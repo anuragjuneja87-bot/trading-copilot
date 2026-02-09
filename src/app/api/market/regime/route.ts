@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 
+// Validate API key
+if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
+  console.warn('POLYGON_API_KEY is not configured properly');
+}
+
 // Crisis keywords that trigger regime change
 const CRISIS_KEYWORDS = [
   'circuit breaker', 'trading halt', 'flash crash', 'bank run', 
@@ -20,7 +25,10 @@ export async function GET(request: NextRequest) {
     // Get VIX proxy (VIXY) price
     const vixResponse = await fetch(
       `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=VIXY&apiKey=${POLYGON_API_KEY}`,
-      { next: { revalidate: 60 } }
+      { 
+        next: { revalidate: 60 },
+        signal: AbortSignal.timeout(30000), // 30 second timeout
+      }
     );
     
     let vixLevel = 20; // Default
@@ -42,7 +50,10 @@ export async function GET(request: NextRequest) {
     // Fetch recent market news from Polygon
     const newsResponse = await fetch(
       `https://api.polygon.io/v2/reference/news?limit=20&apiKey=${POLYGON_API_KEY}`,
-      { next: { revalidate: 120 } }
+      { 
+        next: { revalidate: 120 },
+        signal: AbortSignal.timeout(30000), // 30 second timeout
+      }
     );
 
     if (newsResponse.ok) {
@@ -98,10 +109,33 @@ export async function GET(request: NextRequest) {
       },
     });
     
-  } catch (error) {
+  } catch (error: any) {
     console.error('Regime API error:', error);
+    
+    // Return default/fallback data if API fails
+    if (error.name === 'AbortError' || error.code === 'UND_ERR_CONNECT_TIMEOUT') {
+      return NextResponse.json({
+        success: true,
+        data: {
+          status: 'normal' as const,
+          vixLevel: 20,
+          crisisCount: 0,
+          elevatedCount: 0,
+          reason: 'API timeout - using default values',
+        },
+        meta: {
+          timestamp: new Date().toISOString(),
+          warning: 'Polygon API timeout - returned default values',
+        },
+      });
+    }
+    
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { 
+        success: false, 
+        error: error.message || 'Failed to fetch regime data',
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      },
       { status: 500 }
     );
   }

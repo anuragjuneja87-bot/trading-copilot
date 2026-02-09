@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 
+// Validate API key
+if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
+  console.warn('POLYGON_API_KEY is not configured properly');
+}
+
 // Default tickers to monitor for flow
 const DEFAULT_TICKERS = ['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA', 'AMD', 'META', 'MSFT', 'AMZN', 'GOOGL'];
 
@@ -30,6 +35,7 @@ export async function GET(request: NextRequest) {
         
         const response = await fetch(url, {
           next: { revalidate: 30 }, // Cache for 30 seconds
+          signal: AbortSignal.timeout(30000), // 30 second timeout
         });
 
         if (!response.ok) continue;
@@ -101,8 +107,12 @@ export async function GET(request: NextRequest) {
             timestamp: new Date().toISOString(),
           });
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error(`Error fetching flow for ${ticker}:`, err);
+        // Continue to next ticker if one fails
+        if (err.name === 'AbortError' || err.code === 'UND_ERR_CONNECT_TIMEOUT') {
+          console.warn(`Timeout fetching ${ticker} - skipping`);
+        }
       }
     }
 
@@ -126,10 +136,35 @@ export async function GET(request: NextRequest) {
       },
     });
     
-  } catch (error) {
+  } catch (error: any) {
     console.error('Flow API error:', error);
+    
+    // Return partial data if we have some results
+    if (flowData.length > 0) {
+      return NextResponse.json({
+        success: true,
+        data: { 
+          flow: flowData,
+          meta: {
+            total: flowData.length,
+            returned: flowData.length,
+            tickers: tickers.slice(0, 5),
+            warning: 'Some tickers failed to load',
+          }
+        },
+        meta: {
+          timestamp: new Date().toISOString(),
+          cached: false,
+        },
+      });
+    }
+    
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { 
+        success: false, 
+        error: error.message || 'Failed to fetch options flow data',
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      },
       { status: 500 }
     );
   }

@@ -34,9 +34,10 @@ export default function AskPage() {
   const { messages, addMessage, updateMessage, clearMessages } = useChatStore();
   const { dailyQuestionsUsed, incrementQuestionsUsed, tier } = useUserStore();
   
-  const dailyLimit = tier === 'free' ? 3 : tier === 'pro' ? 100 : -1;
+  // Temporarily disabled for testing - set to unlimited
+  const dailyLimit = -1; // tier === 'free' ? 3 : tier === 'pro' ? 100 : -1;
   const questionsRemaining = dailyLimit === -1 ? '∞' : Math.max(0, dailyLimit - dailyQuestionsUsed);
-  const canAsk = dailyLimit === -1 || dailyQuestionsUsed < dailyLimit;
+  const canAsk = true; // dailyLimit === -1 || dailyQuestionsUsed < dailyLimit;
 
   // Scroll to bottom on new message
   useEffect(() => {
@@ -86,21 +87,30 @@ export default function AskPage() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to get response');
+        const errorData = await response.json().catch(() => ({ error: 'Failed to get response' }));
+        throw new Error(errorData.error || `HTTP ${response.status}: Failed to get response`);
       }
 
       const data = await response.json();
       
+      // Handle response
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to get response');
+      }
+      
       // Update assistant message with response
-      updateMessage(assistantMsgId, data.data?.message || 'Sorry, I couldn\'t process that request.');
+      const messageText = data.data?.message;
+      if (!messageText || messageText === 'null' || messageText.trim() === '') {
+        throw new Error('Received empty response from AI service');
+      }
+      
+      updateMessage(assistantMsgId, messageText);
       incrementQuestionsUsed();
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Chat error:', error);
-      updateMessage(
-        assistantMsgId, 
-        'Sorry, there was an error processing your request. Please try again.'
-      );
+      const errorMessage = error.message || 'Sorry, there was an error processing your request. Please try again.';
+      updateMessage(assistantMsgId, errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -130,18 +140,20 @@ export default function AskPage() {
               Get verdicts, key levels, and actionable insights. Not just data.
             </p>
             
-            {/* Questions remaining */}
-            <div className="mt-4 inline-flex items-center gap-2 text-sm">
-              <span className="text-text-muted">Questions today:</span>
-              <Badge variant={canAsk ? 'normal' : 'crisis'}>
-                {questionsRemaining} remaining
-              </Badge>
-              {tier === 'free' && (
-                <Link href="/pricing" className="text-accent hover:underline ml-2">
-                  Upgrade for more →
-                </Link>
-              )}
-            </div>
+            {/* Questions remaining - Hidden during testing */}
+            {dailyLimit !== -1 && (
+              <div className="mt-4 inline-flex items-center gap-2 text-sm">
+                <span className="text-text-muted">Questions today:</span>
+                <Badge variant={canAsk ? 'normal' : 'crisis'}>
+                  {questionsRemaining} remaining
+                </Badge>
+                {tier === 'free' && (
+                  <Link href="/pricing" className="text-accent hover:underline ml-2">
+                    Upgrade for more →
+                  </Link>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Chat container */}
@@ -201,13 +213,16 @@ export default function AskPage() {
                         }`}
                       >
                         {message.isLoading ? (
-                          <div className="flex items-center gap-2 text-text-muted">
-                            <div className="flex gap-1">
-                              <div className="h-2 w-2 rounded-full bg-accent animate-bounce" style={{ animationDelay: '0ms' }} />
-                              <div className="h-2 w-2 rounded-full bg-accent animate-bounce" style={{ animationDelay: '150ms' }} />
-                              <div className="h-2 w-2 rounded-full bg-accent animate-bounce" style={{ animationDelay: '300ms' }} />
+                          <div className="flex flex-col gap-2 text-text-muted">
+                            <div className="flex items-center gap-2">
+                              <div className="flex gap-1">
+                                <div className="h-2 w-2 rounded-full bg-accent animate-bounce" style={{ animationDelay: '0ms' }} />
+                                <div className="h-2 w-2 rounded-full bg-accent animate-bounce" style={{ animationDelay: '150ms' }} />
+                                <div className="h-2 w-2 rounded-full bg-accent animate-bounce" style={{ animationDelay: '300ms' }} />
+                              </div>
+                              <span className="text-sm">Analyzing market data and generating insights...</span>
                             </div>
-                            <span className="text-sm">Analyzing...</span>
+                            <span className="text-xs text-text-muted/70">The AI agent is running multiple analyses. This typically takes 3-5 minutes.</span>
                           </div>
                         ) : (
                           <div 
@@ -288,28 +303,108 @@ export default function AskPage() {
   );
 }
 
-// Simple markdown-like formatting
+// Enhanced markdown formatting
 function formatMessage(content: string): string {
-  return content
-    // Bold
-    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-text-primary">$1</strong>')
-    // Verdict badges
-    .replace(/VERDICT:\s*(BUY|SELL|WAIT|HOLD)/gi, (_, verdict) => {
-      const colors: Record<string, string> = {
-        BUY: 'bg-bull text-white',
-        SELL: 'bg-bear text-white',
-        WAIT: 'bg-warning text-background',
-        HOLD: 'bg-text-muted text-white',
-      };
-      return `<span class="inline-flex px-2 py-0.5 rounded text-xs font-bold ${colors[verdict.toUpperCase()]}">${verdict.toUpperCase()}</span>`;
-    })
-    // Crisis/Elevated tags
+  let formatted = content;
+  
+  // Split into lines for better processing
+  const lines = formatted.split('\n');
+  const processedLines: string[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    
+    // Headers (process before other formatting)
+    if (line.match(/^####\s+/)) {
+      line = line.replace(/^####\s+(.+)$/, '<h4 class="text-lg font-semibold text-text-primary mt-4 mb-2">$1</h4>');
+    } else if (line.match(/^###\s+/)) {
+      line = line.replace(/^###\s+(.+)$/, '<h3 class="text-xl font-semibold text-text-primary mt-5 mb-3">$1</h3>');
+    } else if (line.match(/^##\s+/)) {
+      line = line.replace(/^##\s+(.+)$/, '<h2 class="text-2xl font-bold text-text-primary mt-6 mb-4">$1</h2>');
+    }
+    // Horizontal rules
+    else if (line.trim() === '---' || line.trim() === '•--') {
+      line = '<hr class="my-4 border-border" />';
+    }
+    // Bullet points (•, -, *)
+    else if (line.match(/^[•·-]\s+/)) {
+      const text = line.replace(/^[•·-]\s+/, '');
+      line = `<div class="flex items-start gap-2 my-1"><span class="text-accent mt-1 flex-shrink-0">•</span><span>${text}</span></div>`;
+    } else if (line.match(/^\*\s+/)) {
+      const text = line.replace(/^\*\s+/, '');
+      line = `<div class="flex items-start gap-2 my-1"><span class="text-accent mt-1 flex-shrink-0">•</span><span>${text}</span></div>`;
+    }
+    // Numbered lists
+    else if (line.match(/^\d+\.\s+/)) {
+      line = line.replace(/^(\d+)\.\s+(.+)$/, '<div class="flex items-start gap-2 my-1"><span class="text-accent font-semibold flex-shrink-0">$1.</span><span>$2</span></div>');
+    }
+    
+    processedLines.push(line);
+  }
+  
+  formatted = processedLines.join('\n');
+  
+  // Inline formatting (process after line-level formatting)
+  
+  // Bold (**text** or __text__) - must come before italic
+  formatted = formatted
+    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-text-primary font-semibold">$1</strong>')
+    .replace(/__(.*?)__/g, '<strong class="text-text-primary font-semibold">$1</strong>');
+  
+  // Italic (*text* or _text_) - but not if it's part of bold
+  formatted = formatted
+    .replace(/(?<!\*)\*(?!\*)([^*]+?)(?<!\*)\*(?!\*)/g, '<em class="text-text-secondary">$1</em>')
+    .replace(/(?<!_)_(?!_)([^_]+?)(?<!_)_(?!_)/g, '<em class="text-text-secondary">$1</em>');
+  
+  // Code blocks (backticks)
+  formatted = formatted.replace(/`([^`]+)`/g, '<code class="bg-background-surface px-1.5 py-0.5 rounded text-xs font-mono text-accent">$1</code>');
+  
+  // Verdict badges
+  formatted = formatted.replace(/VERDICT:\s*(BUY|SELL|WAIT|HOLD)/gi, (_, verdict) => {
+    const colors: Record<string, string> = {
+      BUY: 'bg-bull text-white',
+      SELL: 'bg-bear text-white',
+      WAIT: 'bg-warning text-background',
+      HOLD: 'bg-text-muted text-white',
+    };
+    return `<span class="inline-flex px-2 py-0.5 rounded text-xs font-bold ${colors[verdict.toUpperCase()]}">${verdict.toUpperCase()}</span>`;
+  });
+  
+  // Warning/Caution sections
+  formatted = formatted
+    .replace(/⚠️?\s*CRITICAL\s+WARNING/gi, '<span class="inline-flex items-center gap-1 text-bear font-semibold">⚠️ CRITICAL WARNING</span>')
+    .replace(/⚠️?\s*WARNING/gi, '<span class="inline-flex items-center gap-1 text-warning font-semibold">⚠️ WARNING</span>')
+    .replace(/⚠️?\s*CAUTION/gi, '<span class="inline-flex items-center gap-1 text-warning font-semibold">⚠️ CAUTION</span>');
+  
+  // Crisis/Elevated tags
+  formatted = formatted
     .replace(/\(CRISIS\)/gi, '<span class="text-bear font-medium">(CRISIS)</span>')
-    .replace(/\(ELEVATED\)/gi, '<span class="text-warning font-medium">(ELEVATED)</span>')
-    // Price levels
-    .replace(/\$[\d,]+\.?\d*/g, '<span class="text-accent font-mono">$&</span>')
-    // Bullet points
-    .replace(/^[•·-]\s*/gm, '<span class="text-accent mr-1">•</span>')
-    // Newlines
-    .replace(/\n/g, '<br>');
+    .replace(/\(ELEVATED\)/gi, '<span class="text-warning font-medium">(ELEVATED)</span>');
+  
+  // Price levels and numbers ($123.45, percentages)
+  formatted = formatted
+    .replace(/\$[\d,]+\.?\d*/g, '<span class="text-accent font-mono font-semibold">$&</span>')
+    .replace(/([\d,]+\.?\d*)%/g, '<span class="text-accent font-mono">$1%</span>');
+  
+  // Links
+  formatted = formatted.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-accent hover:underline" target="_blank" rel="noopener noreferrer">$1</a>');
+  
+  // Emoji styling
+  formatted = formatted
+    .replace(/✅/g, '<span class="text-bull">✅</span>')
+    .replace(/❌/g, '<span class="text-bear">❌</span>')
+    .replace(/⚠️/g, '<span class="text-warning">⚠️</span>');
+  
+  // Convert double newlines to paragraph breaks, single newlines to <br>
+  formatted = formatted.replace(/\n\n+/g, '</p><p class="my-2">');
+  formatted = formatted.replace(/\n/g, '<br>');
+  
+  // Wrap in paragraph tags if not already wrapped
+  if (!formatted.startsWith('<')) {
+    formatted = `<p class="my-2">${formatted}</p>`;
+  } else {
+    formatted = `<div class="my-2">${formatted}</div>`;
+  }
+  
+  return formatted;
 }
