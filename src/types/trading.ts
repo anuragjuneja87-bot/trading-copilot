@@ -258,3 +258,16 @@ export interface SubscriptionRequest {
   channel: 'prices' | 'flow' | 'news' | 'alerts';
   tickers?: string[];
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  FILTER TYPES
+// ═══════════════════════════════════════════════════════════════
+
+export interface FlowFilters {
+  tickers?: string[];
+  minPremium?: number;
+  callPut?: 'C' | 'P' | 'all';
+  unusual?: boolean;
+  sweeps?: boolean;
+  limit?: number;
+}

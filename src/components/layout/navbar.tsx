@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { useSession, signOut } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { 
@@ -10,7 +11,10 @@ import {
   Zap, 
   BarChart3, 
   MessageSquare,
-  ChevronDown 
+  ChevronDown,
+  User,
+  LogOut,
+  LayoutDashboard
 } from 'lucide-react';
 
 const navigation = [
@@ -21,6 +25,12 @@ const navigation = [
 
 export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const { data: session, status } = useSession();
+
+  const handleSignOut = async () => {
+    await signOut({ callbackUrl: '/' });
+  };
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
@@ -74,12 +84,63 @@ export function Navbar() {
 
         {/* Desktop auth buttons */}
         <div className="hidden lg:flex lg:flex-1 lg:justify-end lg:gap-x-4">
-          <Button variant="ghost" asChild>
-            <Link href="/login">Log In</Link>
-          </Button>
-          <Button asChild>
-            <Link href="/signup">Start Free</Link>
-          </Button>
+          {status === 'loading' ? (
+            <div className="flex items-center gap-4">
+              <div className="h-8 w-8 rounded-full bg-background-surface animate-pulse" />
+            </div>
+          ) : session?.user ? (
+            <div className="relative">
+              <button
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-background-elevated transition-colors"
+              >
+                <div className="h-8 w-8 rounded-full bg-accent/20 flex items-center justify-center">
+                  <User className="h-4 w-4 text-accent" />
+                </div>
+                <span className="text-sm font-medium text-text-primary">
+                  {session.user.name || session.user.email?.split('@')[0]}
+                </span>
+                <ChevronDown className="h-4 w-4 text-text-secondary" />
+              </button>
+              
+              {userMenuOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-10" 
+                    onClick={() => setUserMenuOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-48 rounded-lg border border-border bg-background-card shadow-lg z-20">
+                    <div className="p-2">
+                      <Link
+                        href="/app"
+                        className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-primary hover:bg-background-elevated transition-colors"
+                        onClick={() => setUserMenuOpen(false)}
+                      >
+                        <LayoutDashboard className="h-4 w-4" />
+                        Dashboard
+                      </Link>
+                      <button
+                        onClick={handleSignOut}
+                        className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-primary hover:bg-background-elevated transition-colors"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Log Out
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              <Button variant="ghost" asChild>
+                <Link href="/login">Log In</Link>
+              </Button>
+              <Button asChild>
+                <Link href="/signup">Start Free</Link>
+              </Button>
+            </>
+          )}
         </div>
       </nav>
 
@@ -108,12 +169,37 @@ export function Navbar() {
             </Link>
           ))}
           <div className="mt-4 flex flex-col gap-2 border-t border-border pt-4">
-            <Button variant="outline" asChild className="w-full">
-              <Link href="/login">Log In</Link>
-            </Button>
-            <Button asChild className="w-full">
-              <Link href="/signup">Start Free</Link>
-            </Button>
+            {session?.user ? (
+              <>
+                <Link
+                  href="/app"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-base font-medium text-text-secondary hover:bg-background-elevated hover:text-text-primary"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <LayoutDashboard className="h-5 w-5" />
+                  Dashboard
+                </Link>
+                <button
+                  onClick={() => {
+                    handleSignOut();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-base font-medium text-text-secondary hover:bg-background-elevated hover:text-text-primary"
+                >
+                  <LogOut className="h-5 w-5" />
+                  Log Out
+                </button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" asChild className="w-full">
+                  <Link href="/login">Log In</Link>
+                </Button>
+                <Button asChild className="w-full">
+                  <Link href="/signup">Start Free</Link>
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>

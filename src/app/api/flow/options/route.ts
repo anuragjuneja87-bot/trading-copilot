@@ -11,6 +11,10 @@ if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
 const DEFAULT_TICKERS = ['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA', 'AMD', 'META', 'MSFT', 'AMZN', 'GOOGL'];
 
 export async function GET(request: NextRequest) {
+  // Declare variables outside try block so they're accessible in catch block
+  const flowData: any[] = [];
+  let tickers: string[] = [];
+  
   try {
     const { searchParams } = new URL(request.url);
     const tickersParam = searchParams.get('tickers');
@@ -20,14 +24,13 @@ export async function GET(request: NextRequest) {
     const sweeps = searchParams.get('sweeps') === 'true';
     const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 100);
 
-    const tickers = tickersParam 
+    tickers = tickersParam 
       ? tickersParam.split(',').map(t => t.trim().toUpperCase())
       : DEFAULT_TICKERS;
 
     // Fetch options data from Polygon
     // Note: This is a simplified version. In production, you'd query your
     // options_flow Delta table that's populated by streaming job
-    const flowData: any[] = [];
 
     for (const ticker of tickers.slice(0, 5)) { // Limit API calls
       try {
