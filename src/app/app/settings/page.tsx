@@ -206,7 +206,7 @@ export default function SettingsPage() {
 
   const tier = accountData?.user.tier || 'FREE';
   const watchlistCount = watchlistData?.count || 0;
-  const watchlistLimit = watchlistData?.limit || 5;
+  const watchlistLimit = watchlistData?.limit || 10;
   const isAtLimit = watchlistCount >= watchlistLimit;
 
   return (

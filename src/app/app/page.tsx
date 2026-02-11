@@ -346,7 +346,9 @@ export default function CommandCenterPage() {
 
         {/* Right Column - Chat */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <ChatPanel />
+          <ChatPanel 
+            watchlist={watchlistData?.watchlist?.map((item: any) => item.ticker) || []}
+          />
         </div>
       </div>
     </div>

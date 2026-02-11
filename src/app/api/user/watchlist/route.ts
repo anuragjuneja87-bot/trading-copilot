@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 
 // Tier limits
 const TIER_LIMITS = {
-  FREE: 5,
+  FREE: 10,
   PRO: 15,
   ELITE: 50,
 };

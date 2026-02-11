@@ -17,7 +17,7 @@ const tiers = [
     features: [
       { text: '3 AI questions per day', included: true },
       { text: 'Delayed options flow (30 min)', included: true },
-      { text: '5 watchlist tickers', included: true },
+      { text: '10 watchlist tickers', included: true },
       { text: 'Basic key levels', included: true },
       { text: 'Real-time flow', included: false },
       { text: 'Dark pool prints', included: false },

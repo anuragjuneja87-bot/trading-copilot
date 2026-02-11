@@ -120,7 +120,7 @@ const tiers = [
     features: [
       '3 AI questions per day',
       'Delayed options flow (30 min)',
-      '5 watchlist tickers',
+      '10 watchlist tickers',
       'Basic key levels',
     ],
     cta: 'Start Free',

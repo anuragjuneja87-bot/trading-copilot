@@ -159,7 +159,7 @@ export interface UserConfig {
 export const TIER_CONFIG: Record<SubscriptionTier, UserConfig> = {
   free: {
     tier: 'free',
-    maxWatchlist: 5,
+    maxWatchlist: 10,
     pollInterval: 900, // 15 minutes
     hasRealTimeFlow: false,
     hasOptionsFlow: true, // delayed
