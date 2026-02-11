@@ -5,6 +5,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { SessionProvider } from 'next-auth/react';
 import { useState, useEffect } from 'react';
 import { initializeSocket, disconnectSocket } from '@/lib/socket';
+import { ToastContainer } from '@/components/ui/toast';
 
 // Create a client with good defaults for trading data
 function makeQueryClient() {
@@ -13,10 +14,14 @@ function makeQueryClient() {
       queries: {
         // Don't refetch on window focus for trading app (too disruptive)
         refetchOnWindowFocus: false,
+        refetchOnReconnect: true,
         // Keep data fresh for 30 seconds by default
         staleTime: 30 * 1000,
-        // Retry failed requests 3 times
-        retry: 3,
+        // Cache data for 5 minutes
+        gcTime: 5 * 60 * 1000,
+        // Retry failed requests 2 times with exponential backoff
+        retry: 2,
+        retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
         // Show stale data while fetching new data
         placeholderData: (previousData: unknown) => previousData,
       },
@@ -51,9 +56,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   // Initialize WebSocket connection on mount
   useEffect(() => {
-    // Only initialize in browser
+    // Only initialize in browser and if URL is configured
     if (typeof window !== 'undefined') {
-      initializeSocket();
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+      if (socketUrl && socketUrl.trim() !== '') {
+        initializeSocket();
+      }
     }
 
     return () => {
@@ -65,6 +73,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <SessionProvider>
       <QueryClientProvider client={queryClient}>
         {children}
+        <ToastContainer />
         {process.env.NODE_ENV === 'development' && (
           <ReactQueryDevtools initialIsOpen={false} position="bottom" />
         )}

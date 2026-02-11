@@ -1,13 +1,12 @@
 import { NextAuthOptions } from 'next-auth';
-import { PrismaAdapter } from '@auth/prisma-adapter';
 import CredentialsProvider from 'next-auth/providers/credentials';
+import GoogleProvider from 'next-auth/providers/google';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma) as any,
   session: {
     strategy: 'jwt',
   },
@@ -16,6 +15,10 @@ export const authOptions: NextAuthOptions = {
     error: '/login',
   },
   providers: [
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }),
     CredentialsProvider({
       name: 'Credentials',
       credentials: {
@@ -35,11 +38,6 @@ export const authOptions: NextAuthOptions = {
           throw new Error('Invalid email or password');
         }
 
-        // For now, we'll check if password exists in a separate field
-        // In production, you'd store hashed passwords in the database
-        // For this implementation, we'll need to add a password field to User model
-        // or use a different approach
-        
         // Check if user has a password (stored in accounts table for credentials provider)
         const account = await prisma.account.findFirst({
           where: {
@@ -70,21 +68,97 @@ export const authOptions: NextAuthOptions = {
         };
       },
     }),
-    // Google and GitHub providers commented out for future use
-    // GoogleProvider({
-    //   clientId: process.env.GOOGLE_CLIENT_ID!,
-    //   clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    // }),
-    // GitHubProvider({
-    //   clientId: process.env.GITHUB_CLIENT_ID!,
-    //   clientSecret: process.env.GITHUB_CLIENT_SECRET!,
-    // }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async signIn({ user, account, profile }) {
+      // For OAuth providers (like Google), create or update user in database
+      if (account?.provider === 'google' && user.email && account.providerAccountId) {
+        try {
+          const existingUser = await prisma.user.findUnique({
+            where: { email: user.email },
+            include: { accounts: true },
+          });
+
+          if (!existingUser) {
+            // Create new user with FREE tier and account record
+            await prisma.user.create({
+              data: {
+                email: user.email,
+                name: user.name || (profile as any)?.name || null,
+                image: user.image || null,
+                emailVerified: new Date(),
+                tier: 'FREE',
+                accounts: {
+                  create: {
+                    type: account.type,
+                    provider: account.provider,
+                    providerAccountId: account.providerAccountId,
+                    access_token: account.access_token || null,
+                    refresh_token: account.refresh_token || null,
+                    expires_at: account.expires_at || null,
+                    token_type: account.token_type || null,
+                    scope: account.scope || null,
+                    id_token: account.id_token || null,
+                    session_state: account.session_state || null,
+                  },
+                },
+              },
+            });
+          } else {
+            // Update existing user if needed
+            await prisma.user.update({
+              where: { email: user.email },
+              data: {
+                name: user.name || existingUser.name,
+                image: user.image || existingUser.image,
+                emailVerified: existingUser.emailVerified || new Date(),
+              },
+            });
+
+            // Create or update account record
+            const existingAccount = existingUser.accounts.find(
+              (acc) => acc.provider === 'google' && acc.providerAccountId === account.providerAccountId
+            );
+
+            if (!existingAccount) {
+              await prisma.account.create({
+                data: {
+                  userId: existingUser.id,
+                  type: account.type,
+                  provider: account.provider,
+                  providerAccountId: account.providerAccountId,
+                  access_token: account.access_token || null,
+                  refresh_token: account.refresh_token || null,
+                  expires_at: account.expires_at || null,
+                  token_type: account.token_type || null,
+                  scope: account.scope || null,
+                  id_token: account.id_token || null,
+                  session_state: account.session_state || null,
+                },
+              });
+            }
+          }
+        } catch (error) {
+          console.error('Error creating/updating OAuth user:', error);
+          return false;
+        }
+      }
+      return true;
+    },
+    async jwt({ token, user, account }) {
       if (user) {
         token.id = user.id;
-        token.tier = (user as any).tier;
+        
+        // For OAuth users, fetch tier from database
+        if (account?.provider === 'google' && user.email) {
+          const dbUser = await prisma.user.findUnique({
+            where: { email: user.email },
+            select: { tier: true },
+          });
+          token.tier = dbUser?.tier || 'FREE';
+        } else {
+          token.tier = (user as any).tier;
+        }
       }
       return token;
     },

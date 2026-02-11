@@ -1,8 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════
-   FONTS - @import must come before all other rules
+   FONTS - Now loaded via next/font in layout.tsx
    ═══════════════════════════════════════════════════════════════ */
-
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -90,14 +88,23 @@
     @apply bg-background-card border border-border rounded-lg;
   }
   .card-hover {
-    @apply hover:border-border-strong transition-colors;
+    @apply transition-all duration-200;
+  }
+  .card-hover:hover {
+    @apply transform -translate-y-1 shadow-lg shadow-accent/5;
   }
 
   /* Button variants */
   .btn {
-    @apply inline-flex items-center justify-center rounded-md font-medium transition-colors
+    @apply inline-flex items-center justify-center rounded-md font-medium transition-all duration-150
            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent
            disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn:hover:not(:disabled) {
+    @apply transform scale-[1.02];
+  }
+  .btn:active:not(:disabled) {
+    @apply transform scale-[0.98];
   }
   .btn-primary {
     @apply bg-accent text-background hover:bg-accent-hover;
@@ -116,8 +123,21 @@
   .input {
     @apply flex w-full rounded-md border border-border bg-background-surface px-3 py-2
            text-sm text-text-primary placeholder:text-text-muted
-           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent
+           transition-all duration-200
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent
            disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  
+  /* Link underline animation */
+  .link-underline {
+    @apply relative;
+  }
+  .link-underline::after {
+    content: '';
+    @apply absolute bottom-0 left-0 w-0 h-0.5 bg-accent transition-all duration-200;
+  }
+  .link-underline:hover::after {
+    @apply w-full;
   }
 
   /* Badge variants */
@@ -192,16 +212,32 @@
 
   /* Verdict badge */
   .verdict-buy {
-    @apply bg-bull text-white font-bold px-3 py-1 rounded;
+    @apply bg-bull/20 text-bull border border-bull/30 font-bold px-3 py-1 rounded;
+    animation: pulseGreen 2s ease-in-out infinite;
   }
   .verdict-sell {
-    @apply bg-bear text-white font-bold px-3 py-1 rounded;
+    @apply bg-bear/20 text-bear border border-bear/30 font-bold px-3 py-1 rounded;
+    animation: pulseRed 2s ease-in-out infinite;
   }
   .verdict-wait {
-    @apply bg-warning text-background font-bold px-3 py-1 rounded;
+    @apply bg-warning/20 text-warning border border-warning/30 font-bold px-3 py-1 rounded;
   }
   .verdict-hold {
-    @apply bg-text-muted text-white font-bold px-3 py-1 rounded;
+    @apply bg-text-muted/20 text-text-muted border border-text-muted/30 font-bold px-3 py-1 rounded;
+  }
+  
+  /* Regime crisis pulse */
+  .regime-crisis {
+    animation: regimePulse 1s ease-in-out 3;
+  }
+  
+  .regime-elevated {
+    animation: regimePulse 1.5s ease-in-out 2;
+  }
+  
+  /* Flow row new animation */
+  .flow-row-new {
+    animation: slideInHighlight 1s ease-out;
   }
 }
 
@@ -307,4 +343,52 @@
 .typing-cursor::after {
   content: '|';
   animation: blink 1s step-end infinite;
+}
+
+@keyframes pulseGreen {
+  0%, 100% { 
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); 
+  }
+  50% { 
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0); 
+  }
+}
+
+@keyframes pulseRed {
+  0%, 100% { 
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); 
+  }
+  50% { 
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); 
+  }
+}
+
+@keyframes regimePulse {
+  0%, 100% { 
+    background-color: rgba(239, 68, 68, 0.1); 
+  }
+  50% { 
+    background-color: rgba(239, 68, 68, 0.3); 
+  }
+}
+
+@keyframes slideInHighlight {
+  0% {
+    opacity: 0;
+    transform: translateX(-10px);
+    background-color: rgba(34, 211, 238, 0.1);
+  }
+  50% {
+    background-color: rgba(34, 211, 238, 0.1);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+    background-color: transparent;
+  }
+}
+
+/* Skeleton pulse */
+.skeleton {
+  @apply bg-background-elevated rounded animate-pulse;
 }

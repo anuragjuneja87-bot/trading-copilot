@@ -8,6 +8,7 @@ import { Navbar, Footer } from '@/components/layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Zap, AlertCircle } from 'lucide-react';
+import { GoogleButton } from '@/components/auth/google-button';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -61,6 +62,19 @@ export default function LoginPage() {
 
           {/* Login form */}
           <div className="rounded-xl border border-border bg-background-card p-8 shadow-lg">
+            {/* Google sign in button */}
+            <GoogleButton disabled={isLoading} />
+            
+            {/* Divider */}
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-background-card text-text-muted">or</span>
+              </div>
+            </div>
+
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Error message */}
               {error && (

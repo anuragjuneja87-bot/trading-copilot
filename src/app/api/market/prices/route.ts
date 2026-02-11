@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    return NextResponse.json({
+    const nextResponse = NextResponse.json({
       success: true,
       data: { prices },
       meta: {
@@ -70,6 +70,14 @@ export async function GET(request: NextRequest) {
         cached: false,
       },
     });
+    
+    // Cache for 5 seconds, stale-while-revalidate for 10s
+    nextResponse.headers.set(
+      'Cache-Control',
+      'public, s-maxage=5, stale-while-revalidate=10'
+    );
+    
+    return nextResponse;
     
   } catch (error) {
     console.error('Prices API error:', error);

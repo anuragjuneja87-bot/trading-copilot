@@ -1,6 +1,19 @@
 import type { Metadata, Viewport } from 'next';
+import { DM_Sans, JetBrains_Mono } from 'next/font/google';
 import { Providers, ThemeProvider } from './providers';
 import '@/styles/globals.css';
+
+const dmSans = DM_Sans({
+  subsets: ['latin'],
+  variable: '--font-dm-sans',
+  display: 'swap',
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-jetbrains',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'),
@@ -77,7 +90,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className={`dark ${dmSans.variable} ${jetbrainsMono.variable}`}>
       <body className="min-h-screen bg-background antialiased">
         <ThemeProvider>
           <Providers>{children}</Providers>

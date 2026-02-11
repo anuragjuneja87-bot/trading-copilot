@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Zap } from 'lucide-react';
+import { Zap, Twitter, Mail } from 'lucide-react';
 
 const footerLinks = {
   product: [
@@ -8,17 +8,9 @@ const footerLinks = {
     { name: 'Pricing', href: '/pricing' },
     { name: 'Dashboard', href: '/app' },
   ],
-  resources: [
-    { name: 'Documentation', href: '/docs' },
-    { name: 'Blog', href: '/blog' },
-    { name: 'Guides', href: '/guides' },
-    { name: 'API', href: '/api-docs' },
-  ],
-  company: [
-    { name: 'About', href: '/about' },
-    { name: 'Contact', href: '/contact' },
-    { name: 'Privacy', href: '/privacy' },
-    { name: 'Terms', href: '/terms' },
+  legal: [
+    { name: 'Privacy Policy', href: '/privacy' },
+    { name: 'Terms of Service', href: '/terms' },
   ],
 };
 
@@ -59,11 +51,11 @@ export function Footer() {
             </ul>
           </div>
 
-          {/* Resources links */}
+          {/* Legal links */}
           <div>
-            <h3 className="text-sm font-semibold text-text-primary">Resources</h3>
+            <h3 className="text-sm font-semibold text-text-primary">Legal</h3>
             <ul className="mt-4 space-y-3">
-              {footerLinks.resources.map((link) => (
+              {footerLinks.legal.map((link) => (
                 <li key={link.name}>
                   <Link
                     href={link.href}
@@ -76,20 +68,30 @@ export function Footer() {
             </ul>
           </div>
 
-          {/* Company links */}
+          {/* Connect */}
           <div>
-            <h3 className="text-sm font-semibold text-text-primary">Company</h3>
+            <h3 className="text-sm font-semibold text-text-primary">Connect</h3>
             <ul className="mt-4 space-y-3">
-              {footerLinks.company.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    href={link.href}
-                    className="text-sm text-text-secondary hover:text-text-primary transition-colors"
-                  >
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
+              <li>
+                <a
+                  href="https://twitter.com/tradingcopilot"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  <Twitter className="h-4 w-4" />
+                  Twitter/X
+                </a>
+              </li>
+              <li>
+                <a
+                  href="mailto:support@tradingcopilot.com"
+                  className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  <Mail className="h-4 w-4" />
+                  Email
+                </a>
+              </li>
             </ul>
           </div>
         </div>

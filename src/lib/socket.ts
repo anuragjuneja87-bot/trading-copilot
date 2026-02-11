@@ -19,18 +19,30 @@ const eventListeners = new Map<string, Set<SocketEventCallback>>();
 //  CONNECTION MANAGEMENT
 // ═══════════════════════════════════════════════════════════════
 
-export function initializeSocket(serverUrl?: string): Socket {
+export function initializeSocket(serverUrl?: string): Socket | null {
   if (socket?.connected) return socket;
 
   const url = serverUrl || process.env.NEXT_PUBLIC_SOCKET_URL || '';
   
-  socket = io(url, {
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
-    reconnectionDelay: RECONNECT_DELAY,
-    timeout: 10000,
-  });
+  // Don't initialize if no URL is provided
+  if (!url || url.trim() === '') {
+    console.log('[Socket] No socket URL configured, skipping initialization');
+    return null;
+  }
+  
+  try {
+    socket = io(url, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
+      reconnectionDelay: RECONNECT_DELAY,
+      timeout: 10000,
+      autoConnect: true,
+    });
+  } catch (error) {
+    console.error('[Socket] Failed to initialize:', error);
+    return null;
+  }
 
   // Connection events
   socket.on('connect', () => {
@@ -45,12 +57,20 @@ export function initializeSocket(serverUrl?: string): Socket {
   });
 
   socket.on('connect_error', (error) => {
-    console.error('[Socket] Connection error:', error);
+    console.warn('[Socket] Connection error:', error.message || error);
     reconnectAttempts++;
     
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       console.log('[Socket] Max reconnection attempts reached, falling back to polling');
+      // Disconnect to stop retrying
+      if (socket) {
+        socket.disconnect();
+      }
     }
+  });
+
+  socket.on('connect_timeout', () => {
+    console.warn('[Socket] Connection timeout');
   });
 
   // Data events
@@ -241,19 +261,23 @@ export function initializeRealTimeData(
   pollIntervalMs: number,
   fetchPrices: () => Promise<void>
 ): () => void {
-  // Try WebSocket
+  // Try WebSocket (may return null if no URL configured)
   const socket = initializeSocket();
   
-  // Subscribe via WS
-  subscribeToPrices(tickers);
+  // Subscribe via WS if available
+  if (socket) {
+    subscribeToPrices(tickers);
+  }
   
-  // Also start polling as backup (will coexist with WS)
+  // Also start polling as backup (will coexist with WS if available)
   // Polling is tier-gated by interval
   startPolling('prices', fetchPrices, pollIntervalMs);
 
   // Return cleanup function
   return () => {
-    unsubscribeFromPrices(tickers);
+    if (socket) {
+      unsubscribeFromPrices(tickers);
+    }
     stopPolling('prices');
   };
 }

@@ -3,9 +3,27 @@ const nextConfig = {
   // Enable React strict mode for better development
   reactStrictMode: true,
   
-  // Image optimization domains (add your CDN/image hosts)
+  // Image optimization
   images: {
-    domains: ['cdn.sanity.io', 'images.unsplash.com'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**.polygon.io',
+      },
+      {
+        protocol: 'https',
+        hostname: '**.benzinga.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'cdn.sanity.io',
+      },
+      {
+        protocol: 'https',
+        hostname: 'images.unsplash.com',
+      },
+    ],
+    formats: ['image/avif', 'image/webp'],
   },
   
   // Environment variables exposed to browser

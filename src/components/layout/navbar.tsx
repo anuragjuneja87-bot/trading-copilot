@@ -23,6 +23,12 @@ const navigation = [
   { name: 'Pricing', href: '/pricing' },
 ];
 
+const loggedInNavigation = [
+  { name: 'Dashboard', href: '/app', icon: LayoutDashboard },
+  { name: 'Options Flow', href: '/app/flow', icon: BarChart3 },
+  { name: 'Ask AI', href: '/app', icon: MessageSquare },
+];
+
 export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -65,21 +71,32 @@ export function Navbar() {
 
         {/* Desktop navigation */}
         <div className="hidden lg:flex lg:gap-x-8">
-          {navigation.map((item) => (
-            <Link
-              key={item.name}
-              href={item.href}
-              className="flex items-center gap-2 text-sm font-medium text-text-secondary transition-colors hover:text-text-primary"
-            >
-              {item.icon && <item.icon className="h-4 w-4" />}
-              {item.name}
-              {item.badge && (
-                <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
-                  {item.badge}
-                </span>
-              )}
-            </Link>
-          ))}
+          {session?.user
+            ? loggedInNavigation.map((item) => (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className="flex items-center gap-2 text-sm font-medium text-text-secondary transition-colors hover:text-text-primary"
+                >
+                  {item.icon && <item.icon className="h-4 w-4" />}
+                  {item.name}
+                </Link>
+              ))
+            : navigation.map((item) => (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className="flex items-center gap-2 text-sm font-medium text-text-secondary transition-colors hover:text-text-primary"
+                >
+                  {item.icon && <item.icon className="h-4 w-4" />}
+                  {item.name}
+                  {item.badge && (
+                    <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                      {item.badge}
+                    </span>
+                  )}
+                </Link>
+              ))}
         </div>
 
         {/* Desktop auth buttons */}
@@ -93,9 +110,12 @@ export function Navbar() {
               <button
                 onClick={() => setUserMenuOpen(!userMenuOpen)}
                 className="flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-background-elevated transition-colors"
+                aria-label="User menu"
               >
                 <div className="h-8 w-8 rounded-full bg-accent/20 flex items-center justify-center">
-                  <User className="h-4 w-4 text-accent" />
+                  <span className="text-sm font-medium text-accent">
+                    {(session.user.name || session.user.email?.[0] || 'U').toUpperCase()}
+                  </span>
                 </div>
                 <span className="text-sm font-medium text-text-primary">
                   {session.user.name || session.user.email?.split('@')[0]}
@@ -112,12 +132,12 @@ export function Navbar() {
                   <div className="absolute right-0 mt-2 w-48 rounded-lg border border-border bg-background-card shadow-lg z-20">
                     <div className="p-2">
                       <Link
-                        href="/app"
+                        href="/app/settings"
                         className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-primary hover:bg-background-elevated transition-colors"
                         onClick={() => setUserMenuOpen(false)}
                       >
-                        <LayoutDashboard className="h-4 w-4" />
-                        Dashboard
+                        <User className="h-4 w-4" />
+                        Settings
                       </Link>
                       <button
                         onClick={handleSignOut}
@@ -145,64 +165,85 @@ export function Navbar() {
       </nav>
 
       {/* Mobile menu */}
-      <div
-        className={cn(
-          'lg:hidden',
-          mobileMenuOpen ? 'block' : 'hidden'
-        )}
-      >
-        <div className="space-y-1 border-t border-border bg-background px-4 py-4">
-          {navigation.map((item) => (
-            <Link
-              key={item.name}
-              href={item.href}
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-base font-medium text-text-secondary hover:bg-background-elevated hover:text-text-primary"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              {item.icon && <item.icon className="h-5 w-5" />}
-              {item.name}
-              {item.badge && (
-                <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
-                  {item.badge}
-                </span>
-              )}
-            </Link>
-          ))}
-          <div className="mt-4 flex flex-col gap-2 border-t border-border pt-4">
-            {session?.user ? (
-              <>
-                <Link
-                  href="/app"
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-base font-medium text-text-secondary hover:bg-background-elevated hover:text-text-primary"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <LayoutDashboard className="h-5 w-5" />
-                  Dashboard
-                </Link>
-                <button
-                  onClick={() => {
-                    handleSignOut();
-                    setMobileMenuOpen(false);
-                  }}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-base font-medium text-text-secondary hover:bg-background-elevated hover:text-text-primary"
-                >
-                  <LogOut className="h-5 w-5" />
-                  Log Out
-                </button>
-              </>
-            ) : (
-              <>
-                <Button variant="outline" asChild className="w-full">
-                  <Link href="/login">Log In</Link>
-                </Button>
-                <Button asChild className="w-full">
-                  <Link href="/signup">Start Free</Link>
-                </Button>
-              </>
-            )}
+      {mobileMenuOpen && (
+        <div className="lg:hidden fixed inset-0 z-40 bg-background/95 backdrop-blur-lg">
+          <div className="flex flex-col h-full">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <span className="text-lg font-bold text-text-primary">Menu</span>
+              <button
+                onClick={() => setMobileMenuOpen(false)}
+                className="p-2 rounded-lg hover:bg-background-elevated text-text-secondary"
+                aria-label="Close menu"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-6 space-y-1">
+              {session?.user
+                ? loggedInNavigation.map((item) => (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      className="flex items-center gap-3 rounded-lg px-4 py-3 text-base font-medium text-text-secondary hover:bg-background-elevated hover:text-text-primary"
+                      onClick={() => setMobileMenuOpen(false)}
+                    >
+                      {item.icon && <item.icon className="h-5 w-5" />}
+                      {item.name}
+                    </Link>
+                  ))
+                : navigation.map((item) => (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      className="flex items-center gap-3 rounded-lg px-4 py-3 text-base font-medium text-text-secondary hover:bg-background-elevated hover:text-text-primary"
+                      onClick={() => setMobileMenuOpen(false)}
+                    >
+                      {item.icon && <item.icon className="h-5 w-5" />}
+                      {item.name}
+                      {item.badge && (
+                        <span className="ml-auto rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                          {item.badge}
+                        </span>
+                      )}
+                    </Link>
+                  ))}
+              <div className="mt-6 flex flex-col gap-2 border-t border-border pt-6">
+                {session?.user ? (
+                  <>
+                    <Link
+                      href="/app/settings"
+                      className="flex items-center gap-3 rounded-lg px-4 py-3 text-base font-medium text-text-secondary hover:bg-background-elevated hover:text-text-primary"
+                      onClick={() => setMobileMenuOpen(false)}
+                    >
+                      <User className="h-5 w-5" />
+                      Settings
+                    </Link>
+                    <button
+                      onClick={() => {
+                        handleSignOut();
+                        setMobileMenuOpen(false);
+                      }}
+                      className="flex items-center gap-3 rounded-lg px-4 py-3 text-base font-medium text-text-secondary hover:bg-background-elevated hover:text-text-primary text-left"
+                    >
+                      <LogOut className="h-5 w-5" />
+                      Log Out
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Button variant="outline" asChild className="w-full">
+                      <Link href="/login">Log In</Link>
+                    </Button>
+                    <Button asChild className="w-full">
+                      <Link href="/signup">Start Free</Link>
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </header>
   );
 }

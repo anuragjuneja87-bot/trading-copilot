@@ -82,6 +82,40 @@ export function usePrice(ticker: string) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  OPTIONS FLOW HOOK
+// ═══════════════════════════════════════════════════════════════
+
+export function useOptionsFlow(filters?: {
+  tickers?: string;
+  minPremium?: number;
+  callPut?: string;
+  limit?: number;
+}) {
+  const params = new URLSearchParams();
+  if (filters?.tickers) params.set('tickers', filters.tickers);
+  if (filters?.minPremium) params.set('minPremium', filters.minPremium.toString());
+  if (filters?.callPut && filters.callPut !== 'all') params.set('callPut', filters.callPut);
+  if (filters?.limit) params.set('limit', filters.limit.toString());
+
+  return useQuery({
+    queryKey: ['optionsFlow', filters],
+    queryFn: async () => {
+      const response = await fetch(`/api/flow/options?${params.toString()}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch options flow');
+      }
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to fetch options flow');
+      }
+      return data;
+    },
+    refetchInterval: 10000, // Auto-refresh every 10 seconds
+    staleTime: 5000,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  REGIME HOOK
 // ═══════════════════════════════════════════════════════════════
 
@@ -119,42 +153,6 @@ export function useKeyLevels(ticker: string) {
   });
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  OPTIONS FLOW HOOKS
-// ═══════════════════════════════════════════════════════════════
-
-export function useOptionsFlow(filters?: FlowFilters) {
-  const queryClient = useQueryClient();
-  const tier = useUserStore((s) => s.tier);
-  const config = TIER_CONFIG[tier];
-
-  const query = useQuery({
-    queryKey: queryKeys.flow(filters),
-    queryFn: () => api.flow.getFlow(filters),
-    staleTime: config.hasRealTimeFlow ? 5000 : 30 * 60 * 1000,
-    refetchInterval: config.hasRealTimeFlow ? 5000 : 30 * 60 * 1000,
-    enabled: config.hasOptionsFlow,
-  });
-
-  // Real-time flow updates (pro/elite only)
-  useEffect(() => {
-    if (!config.hasRealTimeFlow) return;
-
-    const unsubscribe = onSocketEvent('flow:new', (data) => {
-      queryClient.setQueryData<OptionsFlow[]>(
-        queryKeys.flow(filters),
-        (old) => {
-          if (!old) return [data as OptionsFlow];
-          return [data as OptionsFlow, ...old].slice(0, 100);
-        }
-      );
-    });
-
-    return unsubscribe;
-  }, [config.hasRealTimeFlow, filters, queryClient]);
-
-  return query;
-}
 
 export function useTopTickers(type: 'unusual' | 'sweeps' | 'momentum' | 'premium' = 'unusual') {
   return useQuery({

@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
       reason = 'Market conditions normal';
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       data: {
         status,
@@ -108,6 +108,14 @@ export async function GET(request: NextRequest) {
         timestamp: new Date().toISOString(),
       },
     });
+    
+    // Cache for 30 seconds, stale-while-revalidate for 60s
+    response.headers.set(
+      'Cache-Control',
+      'public, s-maxage=30, stale-while-revalidate=60'
+    );
+    
+    return response;
     
   } catch (error: any) {
     console.error('Regime API error:', error);
