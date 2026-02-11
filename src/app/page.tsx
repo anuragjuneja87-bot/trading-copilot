@@ -4,6 +4,12 @@ import Link from 'next/link';
 import { Navbar, Footer } from '@/components/layout';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  MarketPulseProvider,
+  MarketPulseLeftSidebar,
+  MarketPulseRightSidebar,
+  MobileMarketPulse,
+} from '@/components/homepage/market-pulse';
 import { 
   Zap, 
   AlertTriangle, 
@@ -165,16 +171,26 @@ const tiers = [
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-background">
-      <Navbar />
-      
-      {/* Hero Section */}
-      <section className="relative overflow-hidden pt-24 pb-20 lg:pt-32 lg:pb-32">
-        {/* Background gradient with grid */}
-        <div className="absolute inset-0 bg-gradient-to-b from-background via-background-surface/50 to-background" />
-        <div className="absolute inset-0 bg-grid opacity-30" />
-        
-        <div className="relative mx-auto max-w-7xl px-4 lg:px-8">
+    <MarketPulseProvider>
+      <div className="min-h-screen bg-background">
+        <Navbar />
+
+        {/* Main content with sidebars */}
+        <main className="flex justify-center">
+          {/* Left Sidebar - Market Indicators */}
+          <aside className="hidden lg:block sticky top-20 h-fit">
+            <MarketPulseLeftSidebar />
+          </aside>
+
+          {/* Center Content - Hero + Demo */}
+          <div className="flex-1 max-w-3xl px-4 py-12">
+              {/* Hero Section */}
+            <section className="relative overflow-hidden pt-24 pb-20 lg:pt-32 lg:pb-32">
+              {/* Background gradient with grid */}
+              <div className="absolute inset-0 bg-gradient-to-b from-background via-background-surface/50 to-background" />
+              <div className="absolute inset-0 bg-grid opacity-30" />
+              
+              <div className="relative mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -275,9 +291,14 @@ export default function HomePage() {
           </motion.div>
         </div>
       </section>
-      
-      {/* Social Proof Bar */}
-      <section className="border-y border-border bg-background-surface py-8">
+
+            {/* Mobile Market Pulse - shows on smaller screens */}
+            <div className="lg:hidden mt-8 px-4">
+              <MobileMarketPulse />
+            </div>
+            
+            {/* Social Proof Bar */}
+            <section className="border-y border-border bg-background-surface py-8">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
             {stats.map((stat, index) => (
@@ -296,9 +317,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-      
-      {/* How It Works Section */}
-      <section className="py-20 lg:py-32 bg-background">
+            
+            {/* How It Works Section */}
+            <section className="py-20 lg:py-32 bg-background">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             {...fadeInUp}
@@ -335,9 +356,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-      
-      {/* Key Features Section */}
-      <section className="py-20 lg:py-32 bg-background-surface">
+            
+            {/* Key Features Section */}
+            <section className="py-20 lg:py-32 bg-background-surface">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             {...fadeInUp}
@@ -371,9 +392,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-      
-      {/* Comparison Section */}
-      <section className="py-20 lg:py-32 bg-background">
+            
+            {/* Comparison Section */}
+            <section className="py-20 lg:py-32 bg-background">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             {...fadeInUp}
@@ -423,9 +444,9 @@ export default function HomePage() {
           </motion.div>
         </div>
       </section>
-      
-      {/* Live Demo Section */}
-      <section className="py-20 lg:py-32 bg-background-surface">
+            
+            {/* Live Demo Section */}
+            <section className="py-20 lg:py-32 bg-background-surface">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             {...fadeInUp}
@@ -483,9 +504,9 @@ export default function HomePage() {
           </motion.div>
         </div>
       </section>
-      
-      {/* Pricing Section */}
-      <section id="pricing" className="py-20 lg:py-32 bg-background">
+            
+            {/* Pricing Section */}
+            <section id="pricing" className="py-20 lg:py-32 bg-background">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             {...fadeInUp}
@@ -552,9 +573,9 @@ export default function HomePage() {
           </motion.div>
         </div>
       </section>
-      
-      {/* Final CTA Section */}
-      <section className="py-20 lg:py-32 bg-background-surface">
+            
+            {/* Final CTA Section */}
+            <section className="py-20 lg:py-32 bg-background-surface">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -583,8 +604,16 @@ export default function HomePage() {
           </motion.div>
         </div>
       </section>
-      
-      <Footer />
-    </div>
+          </div>
+
+          {/* Right Sidebar - Movers + News */}
+          <aside className="hidden lg:block sticky top-20 h-fit">
+            <MarketPulseRightSidebar />
+          </aside>
+        </main>
+
+        <Footer />
+      </div>
+    </MarketPulseProvider>
   );
 }
