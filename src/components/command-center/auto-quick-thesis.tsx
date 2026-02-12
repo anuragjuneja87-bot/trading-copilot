@@ -24,6 +24,7 @@ interface AutoQuickThesisProps {
 
 export function AutoQuickThesis({ tickers }: AutoQuickThesisProps) {
   const [forceRefresh, setForceRefresh] = useState(false);
+  const [hasTriggeredFetch, setHasTriggeredFetch] = useState(false);
   const today = getTodayET();
   
   // Memoize displayTickers and cacheParams to prevent infinite loops
@@ -48,20 +49,35 @@ export function AutoQuickThesis({ tickers }: AutoQuickThesisProps) {
     cacheDuration: CACHE_DURATIONS.quick_thesis,
     queryKey: ['quickThesis', today, displayTickers.join(','), forceRefresh],
     queryFn: async () => {
+      console.log('[Quick Thesis] Fetching thesis for:', displayTickers);
       const res = await fetch('/api/ai/thesis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tickers: displayTickers }),
       });
       const data = await res.json();
+      console.log('[Quick Thesis] API response:', data);
       if (!data.success) throw new Error(data.error);
       return data.data;
     },
     enabled: displayTickers.length > 0,
   });
 
+  // Auto-trigger fetch on mount if we have tickers and no cache
+  useEffect(() => {
+    if (displayTickers.length > 0 && !hasCache && !isLoading && !hasTriggeredFetch && !cachedTheses) {
+      console.log('[Quick Thesis] Auto-triggering fetch for:', displayTickers);
+      setHasTriggeredFetch(true);
+      // Small delay to ensure hook is ready
+      setTimeout(() => {
+        refetch();
+      }, 100);
+    }
+  }, [displayTickers.length, hasCache, isLoading, hasTriggeredFetch, cachedTheses, refetch]);
+
   const handleRefresh = () => {
     setForceRefresh(!forceRefresh);
+    setHasTriggeredFetch(false); // Reset to allow auto-fetch again
     refetch();
   };
 
@@ -90,7 +106,38 @@ export function AutoQuickThesis({ tickers }: AutoQuickThesisProps) {
     );
   }
 
-  if (error && !cachedTheses) {
+
+  if (tickers.length === 0) {
+    return (
+      <div className="text-center py-4 text-sm text-text-muted">
+        <p>Add tickers to your watchlist to see thesis</p>
+      </div>
+    );
+  }
+
+  // If no data and not loading, show generate button
+  if (relevantTheses.length === 0 && !isLoading && !hasCache) {
+    return (
+      <div className="space-y-3">
+        <div className="text-center py-4 text-sm text-text-muted">
+          <p>No thesis data available</p>
+        </div>
+        <Button
+          onClick={handleRefresh}
+          variant="outline"
+          size="sm"
+          className="w-full"
+          disabled={isLoading}
+        >
+          <RefreshCw className={cn("h-4 w-4 mr-2", isLoading && "animate-spin")} />
+          Generate Thesis
+        </Button>
+      </div>
+    );
+  }
+
+  // If error but no cache, show error with retry
+  if (error && !cachedTheses && !isLoading) {
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm text-bear">
@@ -106,22 +153,6 @@ export function AutoQuickThesis({ tickers }: AutoQuickThesisProps) {
           <RefreshCw className="h-4 w-4 mr-2" />
           Retry
         </Button>
-      </div>
-    );
-  }
-
-  if (relevantTheses.length === 0 && tickers.length > 0) {
-    return (
-      <div className="text-center py-4 text-sm text-text-muted">
-        <p>No thesis data available</p>
-      </div>
-    );
-  }
-
-  if (tickers.length === 0) {
-    return (
-      <div className="text-center py-4 text-sm text-text-muted">
-        <p>Add tickers to your watchlist to see thesis</p>
       </div>
     );
   }
@@ -174,9 +205,10 @@ export function AutoQuickThesis({ tickers }: AutoQuickThesisProps) {
           onClick={handleRefresh}
           className={cn(
             "p-1.5 rounded hover:bg-[rgba(255,255,255,0.04)] transition-colors",
-            isUpdating && "animate-spin"
+            (isUpdating || isLoading) && "animate-spin"
           )}
           title="Refresh thesis"
+          disabled={isLoading || isUpdating}
         >
           <RefreshCw className="h-3.5 w-3.5 text-text-muted" />
         </button>

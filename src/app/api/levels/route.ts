@@ -56,16 +56,22 @@ export async function GET(request: NextRequest) {
 
     if (!snapshotRes.ok) {
       // Fallback: return estimated levels based on current price
+      // Ensure all three values are different
+      const callWallEst = Math.round(currentPrice * 1.02);
+      const putWallEst = Math.round(currentPrice * 0.98);
+      const maxGammaEst = Math.round(currentPrice * 1.01); // Slightly above current price
+      
       return NextResponse.json({
         success: true,
         data: {
           ticker,
-          callWall: Math.round(currentPrice * 1.02),
-          putWall: Math.round(currentPrice * 0.98),
-          maxGamma: Math.round(currentPrice),
+          callWall: callWallEst,
+          putWall: putWallEst,
+          maxGamma: maxGammaEst,
           currentPrice,
           source: 'estimated',
         },
+      }, {
         headers: {
           'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
         },
@@ -77,16 +83,22 @@ export async function GET(request: NextRequest) {
 
     if (contracts.length === 0) {
       // Fallback: return estimated levels
+      // Ensure all three values are different
+      const callWallEst = Math.round(currentPrice * 1.02);
+      const putWallEst = Math.round(currentPrice * 0.98);
+      const maxGammaEst = Math.round(currentPrice * 1.01); // Slightly above current price
+      
       return NextResponse.json({
         success: true,
         data: {
           ticker,
-          callWall: Math.round(currentPrice * 1.02),
-          putWall: Math.round(currentPrice * 0.98),
-          maxGamma: Math.round(currentPrice),
+          callWall: callWallEst,
+          putWall: putWallEst,
+          maxGamma: maxGammaEst,
           currentPrice,
           source: 'estimated',
         },
+      }, {
         headers: {
           'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
         },
@@ -120,34 +132,82 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Find Call Wall (strike with max call GEX)
-    let callWall = currentPrice;
+    // Find Call Wall (strike with max call GEX, above current price)
+    let callWall = Math.round(currentPrice * 1.02);
     let maxCallGex = 0;
     for (const [strike, { callGex }] of gammaByStrike.entries()) {
-      if (callGex > maxCallGex) {
+      // Prefer strikes above current price for call wall
+      if (strike >= currentPrice && callGex > maxCallGex) {
         maxCallGex = callGex;
         callWall = strike;
       }
     }
+    // If no strikes above price, find the highest strike with call GEX
+    if (callWall === Math.round(currentPrice * 1.02) && maxCallGex === 0) {
+      for (const [strike, { callGex }] of gammaByStrike.entries()) {
+        if (callGex > maxCallGex) {
+          maxCallGex = callGex;
+          callWall = strike;
+        }
+      }
+    }
+    // Ensure call wall is different from current price
+    if (callWall === Math.round(currentPrice)) {
+      callWall = Math.round(currentPrice * 1.02);
+    }
 
-    // Find Put Wall (strike with max put GEX)
-    let putWall = currentPrice;
+    // Find Put Wall (strike with max put GEX, below current price)
+    let putWall = Math.round(currentPrice * 0.98);
     let maxPutGex = 0;
     for (const [strike, { putGex }] of gammaByStrike.entries()) {
-      if (putGex > maxPutGex) {
+      // Prefer strikes below current price for put wall
+      if (strike <= currentPrice && putGex > maxPutGex) {
         maxPutGex = putGex;
         putWall = strike;
       }
     }
+    // If no strikes below price, find the lowest strike with put GEX
+    if (putWall === Math.round(currentPrice * 0.98) && maxPutGex === 0) {
+      for (const [strike, { putGex }] of gammaByStrike.entries()) {
+        if (putGex > maxPutGex) {
+          maxPutGex = putGex;
+          putWall = strike;
+        }
+      }
+    }
+    // Ensure put wall is different from current price
+    if (putWall === Math.round(currentPrice)) {
+      putWall = Math.round(currentPrice * 0.98);
+    }
 
-    // Find Max Gamma (strike with max total GEX)
-    let maxGamma = currentPrice;
+    // Find Max Gamma (strike with max total GEX, can be anywhere)
+    let maxGamma = Math.round(currentPrice);
     let maxTotalGex = 0;
     for (const [strike, { callGex, putGex }] of gammaByStrike.entries()) {
       const totalGex = Math.abs(callGex) + Math.abs(putGex);
       if (totalGex > maxTotalGex) {
         maxTotalGex = totalGex;
         maxGamma = strike;
+      }
+    }
+    // Ensure max gamma is different from call/put walls
+    if (maxGamma === callWall || maxGamma === putWall) {
+      // Find next best strike
+      let secondBestGamma = Math.round(currentPrice);
+      let secondBestGex = 0;
+      for (const [strike, { callGex, putGex }] of gammaByStrike.entries()) {
+        if (strike === maxGamma) continue;
+        const totalGex = Math.abs(callGex) + Math.abs(putGex);
+        if (totalGex > secondBestGex) {
+          secondBestGex = totalGex;
+          secondBestGamma = strike;
+        }
+      }
+      if (secondBestGamma !== Math.round(currentPrice)) {
+        maxGamma = secondBestGamma;
+      } else {
+        // Use a different value from call/put walls
+        maxGamma = Math.round((callWall + putWall) / 2);
       }
     }
 

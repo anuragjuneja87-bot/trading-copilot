@@ -15,6 +15,14 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
+// Oxanium font via Google Fonts
+const oxanium = {
+  className: 'font-oxanium',
+  style: {
+    fontFamily: "'Oxanium', 'JetBrains Mono', monospace",
+  },
+};
+
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'),
   title: {

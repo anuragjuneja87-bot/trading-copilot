@@ -82,6 +82,8 @@ export function useCachedFetch<T>({
   }, [cacheKey, cacheParamsKey, cacheDuration, enabled]); // Use cacheParamsKey instead of cacheParams
 
   // Fetch with React Query
+  const shouldFetch = enabled && (cachedValue === null || isUpdating);
+  
   const query = useQuery({
     queryKey,
     queryFn: async () => {
@@ -99,11 +101,13 @@ export function useCachedFetch<T>({
       setIsUpdating(false);
       return data;
     },
-    enabled: enabled && (cachedValue === null || isUpdating),
+    enabled: shouldFetch,
     staleTime: staleTime ?? cacheDuration,
     refetchInterval,
     retry: 1,
     refetchOnWindowFocus: false,
+    // Always refetch on mount if enabled and no cache
+    refetchOnMount: enabled && cachedValue === null,
   });
 
   // Determine what to show
