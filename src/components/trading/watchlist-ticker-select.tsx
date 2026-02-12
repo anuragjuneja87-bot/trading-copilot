@@ -2,9 +2,10 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Select } from '@/components/ui/select';
-import { Loader2, Eye, X } from 'lucide-react';
+import { Loader2, Eye, X, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 interface WatchlistTickerSelectProps {
   value: string[];
@@ -44,12 +45,20 @@ export function WatchlistTickerSelect({
 
   if (watchlist.length === 0) {
     return (
-      <div className={cn('flex items-center gap-2 px-3 py-2 border border-border rounded-md bg-background-surface', className)}>
-        <Eye className="h-4 w-4 text-text-muted" />
-        <span className="text-sm text-text-muted">No watchlist items</span>
-        <a href="/app/settings" className="text-xs text-accent hover:underline ml-auto">
-          Add tickers
-        </a>
+      <div className={cn('flex flex-col items-center gap-3 px-4 py-4 border border-[rgba(255,255,255,0.06)] rounded-lg bg-[rgba(255,255,255,0.02)]', className)}>
+        <div className="text-center">
+          <p className="text-sm text-text-primary mb-1">Add your tickers to filter flow</p>
+          <p className="text-xs text-text-muted">Get personalized alerts and insights</p>
+        </div>
+        <Link href="/app/settings">
+          <Button
+            className="bg-[#00e5ff] text-[#0a0f1a] hover:bg-[#00b8d4] font-semibold"
+            size="sm"
+          >
+            <Plus className="h-4 w-4 mr-1.5" />
+            Add Tickers
+          </Button>
+        </Link>
       </div>
     );
   }

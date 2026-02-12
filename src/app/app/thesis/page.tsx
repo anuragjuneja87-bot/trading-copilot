@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { showToast } from '@/components/ui/toast';
@@ -17,6 +17,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
+import { getTodayET } from '@/lib/cache';
 
 interface ThesisData {
   ticker: string;
@@ -72,8 +73,33 @@ function setCachedReport(report: ThesisReport) {
 
 export default function ThesisPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const briefingDate = searchParams.get('briefing');
+  const today = getTodayET();
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
   const [cachedReport, setCachedReportState] = useState<ThesisReport | null>(null);
+  const [briefingContent, setBriefingContent] = useState<string | null>(null);
+  const [showBriefing, setShowBriefing] = useState(!!briefingDate);
+
+  // Fetch briefing if date parameter is provided
+  const { data: briefingData, isLoading: briefingLoading } = useQuery({
+    queryKey: ['briefing', briefingDate || today],
+    queryFn: async () => {
+      const date = briefingDate || today;
+      const res = await fetch(`/api/briefing?date=${date}`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      return data.data;
+    },
+    enabled: showBriefing,
+    staleTime: 24 * 60 * 60 * 1000, // 24 hours
+  });
+
+  useEffect(() => {
+    if (briefingData?.content) {
+      setBriefingContent(briefingData.content);
+    }
+  }, [briefingData]);
 
   // Load cached report on mount
   useEffect(() => {
@@ -198,9 +224,57 @@ export default function ThesisPage() {
   const tickers = watchlistData?.watchlist?.map((item: any) => item.ticker) || [];
   const isGenerating = generateMutation.isPending;
 
+  // Auto-load briefing if it exists for today
+  useEffect(() => {
+    if (!briefingDate && !briefingLoading && !briefingContent) {
+      // Check if briefing exists for today
+      const checkBriefing = async () => {
+        try {
+          const res = await fetch(`/api/briefing?date=${today}`);
+          const data = await res.json();
+          if (data.success && data.data?.content) {
+            setBriefingContent(data.data.content);
+            setShowBriefing(true);
+          }
+        } catch (error) {
+          // Briefing doesn't exist yet, that's fine
+        }
+      };
+      checkBriefing();
+    }
+  }, [briefingDate, briefingLoading, briefingContent, today]);
+
   return (
     <div className="flex-1 overflow-y-auto p-6 lg:p-8">
       <div className="max-w-7xl mx-auto">
+        {/* Briefing Section (if briefing param or content exists) */}
+        {showBriefing && (
+          <div className="mb-8 p-6 rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.02)]">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-text-primary">Morning Briefing</h2>
+              <button
+                onClick={() => setShowBriefing(false)}
+                className="text-text-muted hover:text-text-primary"
+              >
+                ×
+              </button>
+            </div>
+            {briefingLoading ? (
+              <div className="space-y-2">
+                <div className="h-4 bg-background-elevated rounded animate-pulse" />
+                <div className="h-4 bg-background-elevated rounded animate-pulse w-3/4" />
+                <div className="h-4 bg-background-elevated rounded animate-pulse w-5/6" />
+              </div>
+            ) : briefingContent ? (
+              <div className="prose prose-invert max-w-none text-text-secondary whitespace-pre-wrap">
+                {briefingContent}
+              </div>
+            ) : (
+              <p className="text-text-muted">Briefing not available for today</p>
+            )}
+          </div>
+        )}
+
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
@@ -211,29 +285,43 @@ export default function ThesisPage() {
             One-click trading thesis for your watchlist
           </p>
           <div className="flex items-center gap-4">
-            <Button
-              onClick={handleGenerate}
-              disabled={isGenerating || tickers.length === 0}
-              size="lg"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Generate Report
-                </>
-              )}
-            </Button>
-            {report && (
-              <span className="text-sm text-text-muted">
-                Generated at {format(new Date(report.generatedAt), 'h:mm a')} ET
-              </span>
+            {/* Only show Generate button if no report exists */}
+            {!report && (
+              <Button
+                onClick={handleGenerate}
+                disabled={isGenerating || tickers.length === 0}
+                size="lg"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Generate Report
+                  </>
+                )}
+              </Button>
             )}
-            {!report && !isGenerating && (
+            {report && (
+              <>
+                <span className="text-sm text-text-muted">
+                  Generated at {format(new Date(report.generatedAt), 'h:mm a')} ET
+                </span>
+                <Button
+                  onClick={handleGenerate}
+                  variant="outline"
+                  size="sm"
+                  disabled={isGenerating}
+                >
+                  <RefreshCw className={cn('h-4 w-4 mr-2', isGenerating && 'animate-spin')} />
+                  Refresh All
+                </Button>
+              </>
+            )}
+            {!report && !isGenerating && tickers.length > 0 && (
               <span className="text-sm text-text-muted">Not yet generated today</span>
             )}
           </div>

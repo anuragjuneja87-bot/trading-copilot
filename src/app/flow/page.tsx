@@ -52,7 +52,30 @@ export default function FlowPage() {
   const { data: flowData, isLoading, refetch, dataUpdatedAt } = useOptionsFlow(filters);
   const { data: regime } = useRegime();
 
-  const flow = flowData || [];
+  // Ensure flow is always an array - handle different response formats
+  const flow = useMemo(() => {
+    if (!flowData) return [];
+    
+    // The API returns { success: true, data: { flow: [...], stats: {...} } }
+    // So flowData is the full response object
+    if (flowData.data) {
+      const data = flowData.data;
+      // If data.flow exists and is an array, use it
+      if (data.flow && Array.isArray(data.flow)) return data.flow;
+      // If data itself is an array, use it
+      if (Array.isArray(data)) return data;
+    }
+    
+    // If flowData is already an array, use it
+    if (Array.isArray(flowData)) return flowData;
+    
+    // If flowData has a flow property directly
+    if (flowData.flow && Array.isArray(flowData.flow)) return flowData.flow;
+    
+    // Default to empty array
+    console.warn('[FlowPage] Unexpected flowData format:', flowData);
+    return [];
+  }, [flowData]);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -199,7 +222,7 @@ export default function FlowPage() {
                         ))}
                       </tr>
                     ))
-                  ) : flow.length === 0 ? (
+                  ) : !Array.isArray(flow) || flow.length === 0 ? (
                     // Empty state
                     <tr>
                       <td colSpan={8} className="px-4 py-12 text-center">
@@ -210,7 +233,7 @@ export default function FlowPage() {
                     </tr>
                   ) : (
                     // Flow rows
-                    flow.map((item: any) => (
+                    Array.isArray(flow) && flow.map((item: any) => (
                       <tr
                         key={item.id}
                         className={cn(
@@ -323,7 +346,7 @@ export default function FlowPage() {
             {dataUpdatedAt && (
               <div className="px-4 py-3 border-t border-border bg-background-surface flex items-center justify-between">
                 <span className="text-xs text-text-muted">
-                  {flow.length} trades shown • Last updated {getRelativeTime(new Date(dataUpdatedAt))}
+                  {Array.isArray(flow) ? flow.length : 0} trades shown • Last updated {getRelativeTime(new Date(dataUpdatedAt))}
                 </span>
                 {isDelayed && (
                   <Link href="/pricing" className="text-xs text-accent hover:underline">

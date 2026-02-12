@@ -77,10 +77,14 @@ export function FlowTable({ flow, onTickerClick, isLoading }: FlowTableProps) {
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
-  const sortedFlow = useMemo(() => {
-    if (!sortColumn) return flow;
+  // Ensure flow is always an array
+  const safeFlow = Array.isArray(flow) ? flow : [];
 
-    return [...flow].sort((a, b) => {
+  const sortedFlow = useMemo(() => {
+    if (!Array.isArray(safeFlow)) return [];
+    if (!sortColumn) return safeFlow;
+
+    return [...safeFlow].sort((a, b) => {
       let aVal: any;
       let bVal: any;
 
@@ -113,7 +117,7 @@ export function FlowTable({ flow, onTickerClick, isLoading }: FlowTableProps) {
       if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [flow, sortColumn, sortDirection]);
+  }, [safeFlow, sortColumn, sortDirection]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -134,7 +138,7 @@ export function FlowTable({ flow, onTickerClick, isLoading }: FlowTableProps) {
     );
   }
 
-  if (flow.length === 0) {
+  if (!Array.isArray(safeFlow) || safeFlow.length === 0) {
     return (
       <div className="text-center py-12">
         <BarChart3 className="h-12 w-12 text-text-muted mx-auto mb-4 opacity-50" />
@@ -231,7 +235,7 @@ export function FlowTable({ flow, onTickerClick, isLoading }: FlowTableProps) {
                       isBearish && 'bg-bear/5'
                     )}
                   >
-                    <td className="px-4 py-3 text-xs text-text-secondary font-mono">
+                    <td className="px-4 py-4 lg:py-3 text-xs text-text-secondary font-mono min-h-[44px] flex items-center">
                       {formatTime(trade.timestamp)}
                       {isNew && (
                         <Badge variant="outline" className="ml-2 text-xs">

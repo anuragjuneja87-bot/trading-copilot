@@ -74,6 +74,33 @@ const PRESETS = [
   { id: 'puts', label: 'Puts Only', icon: TrendingDown },
 ];
 
+const QUICK_PRESETS = [
+  { 
+    id: 'whale', 
+    label: 'Whale Trades (>$1M)', 
+    icon: TrendingUp,
+    config: { minPremium: 1000000, activePreset: 'large' }
+  },
+  { 
+    id: '0dte', 
+    label: '0DTE Only', 
+    icon: Zap,
+    config: { expiryFilter: 0, activePreset: 'all' }
+  },
+  { 
+    id: 'watchlist', 
+    label: 'My Watchlist', 
+    icon: Bell,
+    config: { activePreset: 'all' } // Will use watchlist tickers
+  },
+  { 
+    id: 'sweeps-only', 
+    label: 'Sweeps Only', 
+    icon: Flame,
+    config: { activePreset: 'sweeps' }
+  },
+];
+
 const MIN_PREMIUM_OPTIONS = [
   { value: 0, label: '$0' },
   { value: 1000, label: '$1K' },
@@ -316,11 +343,30 @@ export default function FlowPage() {
     limit: apiFilters.limit,
   });
 
-  const flowData = flowResponse?.data;
-  const rawFlow = (flowData?.flow || []) as OptionTrade[];
+  // Ensure flow is always an array - handle both response formats
+  const rawFlow = useMemo(() => {
+    if (!flowResponse) return [];
+    
+    // Check if response has data property
+    const flowData = flowResponse?.data;
+    if (!flowData) return [];
+    
+    // If flowData is already an array, use it directly
+    if (Array.isArray(flowData)) return flowData as OptionTrade[];
+    
+    // If flowData has a flow property, use that
+    if (flowData && typeof flowData === 'object' && 'flow' in flowData) {
+      const flowArray = (flowData as any).flow;
+      if (Array.isArray(flowArray)) return flowArray as OptionTrade[];
+    }
+    
+    // Default to empty array
+    return [];
+  }, [flowResponse]);
   
   // Apply client-side filters
   const filteredFlow = useMemo(() => {
+    if (!Array.isArray(rawFlow)) return [];
     let filtered = [...rawFlow];
 
     // Filter by expiry (days until expiration)
@@ -371,13 +417,30 @@ export default function FlowPage() {
         break;
     }
 
-    return filtered;
+    return Array.isArray(filtered) ? filtered : [];
   }, [rawFlow, expiryFilter, sideFilter, activePreset]);
 
-  const flow = filteredFlow;
+  // Ensure flow is always an array - defensive check
+  const flow: OptionTrade[] = useMemo(() => {
+    if (!filteredFlow) return [];
+    if (!Array.isArray(filteredFlow)) {
+      console.error('[FlowPage] filteredFlow is not an array:', typeof filteredFlow, filteredFlow);
+      return [];
+    }
+    return filteredFlow;
+  }, [filteredFlow]);
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('[FlowPage Debug] flow type:', typeof flow, 'isArray:', Array.isArray(flow), 'value:', flow);
+    console.log('[FlowPage Debug] flowResponse:', flowResponse);
+    console.log('[FlowPage Debug] rawFlow:', rawFlow);
+    console.log('[FlowPage Debug] filteredFlow:', filteredFlow);
+  }, [flow, flowResponse, rawFlow, filteredFlow]);
   
   // Use API stats (already enhanced) with filtered trade count override
   const stats: EnhancedFlowStats = useMemo(() => {
+    const flowData = flowResponse?.data;
     const apiStats = flowData?.stats as EnhancedFlowStats | undefined;
     
     if (!apiStats) {
@@ -407,9 +470,9 @@ export default function FlowPage() {
     // Override trade count with filtered count, but keep all other enhanced metrics from API
     return {
       ...apiStats,
-      tradeCount: flow.length,
+      tradeCount: Array.isArray(flow) ? flow.length : 0,
     };
-  }, [flowData, flow.length]);
+  }, [flowResponse, flow]);
 
   // Auto-refresh every 10 seconds
   useEffect(() => {
@@ -422,7 +485,7 @@ export default function FlowPage() {
 
   // Sound alert for golden sweeps
   useEffect(() => {
-    if (!soundAlerts || !flow) return;
+    if (!soundAlerts || !Array.isArray(flow) || flow.length === 0) return;
 
     const goldenSweeps = flow.filter(
       (item) => item.isGolden && new Date(item.timestamp).getTime() > Date.now() - 10000
@@ -527,9 +590,47 @@ export default function FlowPage() {
       </div>
 
       {/* Filter Bar */}
-      <div className="sticky top-[120px] z-10 bg-background-surface border-b border-border p-4">
+      <div className="sticky top-[120px] z-10 bg-background-surface border-b border-[rgba(255,255,255,0.06)] p-4">
         <div className="flex flex-col gap-4">
-          {/* Presets */}
+          {/* Quick Presets */}
+          <div className="flex flex-wrap gap-2">
+            {QUICK_PRESETS.map((preset) => {
+              const Icon = preset.icon;
+              const isActive = 
+                (preset.id === 'whale' && minPremium >= 1000000) ||
+                (preset.id === '0dte' && expiryFilter === 0) ||
+                (preset.id === 'watchlist' && selectedTickers.length > 0) ||
+                (preset.id === 'sweeps-only' && activePreset === 'sweeps');
+              
+              return (
+                <Button
+                  key={preset.id}
+                  variant={isActive ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    if (preset.config.minPremium !== undefined) {
+                      setMinPremium(preset.config.minPremium);
+                    }
+                    if (preset.config.expiryFilter !== undefined) {
+                      setExpiryFilter(preset.config.expiryFilter);
+                    }
+                    if (preset.config.activePreset) {
+                      setActivePreset(preset.config.activePreset);
+                    }
+                    if (preset.id === 'watchlist' && watchlistData?.length > 0) {
+                      setSelectedTickers(watchlistData.map((item: any) => item.ticker));
+                    }
+                  }}
+                  className="text-xs min-h-[36px] lg:min-h-[auto]"
+                >
+                  <Icon className="h-3.5 w-3.5 mr-1.5" />
+                  {preset.label}
+                </Button>
+              );
+            })}
+          </div>
+
+          {/* Standard Presets */}
           <div className="flex flex-wrap gap-2">
             {PRESETS.map((preset) => {
               const Icon = preset.icon;
@@ -539,8 +640,9 @@ export default function FlowPage() {
                   variant={activePreset === preset.id ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => setActivePreset(preset.id)}
+                  className="text-xs min-h-[36px] lg:min-h-[auto]"
                 >
-                  <Icon className="h-4 w-4 mr-2" />
+                  <Icon className="h-3.5 w-3.5 mr-1.5" />
                   {preset.label}
                 </Button>
               );
@@ -608,35 +710,49 @@ export default function FlowPage() {
 
       {/* Stats Bar */}
       {stats && (
-        <div className="flex items-center gap-6 py-3 px-4 bg-background-card rounded-lg mb-4 mx-6 mt-4">
+        <div className="flex flex-wrap items-center gap-6 py-3 px-4 bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.06)] rounded-lg mb-4 mx-6 mt-4">
           <div>
-            <span className="text-text-muted text-sm">Total Premium</span>
-            <span className="ml-2 font-semibold">{formatPremium(stats.totalPremium)}</span>
+            <span className="text-text-muted text-xs">Total Premium</span>
+            <span className="ml-2 font-semibold text-text-primary">{formatPremium(stats.totalPremium)}</span>
           </div>
           <div>
-            <span className="text-text-muted text-sm">Call/Put</span>
+            <span className="text-text-muted text-xs">Call/Put</span>
             <span className="ml-2">
-              <span className="text-bull">{stats.callRatio}%</span>
+              <span className="text-bull font-semibold">{stats.callRatio}%</span>
               {' / '}
-              <span className="text-bear">{stats.putRatio}%</span>
+              <span className="text-bear font-semibold">{stats.putRatio}%</span>
             </span>
           </div>
           <div>
-            <span className="text-text-muted text-sm">Trades</span>
-            <span className="ml-2 font-semibold">{stats.tradeCount || flow.length}</span>
+            <span className="text-text-muted text-xs">Trades</span>
+            <span className="ml-2 font-semibold text-text-primary">{stats.tradeCount || (Array.isArray(flow) ? flow.length : 0)}</span>
+          </div>
+          <div>
+            <span className="text-text-muted text-xs">Avg Premium</span>
+            <span className="ml-2 font-semibold text-text-primary">
+              {formatPremium(stats.totalPremium / (stats.tradeCount || 1))}
+            </span>
           </div>
           {stats.mostActive && (
-            <div>
-              <span className="text-text-muted text-sm">Most Active</span>
-              <span className="ml-2 font-semibold">{stats.mostActive.ticker}</span>
-            </div>
+            <button
+              onClick={() => {
+                setSelectedTickers([stats.mostActive!.ticker]);
+                setActivePreset('all');
+              }}
+              className="hover:opacity-80 transition-opacity"
+            >
+              <span className="text-text-muted text-xs">Most Active</span>
+              <span className="ml-2 font-semibold text-accent cursor-pointer hover:underline">
+                {stats.mostActive.ticker}
+              </span>
+            </button>
           )}
         </div>
       )}
 
       {/* Flow View */}
       <div className="p-6">
-        {isLoading && flow.length === 0 ? (
+        {isLoading && (!Array.isArray(flow) || flow.length === 0) ? (
           <div className="space-y-4">
             {[1, 2, 3].map((i) => (
               <div key={i} className="h-32 bg-background-elevated animate-pulse rounded-xl" />
@@ -644,12 +760,12 @@ export default function FlowPage() {
           </div>
         ) : viewMode === 'analytics' ? (
           <FlowAnalyticsV2 
-            data={flow} 
+            data={Array.isArray(flow) ? flow : []} 
             stats={stats} 
           />
         ) : (
           <FlowTable
-            flow={flow}
+            flow={Array.isArray(flow) ? flow : []}
             onTickerClick={setSelectedTicker}
             isLoading={isLoading}
           />

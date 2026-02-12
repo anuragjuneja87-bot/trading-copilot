@@ -10,6 +10,10 @@ import {
   MarketPulseRightSidebar,
   MobileMarketPulse,
 } from '@/components/homepage/market-pulse';
+import { Hero } from '@/components/homepage/hero';
+import { DataProviderStrip } from '@/components/homepage/data-provider-strip';
+import { MetricsBar } from '@/components/homepage/metrics-bar';
+import { Testimonials } from '@/components/homepage/testimonials';
 import { 
   Zap, 
   AlertTriangle, 
@@ -25,7 +29,8 @@ import {
   Activity,
   Sparkles,
   CheckCircle2,
-  X
+  X,
+  CheckCircle
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -182,123 +187,31 @@ export default function HomePage() {
             <MarketPulseLeftSidebar />
           </aside>
 
-          {/* Center Content - Hero + Demo */}
-          <div className="flex-1 max-w-3xl px-4 py-12">
-              {/* Hero Section */}
-            <section className="relative overflow-hidden pt-24 pb-20 lg:pt-32 lg:pb-32">
-              {/* Background gradient with grid */}
-              <div className="absolute inset-0 bg-gradient-to-b from-background via-background-surface/50 to-background" />
-              <div className="absolute inset-0 bg-grid opacity-30" />
-              
-              <div className="relative mx-auto max-w-7xl px-4 lg:px-8">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="text-center"
-          >
-            {/* Badge */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.2, duration: 0.4 }}
-              className="mb-6 inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-4 py-1.5"
-            >
-              <Zap className="h-4 w-4 text-accent" />
-              <span className="text-sm font-medium text-accent">AI-Powered Trading Intelligence</span>
-            </motion.div>
-            
-            {/* Headline */}
-            <h1 className="mx-auto max-w-5xl text-4xl font-bold tracking-tight text-text-primary sm:text-5xl lg:text-7xl">
-              AI-Powered Trading Intelligence
-            </h1>
-            
-            {/* Subheadline */}
-            <p className="mx-auto mt-6 max-w-3xl text-xl text-text-secondary lg:text-2xl">
-              Stop staring at data. Start getting answers. The only trading copilot that tells you what to <strong className="text-text-primary">DO</strong>.
-            </p>
-            
-            {/* CTA buttons */}
-            <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Button size="xl" asChild className="text-lg px-8 py-6">
-                <Link href="/ask">
-                  Try AI Free
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Link>
-              </Button>
-              <Button size="xl" variant="outline" asChild className="text-lg px-8 py-6">
-                <Link href="/flow">View Options Flow</Link>
-              </Button>
-            </div>
-          </motion.div>
-          
-          {/* Demo terminal */}
-          <motion.div
-            initial={{ opacity: 0, y: 40 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4, duration: 0.6 }}
-            className="mx-auto mt-16 max-w-5xl"
-          >
-            <div className="rounded-xl border border-border bg-background-card shadow-2xl overflow-hidden">
-              {/* Terminal header */}
-              <div className="flex items-center gap-2 border-b border-border bg-background-surface px-4 py-3">
-                <div className="flex gap-1.5">
-                  <div className="h-3 w-3 rounded-full bg-bear" />
-                  <div className="h-3 w-3 rounded-full bg-warning" />
-                  <div className="h-3 w-3 rounded-full bg-bull" />
-                </div>
-                <span className="ml-2 text-xs text-text-muted font-mono">TradingCopilot AI Terminal</span>
-              </div>
-              
-              {/* Terminal content */}
-              <div className="p-6 font-mono text-sm bg-background">
-                {/* User message */}
-                <div className="mb-4 flex gap-3">
-                  <div className="flex-shrink-0 h-8 w-8 rounded-full bg-accent/20 flex items-center justify-center">
-                    <span className="text-xs text-accent font-bold">U</span>
-                  </div>
-                  <div className="text-text-primary pt-1">
-                    Should I buy NVDA on this dip?
-                  </div>
-                </div>
-                
-                {/* AI response */}
-                <div className="flex gap-3">
-                  <div className="flex-shrink-0 h-8 w-8 rounded-full bg-bull/20 flex items-center justify-center">
-                    <Zap className="h-4 w-4 text-bull" />
-                  </div>
-                  <div className="space-y-3 flex-1">
-                    <div className="text-text-secondary">
-                      <span className="text-warning font-semibold">📊 NVDA DIP ANALYSIS</span>
-                    </div>
-                    <div>
-                      <Badge className="bg-warning text-background text-sm px-3 py-1">VERDICT: WAIT</Badge>
-                    </div>
-                    <div className="space-y-2 text-text-secondary text-sm">
-                      <p><span className="text-bear">•</span> Current: <span className="text-text-primary font-semibold">$190.04</span> (after-hours, +2.5% gap up)</p>
-                      <p><span className="text-bear">•</span> Gamma wall at <span className="text-text-primary font-semibold">$190-195</span> acting as resistance</p>
-                      <p><span className="text-bear">•</span> News: <span className="text-warning font-semibold">CRISIS</span> conditions detected (war concerns)</p>
-                      <p><span className="text-bear">•</span> Flow: Bullish (61.8% calls, $337M premium) but dealers long gamma</p>
-                    </div>
-                    <div className="text-text-secondary text-sm pt-2 border-t border-border/50">
-                      <p><span className="text-bull font-semibold">Entry if:</span> Pullback to <span className="text-text-primary font-semibold">$182-185</span> support zone</p>
-                      <p><span className="text-bear font-semibold">Invalidates:</span> Close below <span className="text-text-primary font-semibold">$180</span></p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      </section>
+          {/* Center Content - Hero */}
+          <div className="flex-1 w-full max-w-7xl">
+            {/* Hero Section */}
+            <Hero />
 
             {/* Mobile Market Pulse - shows on smaller screens */}
             <div className="lg:hidden mt-8 px-4">
               <MobileMarketPulse />
             </div>
-            
-            {/* Social Proof Bar */}
-            <section className="border-y border-border bg-background-surface py-8">
+          </div>
+
+          {/* Right Sidebar - Movers + News */}
+          <aside className="hidden lg:block sticky top-20 h-fit">
+            <MarketPulseRightSidebar />
+          </aside>
+        </main>
+
+        {/* Data Provider Strip */}
+        <DataProviderStrip />
+
+        {/* Metrics Bar */}
+        <MetricsBar />
+
+        {/* Social Proof Bar */}
+        <section className="border-y border-border bg-background-surface py-8">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
             {stats.map((stat, index) => (
@@ -356,9 +269,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-            
-            {/* Key Features Section */}
-            <section className="py-20 lg:py-32 bg-background-surface">
+
+      {/* Key Features Section */}
+      <section className="py-20 lg:py-32 bg-background-surface">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             {...fadeInUp}
@@ -392,9 +305,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-            
-            {/* Comparison Section */}
-            <section className="py-20 lg:py-32 bg-background">
+
+      {/* Comparison Section */}
+      <section className="py-20 lg:py-32 bg-background">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             {...fadeInUp}
@@ -444,9 +357,9 @@ export default function HomePage() {
           </motion.div>
         </div>
       </section>
-            
-            {/* Live Demo Section */}
-            <section className="py-20 lg:py-32 bg-background-surface">
+
+      {/* Live Demo Section */}
+      <section className="py-20 lg:py-32 bg-background-surface">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             {...fadeInUp}
@@ -504,9 +417,9 @@ export default function HomePage() {
           </motion.div>
         </div>
       </section>
-            
-            {/* Pricing Section */}
-            <section id="pricing" className="py-20 lg:py-32 bg-background">
+
+      {/* Pricing Section */}
+      <section id="pricing" className="py-20 lg:py-32 bg-background">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             {...fadeInUp}
@@ -527,7 +440,8 @@ export default function HomePage() {
             viewport={{ once: true }}
             className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-3"
           >
-            {tiers.map((tier) => (
+            {/* Sort tiers: Most Popular first on mobile */}
+            {[...tiers].sort((a, b) => (b.popular ? 1 : 0) - (a.popular ? 1 : 0)).map((tier) => (
               <motion.div
                 key={tier.name}
                 variants={fadeInUp}
@@ -561,21 +475,59 @@ export default function HomePage() {
                 </ul>
                 
                 <Button
-                  className="mt-8 w-full"
+                  className="mt-8 w-full min-h-[48px]"
                   variant={tier.popular ? 'default' : 'outline'}
                   size="lg"
                   asChild
                 >
                   <Link href={tier.href}>{tier.cta}</Link>
                 </Button>
+
+                {/* Trust Badges */}
+                {tier.name === 'Free' && (
+                  <div className="mt-4 pt-4 border-t border-border">
+                    <div className="flex items-center gap-2 text-xs text-[#6b7a99]">
+                      <CheckCircle className="h-3 w-3" />
+                      <span>No credit card required</span>
+                    </div>
+                  </div>
+                )}
+                {tier.name !== 'Free' && (
+                  <div className="mt-4 pt-4 border-t border-border space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-[#6b7a99]">
+                      <CheckCircle className="h-3 w-3" />
+                      <span>Cancel anytime</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-[#6b7a99]">
+                      <CheckCircle className="h-3 w-3" />
+                      <span>30-day money-back guarantee</span>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             ))}
           </motion.div>
+
+          {/* Pricing Comparison Context */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.3 }}
+            className="mt-12 text-center"
+          >
+            <p className="text-[13px] text-[#4a5568]">
+              For context: Bloomberg Terminal costs $24,000/yr · SpotGamma Alpha costs $249/mo · FlowAlgo costs $228/mo
+            </p>
+          </motion.div>
         </div>
       </section>
-            
-            {/* Final CTA Section */}
-            <section className="py-20 lg:py-32 bg-background-surface">
+
+      {/* Testimonials Section */}
+      <Testimonials />
+
+      {/* Final CTA Section */}
+      <section className="py-20 lg:py-32 bg-background-surface">
         <div className="mx-auto max-w-7xl px-4 lg:px-8">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -601,18 +553,27 @@ export default function HomePage() {
                 <Link href="/pricing">View Pricing</Link>
               </Button>
             </div>
+
+            {/* Trust Badges */}
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-xs text-[#6b7a99]">
+              <div className="flex items-center gap-1.5">
+                <CheckCircle className="h-3.5 w-3.5" />
+                <span>No credit card required</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <CheckCircle className="h-3.5 w-3.5" />
+                <span>Cancel anytime</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <CheckCircle className="h-3.5 w-3.5" />
+                <span>30-day money-back guarantee</span>
+              </div>
+            </div>
           </motion.div>
         </div>
       </section>
-          </div>
 
-          {/* Right Sidebar - Movers + News */}
-          <aside className="hidden lg:block sticky top-20 h-fit">
-            <MarketPulseRightSidebar />
-          </aside>
-        </main>
-
-        <Footer />
+      <Footer />
       </div>
     </MarketPulseProvider>
   );

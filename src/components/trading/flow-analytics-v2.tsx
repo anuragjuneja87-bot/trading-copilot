@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   AreaChart,
   Area,
@@ -26,8 +27,13 @@ import {
   Zap,
   AlertTriangle,
   RefreshCw,
+  MessageSquare,
+  ArrowUp,
+  ArrowDown,
+  Minus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { EnhancedOptionTrade, EnhancedFlowStats } from '@/types/flow';
 
 interface FlowAnalyticsV2Props {
@@ -157,12 +163,19 @@ function generateRuleBasedInsight(stats: EnhancedFlowStats, topTrades: EnhancedO
 }
 
 export function FlowAnalyticsV2({ data, stats, selectedTicker }: FlowAnalyticsV2Props) {
+  const [timeRange, setTimeRange] = useState<'today' | 'hour' | 'custom'>('today');
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+
+  // Ensure data is always an array
+  const safeData = Array.isArray(data) ? data : [];
+
   // Get top trades by smart money score
   const topTrades = useMemo(() => {
-    return [...data]
-      .sort((a, b) => b.smartMoneyScore - a.smartMoneyScore)
+    if (!Array.isArray(safeData) || safeData.length === 0) return [];
+    return [...safeData]
+      .sort((a, b) => (b.smartMoneyScore || 0) - (a.smartMoneyScore || 0))
       .slice(0, 5);
-  }, [data]);
+  }, [safeData]);
 
   // AI Insight
   const { insight, isLoading: insightLoading, refreshInsight } = useAIInsight(
@@ -170,6 +183,19 @@ export function FlowAnalyticsV2({ data, stats, selectedTicker }: FlowAnalyticsV2
     topTrades, 
     selectedTicker || 'Market'
   );
+
+  // Fetch current price for annotation
+  useEffect(() => {
+    if (selectedTicker) {
+      fetch(`/api/market/prices?tickers=${selectedTicker}`)
+        .then(res => res.json())
+        .then(data => {
+          const price = data.data?.prices?.[0]?.price;
+          if (price) setCurrentPrice(price);
+        })
+        .catch(() => {});
+    }
+  }, [selectedTicker]);
 
   // Prepare GEX chart data
   const gexChartData = useMemo(() => {
@@ -185,37 +211,60 @@ export function FlowAnalyticsV2({ data, stats, selectedTicker }: FlowAnalyticsV2
       }));
   }, [stats.gexByStrike]);
 
-  // Prepare flow momentum chart (last 2 hours in 5-min buckets)
+  // Prepare flow momentum chart based on time range
   const momentumChartData = useMemo(() => {
-    return stats.flowTimeSeries.slice(-24); // Last 2 hours
-  }, [stats.flowTimeSeries]);
+    if (timeRange === 'hour') {
+      return stats.flowTimeSeries.slice(-12); // Last hour
+    } else if (timeRange === 'today') {
+      return stats.flowTimeSeries; // All today
+    }
+    return stats.flowTimeSeries; // Custom (same as today for now)
+  }, [stats.flowTimeSeries, timeRange]);
 
   return (
     <div className="space-y-4 p-6">
       {/* AI Insight Banner */}
       <div className={cn(
-        "rounded-xl p-4 border",
-        stats.regime === 'RISK_ON' && "bg-bull/10 border-bull/30",
-        stats.regime === 'RISK_OFF' && "bg-bear/10 border-bear/30",
-        stats.regime === 'NEUTRAL' && "bg-background-card border-background-elevated"
-      )}>
-        <div className="flex items-start gap-3">
+        "rounded-xl p-6 border-l-4 relative overflow-hidden",
+        stats.regime === 'RISK_ON' && "bg-bull/10 border-l-bull",
+        stats.regime === 'RISK_OFF' && "bg-bear/10 border-l-bear",
+        stats.regime === 'NEUTRAL' && "bg-[rgba(255,255,255,0.02)] border-l-[#00e5ff]"
+      )}
+      style={{
+        border: '1px solid rgba(255,255,255,0.06)',
+        borderLeft: stats.regime === 'RISK_ON' ? '4px solid #00e676' : 
+                   stats.regime === 'RISK_OFF' ? '4px solid #ff5252' : 
+                   '4px solid #00e5ff',
+      }}>
+        {/* Subtle gradient overlay */}
+        <div 
+          className="absolute inset-0 opacity-5 pointer-events-none"
+          style={{
+            background: stats.regime === 'RISK_ON' 
+              ? 'linear-gradient(135deg, rgba(0,230,118,0.2) 0%, transparent 100%)'
+              : stats.regime === 'RISK_OFF'
+              ? 'linear-gradient(135deg, rgba(255,82,82,0.2) 0%, transparent 100%)'
+              : 'linear-gradient(135deg, rgba(0,229,255,0.2) 0%, transparent 100%)'
+          }}
+        />
+        
+        <div className="flex items-start gap-4 relative z-10">
           <div className={cn(
-            "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
+            "w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0",
             stats.regime === 'RISK_ON' && "bg-bull/20",
             stats.regime === 'RISK_OFF' && "bg-bear/20",
             stats.regime === 'NEUTRAL' && "bg-accent/20"
           )}>
             <Brain className={cn(
-              "w-5 h-5",
+              "w-6 h-6",
               stats.regime === 'RISK_ON' && "text-bull",
               stats.regime === 'RISK_OFF' && "text-bear",
               stats.regime === 'NEUTRAL' && "text-accent"
             )} />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-sm font-medium text-text-muted">AI INSIGHT</span>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#00e5ff]">AI INSIGHT</span>
               {insightLoading && (
                 <div className="w-3 h-3 border-2 border-accent border-t-transparent rounded-full animate-spin" />
               )}
@@ -223,25 +272,39 @@ export function FlowAnalyticsV2({ data, stats, selectedTicker }: FlowAnalyticsV2
               <button
                 onClick={refreshInsight}
                 disabled={insightLoading}
-                className="ml-2 p-1 rounded hover:bg-background-elevated transition-colors disabled:opacity-50"
+                className="ml-auto p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.05)] transition-colors disabled:opacity-50"
                 title="Refresh AI insight"
               >
                 <RefreshCw className={cn(
-                  "w-3.5 h-3.5 text-text-muted",
+                  "w-4 h-4 text-text-muted",
                   insightLoading && "animate-spin"
                 )} />
               </button>
             </div>
-            <p className="text-text-primary leading-relaxed">
+            <p className="text-sm text-text-primary leading-relaxed mb-3">
               {insight}
             </p>
+            {/* Ask AI Button */}
+            <button
+              onClick={() => {
+                const prompt = `Analyze the current options flow: ${insight}`;
+                if (typeof window !== 'undefined') {
+                  sessionStorage.setItem('chat_prompt', prompt);
+                  window.location.href = '/app';
+                }
+              }}
+              className="inline-flex items-center gap-1.5 text-xs text-[#00e5ff] hover:text-[#00b8d4] transition-colors font-medium"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              Ask AI about this flow →
+            </button>
           </div>
           {/* Regime Badge */}
           <div className={cn(
-            "px-3 py-1.5 rounded-lg text-sm font-semibold flex-shrink-0",
-            stats.regime === 'RISK_ON' && "bg-bull/20 text-bull",
-            stats.regime === 'RISK_OFF' && "bg-bear/20 text-bear",
-            stats.regime === 'NEUTRAL' && "bg-background-elevated text-text-secondary"
+            "px-3 py-1.5 rounded-lg text-xs font-bold uppercase flex-shrink-0",
+            stats.regime === 'RISK_ON' && "bg-bull/20 text-bull border border-bull/30",
+            stats.regime === 'RISK_OFF' && "bg-bear/20 text-bear border border-bear/30",
+            stats.regime === 'NEUTRAL' && "bg-background-elevated text-text-secondary border border-[rgba(255,255,255,0.1)]"
           )}>
             {stats.regime === 'RISK_ON' && '🟢 RISK ON'}
             {stats.regime === 'RISK_OFF' && '🔴 RISK OFF'}
@@ -251,13 +314,14 @@ export function FlowAnalyticsV2({ data, stats, selectedTicker }: FlowAnalyticsV2
       </div>
 
       {/* Key Metrics Bar */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="flex lg:grid lg:grid-cols-2 md:lg:grid-cols-3 xl:grid-cols-6 gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-hide">
         <MetricCard
           label="Net Delta Flow"
           value={formatPremium(stats.netDeltaAdjustedFlow)}
           subValue={stats.netDeltaAdjustedFlow >= 0 ? 'BULLISH' : 'BEARISH'}
           trend={stats.netDeltaAdjustedFlow >= 0 ? 'up' : 'down'}
           icon={stats.netDeltaAdjustedFlow >= 0 ? TrendingUp : TrendingDown}
+          highlight={Math.abs(stats.netDeltaAdjustedFlow) > 1000000}
         />
         
         <MetricCard
@@ -300,20 +364,47 @@ export function FlowAnalyticsV2({ data, stats, selectedTicker }: FlowAnalyticsV2
           subValue="avg score"
           trend={stats.avgSmartMoneyScore > 5 ? 'up' : 'neutral'}
           icon={Flame}
+          highlight={stats.avgSmartMoneyScore > 4.0}
         />
       </div>
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Cumulative Delta-Adjusted Flow Chart */}
-        <div className="bg-background-card border border-background-elevated rounded-xl p-4">
-          <h3 className="text-base font-semibold text-text-primary mb-3 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-accent" />
-            Cumulative Delta Flow (CDAF)
-            <span className="text-xs font-normal text-text-muted ml-auto">
-              True directional exposure
-            </span>
-          </h3>
+        <div className="bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.06)] rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 text-accent" />
+              <h3 className="text-base font-semibold text-text-primary">
+                Cumulative Delta Flow (CDAF)
+              </h3>
+            </div>
+            {/* Time Range Selector */}
+            <div className="flex items-center gap-1 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.02)] p-0.5">
+              <button
+                onClick={() => setTimeRange('today')}
+                className={cn(
+                  'px-2 py-1 rounded text-xs font-medium transition-colors',
+                  timeRange === 'today'
+                    ? 'bg-accent text-background'
+                    : 'text-text-muted hover:text-text-primary'
+                )}
+              >
+                Today
+              </button>
+              <button
+                onClick={() => setTimeRange('hour')}
+                className={cn(
+                  'px-2 py-1 rounded text-xs font-medium transition-colors',
+                  timeRange === 'hour'
+                    ? 'bg-accent text-background'
+                    : 'text-text-muted hover:text-text-primary'
+                )}
+              >
+                Last Hour
+              </button>
+            </div>
+          </div>
           <div className="h-[200px]">
             {momentumChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -415,7 +506,13 @@ export function FlowAnalyticsV2({ data, stats, selectedTicker }: FlowAnalyticsV2
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <EmptyState message="No strike data" />
+              <div className="h-full flex items-center justify-center">
+                <div className="space-y-2 w-full">
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                  <Skeleton className="h-32 w-full" />
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -447,32 +544,97 @@ export function FlowAnalyticsV2({ data, stats, selectedTicker }: FlowAnalyticsV2
 
 // Sub-components
 
+// Mock sparkline data - TODO: Replace with real time series
+function generateMiniSparkline(trend: 'up' | 'down' | 'neutral'): number[] {
+  const data = [];
+  const base = 50;
+  for (let i = 0; i < 10; i++) {
+    if (trend === 'up') {
+      data.push(base + Math.random() * 20 + i * 2);
+    } else if (trend === 'down') {
+      data.push(base + Math.random() * 20 - i * 2);
+    } else {
+      data.push(base + (Math.random() - 0.5) * 10);
+    }
+  }
+  return data;
+}
+
+function MiniSparkline({ data, trend }: { data: number[]; trend: 'up' | 'down' | 'neutral' }) {
+  const width = 40;
+  const height = 16;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+
+  const points = data
+    .map((value, index) => {
+      const x = (index / (data.length - 1)) * width;
+      const y = height - ((value - min) / range) * height;
+      return `${x},${y}`;
+    })
+    .join(' ');
+
+  const color = trend === 'up' ? '#00e676' : trend === 'down' ? '#ff5252' : '#6b7a99';
+
+  return (
+    <svg width={width} height={height} className="overflow-visible">
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
 function MetricCard({ 
   label, 
   value, 
   subValue, 
   trend, 
-  icon: Icon 
+  icon: Icon,
+  highlight = false,
 }: { 
   label: string;
   value: string;
   subValue: string;
   trend: 'up' | 'down' | 'neutral';
   icon: React.ComponentType<{ className?: string }>;
+  highlight?: boolean;
 }) {
+  const sparklineData = generateMiniSparkline(trend);
+  const isBullish = trend === 'up';
+  const isBearish = trend === 'down';
+
   return (
-    <div className="bg-background-card border border-background-elevated rounded-lg p-3">
-      <div className="flex items-center gap-2 mb-1">
-        <Icon className={cn(
-          "w-4 h-4",
-          trend === 'up' && "text-bull",
-          trend === 'down' && "text-bear",
-          trend === 'neutral' && "text-text-muted"
-        )} />
-        <span className="text-xs text-text-muted">{label}</span>
+    <div className={cn(
+      "rounded-lg p-3 border transition-all",
+      highlight && "ring-2 ring-[#00e5ff]/50",
+      isBullish && "bg-bull/5 border-bull/20",
+      isBearish && "bg-bear/5 border-bear/20",
+      !isBullish && !isBearish && "bg-[rgba(255,255,255,0.02)] border-[rgba(255,255,255,0.06)]"
+    )}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <Icon className={cn(
+            "w-4 h-4",
+            trend === 'up' && "text-bull",
+            trend === 'down' && "text-bear",
+            trend === 'neutral' && "text-text-muted"
+          )} />
+          <span className="text-sm font-medium text-text-muted">{label}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          {trend === 'up' && <ArrowUp className="w-3 h-3 text-bull" />}
+          {trend === 'down' && <ArrowDown className="w-3 h-3 text-bear" />}
+          {trend === 'neutral' && <Minus className="w-3 h-3 text-text-muted" />}
+          <MiniSparkline data={sparklineData} trend={trend} />
+        </div>
       </div>
       <div className={cn(
-        "text-lg font-bold",
+        "text-xl font-bold mb-1",
         trend === 'up' && "text-bull",
         trend === 'down' && "text-bear",
         trend === 'neutral' && "text-text-primary"

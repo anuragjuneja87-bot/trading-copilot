@@ -2,6 +2,8 @@ import { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { getServerSession } from '@/lib/auth';
 import { DashboardSidebar } from '@/components/layout/dashboard-sidebar';
+import { AppNavbar } from '@/components/layout/app-navbar';
+import { MobileBottomNav } from '@/components/layout/mobile-bottom-nav';
 
 export const metadata: Metadata = {
   title: 'Dashboard',
@@ -22,9 +24,13 @@ export default async function DashboardLayout({
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       <DashboardSidebar />
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {children}
+      <main className="flex-1 flex flex-col overflow-hidden pb-14 lg:pb-0">
+        <AppNavbar />
+        <div className="flex-1 overflow-y-auto">
+          {children}
+        </div>
       </main>
+      <MobileBottomNav />
     </div>
   );
 }

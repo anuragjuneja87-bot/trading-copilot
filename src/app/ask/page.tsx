@@ -1,48 +1,118 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { Navbar, Footer } from '@/components/layout';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ResponseTypeSelector } from '@/components/chat/response-type-selector';
+import { ResponseSections } from '@/components/chat/response-sections';
+import { ChatHeader } from '@/components/chat/chat-header';
+import { LoadingState } from '@/components/chat/loading-state';
+import { MarkdownRenderer } from '@/components/chat/markdown-renderer';
+import { ChatEmptyState } from '@/components/command-center/chat-empty-state';
 import { useUserStore, useChatStore } from '@/stores';
 import { generateId } from '@/lib/utils';
 import { 
   Send, 
-  Zap, 
-  Sparkles,
   Lock,
-  MessageSquare,
-  TrendingUp,
-  AlertTriangle,
-  BarChart3
+  Loader2,
+  Sparkles
 } from 'lucide-react';
-
-// Suggested questions
-const suggestions = [
-  { text: 'Should I buy NVDA on this dip?', icon: TrendingUp },
-  { text: 'What are the key levels for SPY today?', icon: BarChart3 },
-  { text: 'Is it safe to buy tech tomorrow?', icon: AlertTriangle },
-  { text: 'Give me a morning briefing', icon: Sparkles },
-];
+import { 
+  AnalysisDepth, 
+  parseAIResponse, 
+  generateSuggestions, 
+  getTimeOfDay,
+  getPinnedInsights,
+  unpinInsight,
+  getAnalysisDepthPreference,
+  setAnalysisDepthPreference,
+} from '@/lib/chat-utils';
+import { useQuery } from '@tanstack/react-query';
 
 export default function AskPage() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [analysisDepth, setAnalysisDepth] = useState<AnalysisDepth>(getAnalysisDepthPreference());
+  const [pinnedInsights, setPinnedInsights] = useState(getPinnedInsights());
+  const [showPinned, setShowPinned] = useState(pinnedInsights.length > 0);
+  const [parsedMessages, setParsedMessages] = useState<Map<string, ReturnType<typeof parseAIResponse>>>(new Map());
+  const [messageAnalysisDepth, setMessageAnalysisDepth] = useState<Map<string, AnalysisDepth>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const loadingStartTimeRef = useRef<{ [key: string]: number }>({});
   
   const { messages, addMessage, updateMessage, clearMessages } = useChatStore();
   const { dailyQuestionsUsed, incrementQuestionsUsed, tier } = useUserStore();
   
+  // Get watchlist for smart suggestions
+  const { data: watchlistData } = useQuery({
+    queryKey: ['watchlist'],
+    queryFn: async () => {
+      const res = await fetch('/api/user/watchlist');
+      const data = await res.json();
+      return data.data;
+    },
+  });
+
+  const watchlist = watchlistData?.watchlist?.map((item: any) => item.ticker) || [];
+
+  // Get regime for smart suggestions
+  const { data: regime } = useQuery({
+    queryKey: ['regime'],
+    queryFn: async () => {
+      const res = await fetch('/api/market/regime');
+      const data = await res.json();
+      return data.data;
+    },
+    refetchInterval: 60000,
+  });
+
   // Temporarily disabled for testing - set to unlimited
   const dailyLimit = -1; // tier === 'free' ? 3 : tier === 'pro' ? 100 : -1;
   const questionsRemaining = dailyLimit === -1 ? '∞' : Math.max(0, dailyLimit - dailyQuestionsUsed);
   const canAsk = true; // dailyLimit === -1 || dailyQuestionsUsed < dailyLimit;
 
+  // Extract primary ticker and verdict from conversation
+  const primaryTicker = useMemo(() => {
+    for (const msg of [...messages].reverse()) {
+      const parsed = parsedMessages.get(msg.id);
+      if (msg.role === 'assistant' && parsed?.snapshot?.ticker) {
+        return parsed.snapshot.ticker;
+      }
+      const tickerMatch = msg.content.match(/\b([A-Z]{1,5})\b/);
+      if (tickerMatch && ['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA', 'MSFT'].includes(tickerMatch[1])) {
+        return tickerMatch[1];
+      }
+    }
+    return undefined;
+  }, [messages, parsedMessages]);
+
+  const latestVerdict = useMemo(() => {
+    for (const msg of [...messages].reverse()) {
+      const parsed = parsedMessages.get(msg.id);
+      if (msg.role === 'assistant' && parsed?.verdict) {
+        return parsed.verdict.type;
+      }
+    }
+    return undefined;
+  }, [messages, parsedMessages]);
+
   // Scroll to bottom on new message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Update pinned insights
+  useEffect(() => {
+    setPinnedInsights(getPinnedInsights());
+  }, [messages]);
+
+  const handleAnalysisDepthChange = (depth: AnalysisDepth) => {
+    setAnalysisDepth(depth);
+    setAnalysisDepthPreference(depth);
+  };
 
   const handleSubmit = async (question: string) => {
     if (!question.trim() || isLoading || !canAsk) return;
@@ -58,6 +128,13 @@ export default function AskPage() {
 
     // Add loading assistant message
     const assistantMsgId = generateId();
+    const startTime = Date.now();
+    loadingStartTimeRef.current[assistantMsgId] = startTime;
+    
+    // Create abort controller for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    
     addMessage({
       id: assistantMsgId,
       role: 'assistant',
@@ -80,9 +157,11 @@ export default function AskPage() {
       const response = await fetch('/api/ai/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({ 
           question: question.trim(),
           history: history.slice(-10), // Last 10 messages for context
+          analysis_depth: analysisDepth, // Add to payload
         }),
       });
 
@@ -104,15 +183,31 @@ export default function AskPage() {
         throw new Error('Received empty response from AI service');
       }
       
+      // Parse response into structured sections
+      const parsed = parseAIResponse(messageText);
+      
+      // Update message with parsed data
       updateMessage(assistantMsgId, messageText);
+      
+      // Store parsed data in local state map
+      setParsedMessages(prev => new Map(prev).set(assistantMsgId, parsed));
+      setMessageAnalysisDepth(prev => new Map(prev).set(assistantMsgId, analysisDepth));
+      
       incrementQuestionsUsed();
       
     } catch (error: any) {
+      // Don't show error if request was aborted
+      if (error.name === 'AbortError') {
+        updateMessage(assistantMsgId, 'Analysis cancelled. Try a Quick Look for faster results.');
+        return;
+      }
       console.error('Chat error:', error);
       const errorMessage = error.message || 'Sorry, there was an error processing your request. Please try again.';
       updateMessage(assistantMsgId, errorMessage);
     } finally {
       setIsLoading(false);
+      delete loadingStartTimeRef.current[assistantMsgId];
+      abortControllerRef.current = null;
     }
   };
 
@@ -157,97 +252,126 @@ export default function AskPage() {
           </div>
 
           {/* Chat container */}
-          <div className="rounded-xl border border-border bg-background-card overflow-hidden">
-            {/* Messages area */}
-            <div className="h-[500px] overflow-y-auto p-4 space-y-4">
-              {messages.length === 0 ? (
-                // Empty state with suggestions
-                <div className="h-full flex flex-col items-center justify-center text-center">
-                  <div className="mb-6 h-16 w-16 rounded-full bg-accent/10 flex items-center justify-center">
-                    <MessageSquare className="h-8 w-8 text-accent" />
-                  </div>
-                  <h3 className="text-lg font-medium text-text-primary mb-2">
-                    What would you like to know?
-                  </h3>
-                  <p className="text-sm text-text-secondary mb-6 max-w-md">
-                    Ask about specific tickers, market conditions, or get a morning briefing. 
-                    I'll give you actionable insights, not just data.
-                  </p>
-                  
-                  {/* Suggestion chips */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
-                    {suggestions.map((suggestion) => (
-                      <button
-                        key={suggestion.text}
-                        onClick={() => handleSubmit(suggestion.text)}
-                        disabled={!canAsk || isLoading}
-                        className="flex items-center gap-2 px-4 py-3 rounded-lg border border-border bg-background-surface text-left text-sm text-text-secondary hover:text-text-primary hover:border-accent/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <suggestion.icon className="h-4 w-4 text-accent flex-shrink-0" />
-                        <span>{suggestion.text}</span>
-                      </button>
-                    ))}
-                  </div>
+          <div className="rounded-xl border border-border bg-background-card overflow-hidden flex flex-col" style={{ height: '600px' }}>
+            {/* Chat Header (only when conversation active) */}
+            {messages.length > 0 && (
+              <ChatHeader
+                ticker={primaryTicker}
+                verdict={latestVerdict}
+                onNewChat={clearMessages}
+              />
+            )}
+
+            {/* Pinned Insights */}
+            {showPinned && pinnedInsights.length > 0 && (
+              <div className="px-4 pt-3 pb-2 border-b border-[rgba(255,255,255,0.06)]">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">📌 Pinned Insights</span>
+                  <button
+                    onClick={() => setShowPinned(false)}
+                    className="text-text-muted hover:text-text-primary"
+                  >
+                    ×
+                  </button>
                 </div>
+                <div className="space-y-1">
+                  {pinnedInsights.map((pin) => (
+                    <div
+                      key={pin.id}
+                      className="flex items-center justify-between p-2 rounded bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.06)] text-xs"
+                    >
+                      <span className="text-text-secondary flex-1 truncate">{pin.content}</span>
+                      <button
+                        onClick={() => {
+                          unpinInsight(pin.id);
+                          setPinnedInsights(getPinnedInsights());
+                        }}
+                        className="ml-2 text-text-muted hover:text-text-primary"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Messages area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {messages.length === 0 ? (
+                <ChatEmptyState onSuggestionClick={handleSubmit} watchlist={watchlist} />
               ) : (
                 // Messages list
                 <>
-                  {messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`flex gap-3 ${
-                        message.role === 'user' ? 'justify-end' : 'justify-start'
-                      }`}
-                    >
-                      {message.role === 'assistant' && (
-                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-accent/10 flex items-center justify-center">
-                          <Zap className="h-4 w-4 text-accent" />
-                        </div>
-                      )}
-                      
+                  {messages.map((message) => {
+                    const parsed = parsedMessages.get(message.id);
+                    const msgAnalysisDepth = messageAnalysisDepth.get(message.id) || analysisDepth;
+                    
+                    return (
                       <div
-                        className={`max-w-[80%] rounded-lg px-4 py-3 ${
-                          message.role === 'user'
-                            ? 'bg-accent/10 border border-accent/20'
-                            : 'bg-background-elevated'
-                        }`}
+                        key={message.id}
+                        className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                       >
-                        {message.isLoading ? (
-                          <div className="flex flex-col gap-2 text-text-muted">
-                            <div className="flex items-center gap-2">
-                              <div className="flex gap-1">
-                                <div className="h-2 w-2 rounded-full bg-accent animate-bounce" style={{ animationDelay: '0ms' }} />
-                                <div className="h-2 w-2 rounded-full bg-accent animate-bounce" style={{ animationDelay: '150ms' }} />
-                                <div className="h-2 w-2 rounded-full bg-accent animate-bounce" style={{ animationDelay: '300ms' }} />
-                              </div>
-                              <span className="text-sm">Analyzing market data and generating insights...</span>
-                            </div>
-                            <span className="text-xs text-text-muted/70">The AI agent is running multiple analyses. This typically takes 3-5 minutes.</span>
-                          </div>
-                        ) : (
-                          <div 
-                            className="text-sm text-text-primary whitespace-pre-wrap"
-                            dangerouslySetInnerHTML={{ 
-                              __html: formatMessage(message.content) 
-                            }}
-                          />
-                        )}
-                      </div>
-                      
-                      {message.role === 'user' && (
-                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-text-muted/20 flex items-center justify-center">
-                          <span className="text-xs text-text-secondary">You</span>
+                        <div
+                          className={`max-w-[85%] rounded-lg px-4 py-3 ${
+                            message.role === 'user'
+                              ? 'bg-accent/10 text-text-primary'
+                              : 'bg-background-elevated border border-[rgba(255,255,255,0.06)]'
+                          }`}
+                        >
+                          {message.isLoading ? (
+                            <LoadingState 
+                              analysisDepth={msgAnalysisDepth} 
+                              onCancel={() => {
+                                // Cancel the request
+                                if (abortControllerRef.current) {
+                                  abortControllerRef.current.abort();
+                                }
+                                updateMessage(message.id, 'Analysis cancelled. Try a Quick Look for faster results.');
+                                setIsLoading(false);
+                              }}
+                              startTime={loadingStartTimeRef.current[message.id] || Date.now()}
+                            />
+                          ) : message.role === 'assistant' && parsed ? (
+                            <ResponseSections
+                              parsed={parsed}
+                              analysisDepth={msgAnalysisDepth}
+                              onGoDeeper={() => {
+                                const index = messages.findIndex(m => m.id === message.id);
+                                const userMsg = messages[index - 1];
+                                if (userMsg?.role === 'user') {
+                                  // Escalate to next depth
+                                  const currentDepth = msgAnalysisDepth;
+                                  let nextDepth: AnalysisDepth = 'analysis';
+                                  if (currentDepth === 'quick') nextDepth = 'analysis';
+                                  else if (currentDepth === 'analysis') nextDepth = 'full';
+                                  else return;
+                                  handleAnalysisDepthChange(nextDepth);
+                                  handleSubmit(userMsg.content);
+                                }
+                              }}
+                              onFollowUp={(prompt) => setInput(prompt)}
+                            />
+                          ) : (
+                            <MarkdownRenderer content={message.content} className="text-sm" />
+                          )}
                         </div>
-                      )}
-                    </div>
-                  ))}
+                      </div>
+                    );
+                  })}
                   <div ref={messagesEndRef} />
                 </>
               )}
             </div>
 
-            {/* Input area */}
-            <div className="border-t border-border p-4 bg-background-surface">
+            {/* Input area with Response Type Selector */}
+            <div className="border-t border-border p-4 bg-background-surface space-y-3">
+              {/* Response Type Selector */}
+              <ResponseTypeSelector
+                value={analysisDepth}
+                onChange={handleAnalysisDepthChange}
+              />
+
               {canAsk ? (
                 <form onSubmit={handleFormSubmit} className="flex gap-3">
                   <input
@@ -255,11 +379,15 @@ export default function AskPage() {
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     placeholder="Ask about any ticker, market conditions, or trading setup..."
-                    className="flex-1 bg-background border border-border rounded-lg px-4 py-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+                    className="flex-1 bg-background border border-border rounded-lg px-4 py-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent min-h-[48px]"
                     disabled={isLoading}
                   />
-                  <Button type="submit" disabled={!input.trim() || isLoading}>
-                    <Send className="h-4 w-4" />
+                  <Button type="submit" disabled={!input.trim() || isLoading} className="min-h-[48px]">
+                    {isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
                   </Button>
                 </form>
               ) : (
@@ -301,110 +429,4 @@ export default function AskPage() {
       <Footer />
     </div>
   );
-}
-
-// Enhanced markdown formatting
-function formatMessage(content: string): string {
-  let formatted = content;
-  
-  // Split into lines for better processing
-  const lines = formatted.split('\n');
-  const processedLines: string[] = [];
-  
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    
-    // Headers (process before other formatting)
-    if (line.match(/^####\s+/)) {
-      line = line.replace(/^####\s+(.+)$/, '<h4 class="text-lg font-semibold text-text-primary mt-4 mb-2">$1</h4>');
-    } else if (line.match(/^###\s+/)) {
-      line = line.replace(/^###\s+(.+)$/, '<h3 class="text-xl font-semibold text-text-primary mt-5 mb-3">$1</h3>');
-    } else if (line.match(/^##\s+/)) {
-      line = line.replace(/^##\s+(.+)$/, '<h2 class="text-2xl font-bold text-text-primary mt-6 mb-4">$1</h2>');
-    }
-    // Horizontal rules
-    else if (line.trim() === '---' || line.trim() === '•--') {
-      line = '<hr class="my-4 border-border" />';
-    }
-    // Bullet points (•, -, *)
-    else if (line.match(/^[•·-]\s+/)) {
-      const text = line.replace(/^[•·-]\s+/, '');
-      line = `<div class="flex items-start gap-2 my-1"><span class="text-accent mt-1 flex-shrink-0">•</span><span>${text}</span></div>`;
-    } else if (line.match(/^\*\s+/)) {
-      const text = line.replace(/^\*\s+/, '');
-      line = `<div class="flex items-start gap-2 my-1"><span class="text-accent mt-1 flex-shrink-0">•</span><span>${text}</span></div>`;
-    }
-    // Numbered lists
-    else if (line.match(/^\d+\.\s+/)) {
-      line = line.replace(/^(\d+)\.\s+(.+)$/, '<div class="flex items-start gap-2 my-1"><span class="text-accent font-semibold flex-shrink-0">$1.</span><span>$2</span></div>');
-    }
-    
-    processedLines.push(line);
-  }
-  
-  formatted = processedLines.join('\n');
-  
-  // Inline formatting (process after line-level formatting)
-  
-  // Bold (**text** or __text__) - must come before italic
-  formatted = formatted
-    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-text-primary font-semibold">$1</strong>')
-    .replace(/__(.*?)__/g, '<strong class="text-text-primary font-semibold">$1</strong>');
-  
-  // Italic (*text* or _text_) - but not if it's part of bold
-  formatted = formatted
-    .replace(/(?<!\*)\*(?!\*)([^*]+?)(?<!\*)\*(?!\*)/g, '<em class="text-text-secondary">$1</em>')
-    .replace(/(?<!_)_(?!_)([^_]+?)(?<!_)_(?!_)/g, '<em class="text-text-secondary">$1</em>');
-  
-  // Code blocks (backticks)
-  formatted = formatted.replace(/`([^`]+)`/g, '<code class="bg-background-surface px-1.5 py-0.5 rounded text-xs font-mono text-accent">$1</code>');
-  
-  // Verdict badges
-  formatted = formatted.replace(/VERDICT:\s*(BUY|SELL|WAIT|HOLD)/gi, (_, verdict) => {
-    const colors: Record<string, string> = {
-      BUY: 'bg-bull text-white',
-      SELL: 'bg-bear text-white',
-      WAIT: 'bg-warning text-background',
-      HOLD: 'bg-text-muted text-white',
-    };
-    return `<span class="inline-flex px-2 py-0.5 rounded text-xs font-bold ${colors[verdict.toUpperCase()]}">${verdict.toUpperCase()}</span>`;
-  });
-  
-  // Warning/Caution sections
-  formatted = formatted
-    .replace(/⚠️?\s*CRITICAL\s+WARNING/gi, '<span class="inline-flex items-center gap-1 text-bear font-semibold">⚠️ CRITICAL WARNING</span>')
-    .replace(/⚠️?\s*WARNING/gi, '<span class="inline-flex items-center gap-1 text-warning font-semibold">⚠️ WARNING</span>')
-    .replace(/⚠️?\s*CAUTION/gi, '<span class="inline-flex items-center gap-1 text-warning font-semibold">⚠️ CAUTION</span>');
-  
-  // Crisis/Elevated tags
-  formatted = formatted
-    .replace(/\(CRISIS\)/gi, '<span class="text-bear font-medium">(CRISIS)</span>')
-    .replace(/\(ELEVATED\)/gi, '<span class="text-warning font-medium">(ELEVATED)</span>');
-  
-  // Price levels and numbers ($123.45, percentages)
-  formatted = formatted
-    .replace(/\$[\d,]+\.?\d*/g, '<span class="text-accent font-mono font-semibold">$&</span>')
-    .replace(/([\d,]+\.?\d*)%/g, '<span class="text-accent font-mono">$1%</span>');
-  
-  // Links
-  formatted = formatted.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-accent hover:underline" target="_blank" rel="noopener noreferrer">$1</a>');
-  
-  // Emoji styling
-  formatted = formatted
-    .replace(/✅/g, '<span class="text-bull">✅</span>')
-    .replace(/❌/g, '<span class="text-bear">❌</span>')
-    .replace(/⚠️/g, '<span class="text-warning">⚠️</span>');
-  
-  // Convert double newlines to paragraph breaks, single newlines to <br>
-  formatted = formatted.replace(/\n\n+/g, '</p><p class="my-2">');
-  formatted = formatted.replace(/\n/g, '<br>');
-  
-  // Wrap in paragraph tags if not already wrapped
-  if (!formatted.startsWith('<')) {
-    formatted = `<p class="my-2">${formatted}</p>`;
-  } else {
-    formatted = `<div class="my-2">${formatted}</div>`;
-  }
-  
-  return formatted;
 }

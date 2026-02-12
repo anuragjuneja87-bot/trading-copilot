@@ -43,6 +43,7 @@ model User {
   watchlist     WatchlistItem[]
   alerts        Alert[]
   chatSessions  ChatSession[]
+  briefings     Briefing[]
 
   @@map("users")
 }
@@ -199,6 +200,22 @@ model CachedBriefing {
   @@unique([userId, panelType])
   @@index([expiresAt])
   @@map("cached_briefings")
+}
+
+model Briefing {
+  id        String   @id @default(cuid())
+  userId    String
+  date      String   // YYYY-MM-DD format
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([date])
+  @@index([userId])
+  @@map("briefings")
 }
 
 // ═══════════════════════════════════════════════════════════════

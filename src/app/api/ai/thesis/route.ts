@@ -109,7 +109,7 @@ function extractTextFromDatabricksResponse(data: unknown): string {
   }
 }
 
-function parseThesisResponse(text: string): Partial<ThesisData> {
+function parseThesisResponse(text: string, ticker?: string): Partial<ThesisData> {
   const parsed: Partial<ThesisData> = {};
 
   // Extract VERDICT
@@ -143,25 +143,111 @@ function parseThesisResponse(text: string): Partial<ThesisData> {
     parsed.resistance = `$${resistanceMatch[1]}`;
   }
 
-  const entryMatch = text.match(
-    /(?:entry|buy zone|entry zone|buy around|Entry|ENTRY)[:\s-]*\$?(\d+\.?\d*)/i
-  );
-  if (entryMatch) {
-    parsed.entry = `$${entryMatch[1]}`;
+  // Extract Entry - more flexible patterns
+  const entryPatterns = [
+    /(?:entry|Entry|ENTRY|buy zone|entry zone|buy around|enter at|enter near|entry price|entry level)[:\s-]*\$?(\d+\.?\d*)/i,
+    /entry[:\s]*\$?(\d+\.?\d*)/i,
+    /(?:^|\n)\s*3\.?\s*(?:entry|Entry)[:\s-]*\$?(\d+\.?\d*)/i,
+    /entry[:\s]*\$(\d+\.?\d*)/i,
+    /entry\s+at\s+\$?(\d+\.?\d*)/i,
+    /entry\s+around\s+\$?(\d+\.?\d*)/i,
+  ];
+  for (const pattern of entryPatterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      parsed.entry = `$${match[1]}`;
+      break;
+    }
   }
 
-  const targetMatch = text.match(
-    /(?:target|Target|TARGET|pt\b|price target)[:\s-]*\$?(\d+\.?\d*)/i
-  );
-  if (targetMatch) {
-    parsed.target = `$${targetMatch[1]}`;
+  // Extract Target - more flexible patterns
+  const targetPatterns = [
+    /(?:target|Target|TARGET|pt\b|price target|take profit|tp\b|target price|target level)[:\s-]*\$?(\d+\.?\d*)/i,
+    /target[:\s]*\$?(\d+\.?\d*)/i,
+    /(?:^|\n)\s*4\.?\s*(?:target|Target)[:\s-]*\$?(\d+\.?\d*)/i,
+    /target[:\s]*\$(\d+\.?\d*)/i,
+    /target\s+at\s+\$?(\d+\.?\d*)/i,
+    /target\s+of\s+\$?(\d+\.?\d*)/i,
+  ];
+  for (const pattern of targetPatterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      parsed.target = `$${match[1]}`;
+      break;
+    }
   }
 
-  const stopMatch = text.match(
-    /(?:stop|Stop|STOP|stop loss|Stop Loss|\bsl\b)[:\s-]*\$?(\d+\.?\d*)/i
-  );
-  if (stopMatch) {
-    parsed.stop = `$${stopMatch[1]}`;
+  // Extract Stop - more flexible patterns
+  const stopPatterns = [
+    /(?:stop|Stop|STOP|stop loss|Stop Loss|\bsl\b|stop at|stop below|stop above|stop price|stop level)[:\s-]*\$?(\d+\.?\d*)/i,
+    /stop[:\s]*\$?(\d+\.?\d*)/i,
+    /(?:^|\n)\s*5\.?\s*(?:stop|Stop|stop loss)[:\s-]*\$?(\d+\.?\d*)/i,
+    /stop[:\s]*\$(\d+\.?\d*)/i,
+    /stop\s+at\s+\$?(\d+\.?\d*)/i,
+    /stop\s+below\s+\$?(\d+\.?\d*)/i,
+    /stop\s+above\s+\$?(\d+\.?\d*)/i,
+  ];
+  for (const pattern of stopPatterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      parsed.stop = `$${match[1]}`;
+      break;
+    }
+  }
+
+  // Fallback: Try to extract from structured format (Entry: $X, Target: $Y, Stop: $Z)
+  if (!parsed.entry || !parsed.target || !parsed.stop) {
+    // Look for patterns like "Entry: $190, Target: $195, Stop: $185"
+    const structuredMatch = text.match(/(?:entry|Entry)[:\s]*\$?(\d+\.?\d*).*?(?:target|Target)[:\s]*\$?(\d+\.?\d*).*?(?:stop|Stop)[:\s]*\$?(\d+\.?\d*)/i);
+    if (structuredMatch) {
+      if (!parsed.entry) parsed.entry = `$${structuredMatch[1]}`;
+      if (!parsed.target) parsed.target = `$${structuredMatch[2]}`;
+      if (!parsed.stop) parsed.stop = `$${structuredMatch[3]}`;
+    }
+  }
+
+  // Additional fallback: Find dollar amounts near keywords (within 30 characters)
+  if (!parsed.entry || !parsed.target || !parsed.stop) {
+    const lines = text.split(/\n/);
+    for (const line of lines) {
+      const lowerLine = line.toLowerCase();
+      
+      // Check for entry
+      if (!parsed.entry && (lowerLine.includes('entry') || lowerLine.includes('enter'))) {
+        const dollarMatch = line.match(/\$(\d+\.?\d*)/);
+        if (dollarMatch) {
+          parsed.entry = `$${dollarMatch[1]}`;
+        }
+      }
+      
+      // Check for target
+      if (!parsed.target && (lowerLine.includes('target') || lowerLine.includes('take profit') || lowerLine.includes('tp'))) {
+        const dollarMatch = line.match(/\$(\d+\.?\d*)/);
+        if (dollarMatch) {
+          parsed.target = `$${dollarMatch[1]}`;
+        }
+      }
+      
+      // Check for stop
+      if (!parsed.stop && (lowerLine.includes('stop') || lowerLine.includes('stop loss') || lowerLine.includes('sl'))) {
+        const dollarMatch = line.match(/\$(\d+\.?\d*)/);
+        if (dollarMatch) {
+          parsed.stop = `$${dollarMatch[1]}`;
+        }
+      }
+    }
+  }
+
+  // Debug logging (can be removed in production)
+  if (!parsed.entry || !parsed.target || !parsed.stop) {
+    console.log(`[Thesis Parse] Missing values for ${ticker || 'unknown'}:`, {
+      entry: parsed.entry,
+      target: parsed.target,
+      stop: parsed.stop,
+      support: parsed.support,
+      resistance: parsed.resistance,
+      textPreview: text.substring(0, 200),
+    });
   }
 
   // Extract reasoning - look for "reasoning", "because", or take first sentence
@@ -180,13 +266,18 @@ function parseThesisResponse(text: string): Partial<ThesisData> {
 }
 
 async function generateThesisForTicker(ticker: string): Promise<ThesisData> {
-  const prompt = `Give me a concise day trading thesis for ${ticker} today. Include: 
-1. VERDICT (BUY/SELL/WAIT)
-2. Key levels (support/resistance)
-3. Entry zone
-4. Target
-5. Stop loss
-6. One-line reasoning
+  const prompt = `Give me a concise day trading thesis for ${ticker} today. You MUST format your response exactly as follows:
+
+VERDICT: [BUY/SELL/WAIT]
+Support: $[price]
+Resistance: $[price]
+Entry: $[price]
+Target: $[price]
+Stop: $[price]
+Reasoning: [one sentence explanation]
+
+IMPORTANT: You must provide Entry, Target, and Stop prices. If VERDICT is BUY, Entry should be near support, Target should be near resistance, and Stop should be below support. If VERDICT is SELL, Entry should be near resistance, Target should be near support, and Stop should be above resistance. If VERDICT is WAIT, provide reasonable levels based on current price action.
+
 Keep it under 100 words.`;
 
   try {
@@ -229,7 +320,35 @@ Keep it under 100 words.`;
     }
 
     // Parse the response
-    const parsed = parseThesisResponse(fullText);
+    const parsed = parseThesisResponse(fullText, ticker);
+
+    // Fallback: If Entry/Target/Stop are missing but Support/Resistance exist, calculate them
+    if ((!parsed.entry || !parsed.target || !parsed.stop) && parsed.support && parsed.resistance) {
+      const supportNum = parseFloat(parsed.support.replace('$', ''));
+      const resistanceNum = parseFloat(parsed.resistance.replace('$', ''));
+      
+      if (!isNaN(supportNum) && !isNaN(resistanceNum)) {
+        const verdict = parsed.verdict || 'WAIT';
+        
+        if (verdict === 'BUY') {
+          // For BUY: Entry near support, Target near resistance, Stop below support
+          if (!parsed.entry) parsed.entry = `$${(supportNum + (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
+          if (!parsed.target) parsed.target = `$${(resistanceNum - (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
+          if (!parsed.stop) parsed.stop = `$${(supportNum - (resistanceNum - supportNum) * 0.05).toFixed(2)}`;
+        } else if (verdict === 'SELL') {
+          // For SELL: Entry near resistance, Target near support, Stop above resistance
+          if (!parsed.entry) parsed.entry = `$${(resistanceNum - (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
+          if (!parsed.target) parsed.target = `$${(supportNum + (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
+          if (!parsed.stop) parsed.stop = `$${(resistanceNum + (resistanceNum - supportNum) * 0.05).toFixed(2)}`;
+        } else {
+          // For WAIT/HOLD: Use midpoint logic
+          const midpoint = (supportNum + resistanceNum) / 2;
+          if (!parsed.entry) parsed.entry = `$${midpoint.toFixed(2)}`;
+          if (!parsed.target) parsed.target = `$${resistanceNum.toFixed(2)}`;
+          if (!parsed.stop) parsed.stop = `$${supportNum.toFixed(2)}`;
+        }
+      }
+    }
 
     return {
       ticker,

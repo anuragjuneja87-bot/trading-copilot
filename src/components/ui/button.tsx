@@ -17,11 +17,11 @@ const buttonVariants = cva(
         success: 'bg-bull text-white hover:bg-bull-light',
       },
       size: {
-        default: 'h-10 px-4 py-2',
-        sm: 'h-9 rounded-md px-3',
-        lg: 'h-11 rounded-md px-8',
-        xl: 'h-12 rounded-lg px-10 text-base',
-        icon: 'h-10 w-10',
+        default: 'h-10 px-4 py-2 min-h-[44px]',
+        sm: 'h-9 rounded-md px-3 min-h-[44px] lg:min-h-[36px]',
+        lg: 'h-11 rounded-md px-8 min-h-[48px]',
+        xl: 'h-12 rounded-lg px-10 text-base min-h-[48px]',
+        icon: 'h-10 w-10 min-h-[44px] min-w-[44px]',
       },
     },
     defaultVariants: {
