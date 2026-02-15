@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from '@/lib/auth';
 import type { DarkPoolPrint, DarkPoolStats, PriceLevel } from '@/types/darkpool';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
@@ -233,18 +232,7 @@ function getEmptyStats(): DarkPoolStats {
 
 export async function GET(request: NextRequest) {
   try {
-    // Allow public access for the free dark pool page
-    const isPublicRequest = request.headers.get('x-internal-public') === 'true';
-    if (!isPublicRequest) {
-      // Check authentication for protected requests
-      const session = await getServerSession();
-      if (!session?.user) {
-        return NextResponse.json(
-          { success: false, error: 'Unauthorized' },
-          { status: 401 }
-        );
-      }
-    }
+    // No auth required for personal use
 
     const { searchParams } = new URL(request.url);
     const tickerFilter = searchParams.get('ticker'); // Single ticker

@@ -163,12 +163,9 @@ export const aiAPI = {
     return response.data!;
   },
 
-  // Get morning briefing (cached)
+  // Get morning briefing (stub - API deleted for personal use)
   getBriefing: async (): Promise<string> => {
-    const response = await fetchAPI<APIResponse<{ briefing: string }>>(
-      '/api/ai/briefing'
-    );
-    return response.data?.briefing || '';
+    return '';
   },
 
   // Stream response (for real-time typing effect)
@@ -204,34 +201,18 @@ export const aiAPI = {
 // ═══════════════════════════════════════════════════════════════
 
 export const userAPI = {
-  // Get user profile and config
+  // Stub - user APIs deleted for personal use (using zustand instead)
   getProfile: async () => {
-    const response = await fetchAPI<APIResponse<any>>('/api/user/profile');
-    return response.data;
+    return null;
   },
-
-  // Get/update watchlist
   getWatchlist: async (): Promise<string[]> => {
-    const response = await fetchAPI<APIResponse<{ watchlist: string[] }>>(
-      '/api/user/watchlist'
-    );
-    return response.data?.watchlist || [];
+    return [];
   },
-
-  updateWatchlist: async (tickers: string[]): Promise<void> => {
-    await fetchAPI('/api/user/watchlist', {
-      method: 'PUT',
-      body: JSON.stringify({ tickers }),
-    });
+  updateWatchlist: async (): Promise<void> => {
+    // No-op - watchlist managed via zustand
   },
-
-  // Track question usage
   trackQuestion: async (): Promise<{ remaining: number; limit: number }> => {
-    const response = await fetchAPI<APIResponse<{ remaining: number; limit: number }>>(
-      '/api/user/questions',
-      { method: 'POST' }
-    );
-    return response.data!;
+    return { remaining: 999, limit: 999 };
   },
 };
 

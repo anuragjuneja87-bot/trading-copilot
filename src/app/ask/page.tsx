@@ -67,19 +67,7 @@ export default function AskPage() {
   const animationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const { messages, addMessage, updateMessage, clearMessages } = useChatStore();
-  const { dailyQuestionsUsed, incrementQuestionsUsed, tier } = useUserStore();
-
-  // Get watchlist
-  const { data: watchlistData } = useQuery({
-    queryKey: ['watchlist'],
-    queryFn: async () => {
-      const res = await fetch('/api/user/watchlist');
-      const data = await res.json();
-      return data.data;
-    },
-  });
-
-  const watchlist = watchlistData?.watchlist?.map((item: any) => item.ticker) || [];
+  const { dailyQuestionsUsed, incrementQuestionsUsed, tier, watchlist } = useUserStore();
 
   // Load analysis depth preference from localStorage after mount (client-only)
   useEffect(() => {
@@ -547,10 +535,10 @@ export default function AskPage() {
         {/* Left Sidebar */}
         <div
           className={`
-            hidden lg:block w-[240px] flex-shrink-0 border-r border-[rgba(255,255,255,0.04)]
+            hidden lg:block flex-shrink-0 border-r border-[rgba(255,255,255,0.04)] overflow-hidden
             ${leftSidebarOpen ? 'block' : ''}
           `}
-          style={{ background: '#060810' }}
+          style={{ background: '#060810', width: '240px', maxWidth: '240px' }}
         >
           <MarketContextSidebar watchlist={watchlist} onTickerClick={handleTickerClick} />
         </div>

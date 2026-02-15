@@ -33,7 +33,7 @@ export const useUserStore = create<UserState>()(
   persist(
     (set) => ({
       isAuthenticated: false,
-      tier: 'free',
+      tier: 'pro', // Personal use gets full access
       watchlist: ['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA'],
       dailyQuestionsUsed: 0,
       

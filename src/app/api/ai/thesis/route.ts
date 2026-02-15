@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from '@/lib/auth';
 
 // Databricks configuration
 const DATABRICKS_HOST = process.env.DATABRICKS_HOST;
@@ -367,14 +366,7 @@ Keep it under 100 words.`;
 
 export async function POST(request: NextRequest) {
   try {
-    // Check authentication
-    const session = await getServerSession();
-    if (!session?.user) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+    // No auth required for personal use
 
     const { tickers } = await request.json();
 

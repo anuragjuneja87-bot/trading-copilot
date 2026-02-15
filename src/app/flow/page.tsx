@@ -13,12 +13,10 @@ import type { EnhancedFlowStats } from '@/types/flow';
 import { 
   BarChart3, 
   RefreshCw,
-  Lock,
   TrendingUp,
   TrendingDown,
   Flame,
   Zap,
-  Clock
 } from 'lucide-react';
 
 // Filter presets
@@ -35,12 +33,11 @@ const POPULAR_TICKERS = ['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA', 'AMD', 'META', 'A
 export default function FlowPage() {
   const [activePreset, setActivePreset] = useState('all');
   const [minPremium, setMinPremium] = useState(10000);
-  const [selectedTickers, setSelectedTickers] = useState<string[]>(['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA']);
+  const [selectedTickers, setSelectedTickers] = useState<string[]>(['SPY']);
   const [tickerInput, setTickerInput] = useState('');
   const [demoMode, setDemoMode] = useState(false);
   
-  const tier = useUserStore((s) => s.tier);
-  const isDelayed = tier === 'free';
+  // Personal use - always pro tier, no delays
 
   // Build filters based on preset
   const filters = useMemo(() => {
@@ -58,7 +55,7 @@ export default function FlowPage() {
     return f;
   }, [activePreset, minPremium, selectedTickers]);
 
-  const { data: flowData, isLoading, refetch, dataUpdatedAt } = useOptionsFlow(filters);
+  const { data: flowData, isLoading, error, refetch, dataUpdatedAt } = useOptionsFlow(filters);
   const { data: regime } = useRegime();
 
   // Extract flow and stats
@@ -75,15 +72,17 @@ export default function FlowPage() {
     return flowData.data.stats as EnhancedFlowStats;
   }, [flowData]);
 
-  // Auto-detect empty data
+  // Auto-detect empty data or API errors
   const isDataEmpty = !isLoading && (!flow || flow.length === 0) && !flowStats;
+  const hasError = !!error;
 
   useEffect(() => {
-    if (isDataEmpty && !demoMode) {
-      const timer = setTimeout(() => setDemoMode(true), 5000);
+    // Auto-enable demo mode if API fails or data is empty after 3 seconds
+    if ((hasError || isDataEmpty) && !demoMode) {
+      const timer = setTimeout(() => setDemoMode(true), 3000);
       return () => clearTimeout(timer);
     }
-  }, [isDataEmpty, demoMode]);
+  }, [hasError, isDataEmpty, demoMode]);
 
   // Mock data for demo mode
   const mockData = useMemo(() => {
@@ -109,13 +108,6 @@ export default function FlowPage() {
                   style={{ fontFamily: "'Oxanium', monospace" }}>
                   Options Flow
                 </h1>
-                {isDelayed && (
-                  <span className="px-2 py-1 rounded text-[10px] font-bold"
-                    style={{ background: 'rgba(255,193,7,0.1)', color: '#ffc107', fontFamily: "'Oxanium', monospace" }}>
-                    <Clock className="h-3 w-3 inline mr-1" />
-                    30 min delay
-                  </span>
-                )}
                 {demoMode && (
                   <span className="px-2 py-1 rounded text-[10px] font-bold"
                     style={{ background: 'rgba(255,193,7,0.2)', color: '#ffc107', fontFamily: "'Oxanium', monospace" }}>
@@ -186,17 +178,6 @@ export default function FlowPage() {
                 Refresh
               </button>
               
-              {/* Upgrade CTA for free users */}
-              {isDelayed && (
-                <Link
-                  href="/pricing"
-                  className="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all hover:brightness-110 inline-flex items-center gap-1.5"
-                  style={{ background: '#00e5ff', color: '#0a0f1a' }}
-                >
-                  <Lock className="h-3 w-3" />
-                  Get Real-Time
-                </Link>
-              )}
             </div>
           </div>
 
@@ -226,14 +207,16 @@ export default function FlowPage() {
           )}
 
           {/* Empty state with demo mode prompt */}
-          {isDataEmpty && !demoMode && !isLoading && (
+          {(isDataEmpty || hasError) && !demoMode && !isLoading && (
             <div className="mb-4 flex items-center justify-between px-4 py-3 rounded-lg"
               style={{
                 background: 'rgba(0,229,255,0.05)',
                 border: '1px solid rgba(0,229,255,0.1)',
               }}>
               <span className="text-[11px] text-[#8b99b0]">
-                Market is currently closed. Want to explore with demo data?
+                {hasError 
+                  ? 'API connection failed. Want to explore with demo data?'
+                  : 'Market is currently closed. Want to explore with demo data?'}
               </span>
               <button
                 onClick={() => setDemoMode(true)}
@@ -539,11 +522,6 @@ export default function FlowPage() {
                 <span className="text-xs text-[#4a6070]">
                   {Array.isArray(displayFlow) ? displayFlow.length : 0} trades shown • Last updated {getRelativeTime(new Date(dataUpdatedAt))}
                 </span>
-                {isDelayed && (
-                  <Link href="/pricing" className="text-xs text-[#00e5ff] hover:underline">
-                    Upgrade for real-time data →
-                  </Link>
-                )}
               </div>
             )}
           </div>

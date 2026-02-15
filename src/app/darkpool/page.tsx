@@ -30,7 +30,7 @@ const TIME_OPTIONS = [
 ];
 
 export default function DarkPoolPage() {
-  const [selectedTickers, setSelectedTickers] = useState<string[]>(['SPY', 'NVDA']);
+  const [selectedTickers, setSelectedTickers] = useState<string[]>(['SPY']);
   const [tickerInput, setTickerInput] = useState('');
   const [activePreset, setActivePreset] = useState('all');
   const [timeWindow, setTimeWindow] = useState('day');

@@ -1,13 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useCallback } from 'react';
+import { useEffect } from 'react';
 import { api } from '@/lib/api';
-import { 
-  onSocketEvent, 
-  subscribeToPrices, 
-  unsubscribeFromPrices,
-  startPolling,
-  stopPolling 
-} from '@/lib/socket';
 import { useUserStore, useMarketStore } from '@/stores';
 import { TIER_CONFIG } from '@/types';
 import type { Price, OptionsFlow, NewsItem, RegimeData, FlowFilters } from '@/types';
@@ -45,32 +38,7 @@ export function usePrices(tickers: string[]) {
     enabled: tickers.length > 0,
   });
 
-  // Subscribe to real-time updates
-  useEffect(() => {
-    if (!tickers.length) return;
-
-    // WebSocket subscription
-    subscribeToPrices(tickers);
-
-    // Listen for real-time updates
-    const unsubscribe = onSocketEvent('price:update', (data) => {
-      const prices = data as Price[];
-      queryClient.setQueryData<Price[]>(
-        queryKeys.prices(tickers),
-        (old) => {
-          if (!old) return prices;
-          const priceMap = new Map(old.map((p) => [p.ticker, p]));
-          prices.forEach((p) => priceMap.set(p.ticker, p));
-          return Array.from(priceMap.values());
-        }
-      );
-    });
-
-    return () => {
-      unsubscribeFromPrices(tickers);
-      unsubscribe();
-    };
-  }, [tickers.join(','), queryClient]);
+  // Real-time updates removed - using polling via refetchInterval instead
 
   return query;
 }
@@ -90,12 +58,16 @@ export function useOptionsFlow(filters?: {
   minPremium?: number;
   callPut?: string;
   limit?: number;
+  unusual?: boolean;
+  sweeps?: boolean;
 }) {
   const params = new URLSearchParams();
   if (filters?.tickers) params.set('tickers', filters.tickers);
   if (filters?.minPremium) params.set('minPremium', filters.minPremium.toString());
   if (filters?.callPut && filters.callPut !== 'all') params.set('callPut', filters.callPut);
   if (filters?.limit) params.set('limit', filters.limit.toString());
+  if (filters?.unusual) params.set('unusual', 'true');
+  if (filters?.sweeps) params.set('sweeps', 'true');
 
   return useQuery({
     queryKey: ['optionsFlow', filters],
@@ -129,13 +101,7 @@ export function useRegime() {
     refetchInterval: 60 * 1000,
   });
 
-  // Listen for regime changes
-  useEffect(() => {
-    const unsubscribe = onSocketEvent('regime:change', (data) => {
-      queryClient.setQueryData(queryKeys.regime, data);
-    });
-    return unsubscribe;
-  }, [queryClient]);
+  // Real-time regime updates removed - using polling via refetchInterval instead
 
   return query;
 }
@@ -181,20 +147,7 @@ export function useNews(options?: {
     refetchInterval: 2 * 60 * 1000, // 2 minutes
   });
 
-  // Real-time news updates
-  useEffect(() => {
-    const unsubscribe = onSocketEvent('news:new', (data) => {
-      queryClient.setQueryData<NewsItem[]>(
-        queryKeys.news(options),
-        (old) => {
-          if (!old) return [data as NewsItem];
-          return [data as NewsItem, ...old].slice(0, 50);
-        }
-      );
-    });
-
-    return unsubscribe;
-  }, [options, queryClient]);
+  // Real-time news updates removed - using polling via refetchInterval instead
 
   return query;
 }
@@ -204,11 +157,8 @@ export function useNews(options?: {
 // ═══════════════════════════════════════════════════════════════
 
 export function useMorningBriefing() {
-  return useQuery({
-    queryKey: queryKeys.briefing,
-    queryFn: api.ai.getBriefing,
-    staleTime: 30 * 60 * 1000, // 30 minutes
-  });
+  // Stub - briefing API deleted for personal use
+  return { data: null, isLoading: false, error: null };
 }
 
 export function useAskAI() {
@@ -236,54 +186,24 @@ export function useAskAI() {
 // ═══════════════════════════════════════════════════════════════
 
 export function useWatchlist() {
-  const localWatchlist = useUserStore((s) => s.watchlist);
-  const setWatchlist = useUserStore((s) => s.setWatchlist);
-
-  const query = useQuery({
-    queryKey: queryKeys.watchlist,
-    queryFn: api.user.getWatchlist,
-    staleTime: 5 * 60 * 1000,
-    // Sync with local state on success
-    select: (data) => {
-      if (data.length > 0) {
-        setWatchlist(data);
-      }
-      return data;
-    },
-  });
-
-  // Return local watchlist if API hasn't loaded yet
+  // Use zustand directly - no API needed for personal use
+  const watchlist = useUserStore((s) => s.watchlist);
   return {
-    ...query,
-    data: query.data || localWatchlist,
+    data: watchlist.map(ticker => ({ ticker })),
+    isLoading: false,
+    error: null,
   };
 }
 
 export function useUpdateWatchlist() {
-  const queryClient = useQueryClient();
-  const setWatchlist = useUserStore((s) => s.setWatchlist);
-
-  return useMutation({
-    mutationFn: api.user.updateWatchlist,
-    onMutate: async (tickers) => {
-      // Optimistic update
-      await queryClient.cancelQueries({ queryKey: queryKeys.watchlist });
-      const previous = queryClient.getQueryData(queryKeys.watchlist);
-      queryClient.setQueryData(queryKeys.watchlist, tickers);
-      setWatchlist(tickers);
-      return { previous };
+  // Use zustand directly - no API needed for personal use
+  const { addToWatchlist, removeFromWatchlist } = useUserStore();
+  return {
+    mutate: ({ ticker, action }: { ticker: string; action: 'add' | 'remove' }) => {
+      if (action === 'add') addToWatchlist(ticker);
+      else removeFromWatchlist(ticker);
     },
-    onError: (err, variables, context) => {
-      // Rollback on error
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.watchlist, context.previous);
-        setWatchlist(context.previous as string[]);
-      }
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.watchlist });
-    },
-  });
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════

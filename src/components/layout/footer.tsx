@@ -3,10 +3,10 @@ import { Zap, Twitter, Mail } from 'lucide-react';
 
 const footerLinks = {
   product: [
+    { name: 'War Room', href: '/ask' },
     { name: 'Options Flow', href: '/flow' },
-    { name: 'Ask AI', href: '/ask' },
-    { name: 'Pricing', href: '/pricing' },
-    { name: 'Dashboard', href: '/app' },
+    { name: 'Dark Pool', href: '/darkpool' },
+    { name: 'Gamma Levels', href: '/levels' },
   ],
   legal: [
     { name: 'Privacy Policy', href: '/privacy' },

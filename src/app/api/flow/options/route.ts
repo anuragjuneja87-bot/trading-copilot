@@ -181,6 +181,8 @@ export async function GET(request: NextRequest) {
     const minPremium = parseInt(searchParams.get('minPremium') || '0');
     const callPut = searchParams.get('callPut') || 'all';
     const limit = Math.min(parseInt(searchParams.get('limit') || '100'), 200);
+    const filterUnusual = searchParams.get('unusual') === 'true';
+    const filterSweeps = searchParams.get('sweeps') === 'true';
 
     if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
       return NextResponse.json(
@@ -206,25 +208,37 @@ export async function GET(request: NextRequest) {
         
         if (callPut === 'all') {
           // Fetch calls and puts separately, then combine
-          const [callsRes, putsRes] = await Promise.all([
-            fetch(`https://api.polygon.io/v3/snapshot/options/${underlying}?limit=100&contract_type=call&apiKey=${POLYGON_API_KEY}`, {
-              next: { revalidate: 10 },
-              signal: AbortSignal.timeout(30000),
-            }),
-            fetch(`https://api.polygon.io/v3/snapshot/options/${underlying}?limit=100&contract_type=put&apiKey=${POLYGON_API_KEY}`, {
-              next: { revalidate: 10 },
-              signal: AbortSignal.timeout(30000),
-            }),
-          ]);
+          let callsRes: Response | null = null;
+          let putsRes: Response | null = null;
           
-          if (!callsRes.ok && !putsRes.ok) {
-            const errorText = callsRes.ok ? await putsRes.text() : await callsRes.text();
+          try {
+            [callsRes, putsRes] = await Promise.all([
+              fetch(`https://api.polygon.io/v3/snapshot/options/${underlying}?limit=100&contract_type=call&apiKey=${POLYGON_API_KEY}`, {
+                next: { revalidate: 10 },
+                signal: AbortSignal.timeout(15000), // Reduced to 15s
+              }),
+              fetch(`https://api.polygon.io/v3/snapshot/options/${underlying}?limit=100&contract_type=put&apiKey=${POLYGON_API_KEY}`, {
+                next: { revalidate: 10 },
+                signal: AbortSignal.timeout(15000), // Reduced to 15s
+              }),
+            ]);
+          } catch (fetchError: any) {
+            if (fetchError.name === 'AbortError' || fetchError.code === 'UND_ERR_CONNECT_TIMEOUT') {
+              errors.push(`${underlying}: Connection timeout - API may be unavailable`);
+            } else {
+              errors.push(`${underlying}: Fetch error - ${fetchError.message?.substring(0, 100) || 'Unknown error'}`);
+            }
+            continue;
+          }
+          
+          if (!callsRes?.ok && !putsRes?.ok) {
+            const errorText = callsRes?.ok ? (await putsRes?.text().catch(() => 'Unknown')) : (await callsRes?.text().catch(() => 'Unknown'));
             errors.push(`${underlying}: Both snapshots failed - ${errorText.substring(0, 100)}`);
             continue;
           }
           
-          const callsData = callsRes.ok ? await callsRes.json() : { results: [] };
-          const putsData = putsRes.ok ? await putsRes.json() : { results: [] };
+          const callsData = callsRes?.ok ? await callsRes.json().catch(() => ({ results: [] })) : { results: [] };
+          const putsData = putsRes?.ok ? await putsRes.json().catch(() => ({ results: [] })) : { results: [] };
           
           // Combine results
           snapshotData = {
@@ -247,18 +261,28 @@ export async function GET(request: NextRequest) {
             snapshotUrl.searchParams.set('contract_type', 'put');
           }
 
-          const snapshotRes = await fetch(snapshotUrl.toString(), { 
-            next: { revalidate: 10 },
-            signal: AbortSignal.timeout(30000),
-          });
+          let snapshotRes: Response;
+          try {
+            snapshotRes = await fetch(snapshotUrl.toString(), { 
+              next: { revalidate: 10 },
+              signal: AbortSignal.timeout(15000), // Reduced to 15s
+            });
+          } catch (fetchError: any) {
+            if (fetchError.name === 'AbortError' || fetchError.code === 'UND_ERR_CONNECT_TIMEOUT') {
+              errors.push(`${underlying}: Connection timeout - API may be unavailable`);
+            } else {
+              errors.push(`${underlying}: Fetch error - ${fetchError.message?.substring(0, 100) || 'Unknown error'}`);
+            }
+            continue;
+          }
           
           if (!snapshotRes.ok) {
-            const errorText = await snapshotRes.text();
+            const errorText = await snapshotRes.text().catch(() => 'Unknown error');
             errors.push(`${underlying}: Snapshot failed ${snapshotRes.status} - ${errorText.substring(0, 100)}`);
             continue;
           }
-
-          snapshotData = await snapshotRes.json();
+          
+          snapshotData = await snapshotRes.json().catch(() => ({ results: [] }));
         }
         
         if (!snapshotData.results || !Array.isArray(snapshotData.results)) {
@@ -585,8 +609,17 @@ export async function GET(request: NextRequest) {
       trade.heatScore = Math.min(10, Math.max(1, Math.round(heatScore)));
     });
 
+    // Apply filters (unusual, sweeps)
+    let filteredTrades = allTrades;
+    if (filterUnusual) {
+      filteredTrades = filteredTrades.filter(t => t.isUnusual);
+    }
+    if (filterSweeps) {
+      filteredTrades = filteredTrades.filter(t => t.isSweep);
+    }
+
     // Limit results
-    const limitedTrades = allTrades.slice(0, limit);
+    const limitedTrades = filteredTrades.slice(0, limit);
 
     // Calculate enhanced stats
     const enhancedStats = calculateEnhancedStats(allTrades);
@@ -638,6 +671,7 @@ export async function GET(request: NextRequest) {
 
     console.log(`[Flow API] Returning ${limitedTrades.length} trades from ${allTrades.length} total`);
 
+    // Return partial success even if some tickers failed
     return NextResponse.json({
       success: true,
       data: {
@@ -657,10 +691,43 @@ export async function GET(request: NextRequest) {
       },
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[Flow API] Error:', error);
+    
+    // If we have any trades collected, return partial success
+    if (allTrades && allTrades.length > 0) {
+      const partialStats = calculateEnhancedStats(allTrades);
+      const partialLimited = allTrades.slice(0, limit);
+      
+      return NextResponse.json({
+        success: true,
+        data: {
+          flow: partialLimited,
+          stats: partialStats,
+          meta: {
+            total: allTrades.length,
+            returned: partialLimited.length,
+            tickers: tickers.slice(0, 5),
+            errors: [...errors, `Partial data: ${error.message?.substring(0, 100) || 'Unknown error'}`],
+            timestamp: new Date().toISOString(),
+          }
+        }
+      }, {
+        headers: {
+          'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=10',
+        },
+      });
+    }
+    
+    // Only return error if we have no data at all
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Internal server error' },
+      { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Internal server error',
+        details: error?.code === 'UND_ERR_CONNECT_TIMEOUT' 
+          ? 'Polygon API connection timeout - API may be unavailable. Try demo mode.' 
+          : undefined
+      },
       { status: 500 }
     );
   }

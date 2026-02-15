@@ -298,10 +298,6 @@ export function SymbolHub({ symbol, onBack, onAskAI }: SymbolHubProps) {
             {/* NEWS SPOKE */}
             <div className="rounded-xl p-4"
               style={{ background: COLORS.cardBg, border: `1px solid ${COLORS.cardBorder}` }}>
-              <div className="text-[9px] uppercase tracking-wider mb-3"
-                style={{ color: '#2a4a5a', fontFamily: "'Oxanium', monospace", fontWeight: 700 }}>
-                NEWS &amp; SENTIMENT
-              </div>
               <SpokeNews
                 articles={Array.isArray(news) ? news : (news?.articles || news || [])}
                 sentiment={null}
