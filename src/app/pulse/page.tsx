@@ -1,16 +1,43 @@
 'use client';
 
+import { useQuery } from '@tanstack/react-query';
 import { Navbar, Footer } from '@/components/layout';
 import { MarketOverviewBar } from '@/components/pulse/market-overview-bar';
 import { FearGreedGauge } from '@/components/pulse/fear-greed-gauge';
 import { UnusualOptionsActivity } from '@/components/pulse/unusual-options-activity';
 import { KeyLevelsTeaser } from '@/components/pulse/key-levels-teaser';
 import { NewsSentiment } from '@/components/pulse/news-sentiment';
+import { AIInsightBanner } from '@/components/ai/ai-insight-banner';
+import { useAIInsight } from '@/hooks/use-ai-insight';
 import { Button } from '@/components/ui/button';
-import { MessageSquare, ArrowRight } from 'lucide-react';
+import { MessageSquare, ArrowRight, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 
 export default function PulsePage() {
+  // Fetch news data for AI insight
+  const { data: newsData, isLoading: newsLoading, refetch: refetchNews } = useQuery({
+    queryKey: ['news-sentiment', 'pulse'],
+    queryFn: async () => {
+      const res = await fetch('/api/news?limit=10');
+      const data = await res.json();
+      if (!data.success) throw new Error('Failed to fetch news');
+      return data.data;
+    },
+    refetchInterval: 60000,
+    staleTime: 30000,
+  });
+
+  // AI Insight for news
+  const aiInsight = useAIInsight({
+    endpoint: '/api/ai/news-insight',
+    payload: {
+      marketMood: newsData?.marketMood || {},
+      tickerSentiments: newsData?.tickerSentiments || [],
+      articles: newsData?.articles?.slice(0, 10) || [],
+    },
+    enabled: !!newsData?.marketMood,
+  });
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -19,6 +46,19 @@ export default function PulsePage() {
       <MarketOverviewBar />
 
       <main className="max-w-7xl mx-auto px-4 lg:px-8 py-8 space-y-8">
+        {/* AI Insight Banner */}
+        {newsData?.marketMood && (
+          <AIInsightBanner
+            insight={aiInsight.insight}
+            isLoading={aiInsight.isLoading}
+            error={aiInsight.error}
+            processingTime={aiInsight.processingTime}
+            onRefresh={aiInsight.refresh}
+            regime={newsData.marketMood.overall}
+            title="MARKET SENTIMENT"
+          />
+        )}
+
         {/* Fear & Greed Gauge */}
         <FearGreedGauge />
 

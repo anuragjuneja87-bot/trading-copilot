@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect } from 'react';
 import { ToastContainer } from '@/components/ui/toast';
+import { WebSocketProvider } from '@/lib/websocket';
 
 function makeQueryClient() {
   return new QueryClient({
@@ -30,9 +31,15 @@ function getQueryClient() {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const queryClient = getQueryClient();
+  
+  // Use Massive.com API key (same key works for REST and WebSocket)
+  const apiKey = process.env.NEXT_PUBLIC_POLYGON_API_KEY || process.env.NEXT_PUBLIC_MASSIVE_API_KEY || '';
+
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
+      <WebSocketProvider apiKey={apiKey}>
+        {children}
+      </WebSocketProvider>
       <ToastContainer />
       {process.env.NODE_ENV === 'development' && (
         <ReactQueryDevtools initialIsOpen={false} position="bottom" />

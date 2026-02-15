@@ -10,6 +10,8 @@ import { DPBubbleChart } from '@/components/darkpool/dp-bubble-chart';
 import { DPAccumulationHeatmap } from '@/components/darkpool/dp-accumulation-heatmap';
 import { DPSizeDistribution } from '@/components/darkpool/dp-size-distribution';
 import { DPPrintsTable } from '@/components/darkpool/dp-prints-table';
+import { AIInsightBanner } from '@/components/ai/ai-insight-banner';
+import { useAIInsight } from '@/hooks/use-ai-insight';
 import { COLORS } from '@/lib/echarts-theme';
 import { RefreshCw } from 'lucide-react';
 
@@ -90,6 +92,17 @@ export default function DarkPoolPage() {
     if (filteredPrints.length === 0) return undefined;
     return filteredPrints[0]?.price;
   }, [filteredPrints]);
+
+  // AI Insight
+  const aiInsight = useAIInsight({
+    endpoint: '/api/ai/darkpool-insight',
+    payload: {
+      stats: stats || {},
+      prints: filteredPrints?.slice(0, 20) || [],
+      ticker: selectedTickers.length === 1 ? selectedTickers[0] : undefined,
+    },
+    enabled: !!stats && stats.printCount > 0 && !demoMode,
+  });
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: '#060810' }}>
@@ -215,6 +228,21 @@ export default function DarkPoolPage() {
               >
                 Enable Demo Mode
               </button>
+            </div>
+          )}
+
+          {/* AI Insight Banner */}
+          {stats && stats.printCount > 0 && !demoMode && (
+            <div className="mb-4">
+              <AIInsightBanner
+                insight={aiInsight.insight}
+                isLoading={aiInsight.isLoading}
+                error={aiInsight.error}
+                processingTime={aiInsight.processingTime}
+                onRefresh={aiInsight.refresh}
+                regime={stats.regime}
+                title="DARK POOL INSIGHT"
+              />
             </div>
           )}
 

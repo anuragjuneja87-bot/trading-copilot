@@ -7,6 +7,8 @@ import { useOptionsFlow, useRegime } from '@/hooks';
 import { useUserStore } from '@/stores';
 import { formatCompactNumber, formatPercent, getRelativeTime, cn } from '@/lib/utils';
 import { FlowDashboard } from '@/components/flow/flow-dashboard';
+import { AIInsightBanner } from '@/components/ai/ai-insight-banner';
+import { useAIInsight } from '@/hooks/use-ai-insight';
 import { generateMockFlow } from '@/lib/mock-data';
 import { COLORS } from '@/lib/echarts-theme';
 import type { EnhancedFlowStats } from '@/types/flow';
@@ -93,6 +95,17 @@ export default function FlowPage() {
   // Use mock data when in demo mode
   const displayFlow = demoMode ? (mockData?.flow || []) : flow;
   const displayStats = demoMode ? (mockData?.stats || null) : flowStats;
+
+  // AI Insight
+  const aiInsight = useAIInsight({
+    endpoint: '/api/ai/flow-insight',
+    payload: {
+      stats: displayStats || {},
+      topTrades: displayFlow?.slice(0, 10) || [],
+      ticker: selectedTickers.length === 1 ? selectedTickers[0] : undefined,
+    },
+    enabled: !!displayStats && displayStats.tradeCount > 0 && !demoMode,
+  });
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: '#060810' }}>
@@ -225,6 +238,21 @@ export default function FlowPage() {
               >
                 Enable Demo Mode
               </button>
+            </div>
+          )}
+
+          {/* AI Insight Banner */}
+          {displayStats && displayStats.tradeCount > 0 && !demoMode && (
+            <div className="mb-4">
+              <AIInsightBanner
+                insight={aiInsight.insight}
+                isLoading={aiInsight.isLoading}
+                error={aiInsight.error}
+                processingTime={aiInsight.processingTime}
+                onRefresh={aiInsight.refresh}
+                regime={displayStats.regime}
+                title="FLOW INSIGHT"
+              />
             </div>
           )}
 

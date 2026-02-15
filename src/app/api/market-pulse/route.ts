@@ -14,10 +14,11 @@ const POLYGON_BASE_URL = 'https://api.polygon.io';
 // Core market tickers to always fetch
 const MARKET_TICKERS = ['SPY', 'QQQ', 'VIX', 'IWM', 'DIA'];
 
-// Popular tickers for movers
+// Popular tickers for movers - will fetch in ONE batch call
 const MOVERS_UNIVERSE = [
   'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'INTC',
   'JPM', 'BAC', 'GS', 'BA', 'CAT', 'DIS', 'NFLX', 'CRM', 'ORCL', 'PYPL',
+  'SPY', 'QQQ', 'IWM', 'DIA' // Include indices
 ];
 
 export async function GET(request: NextRequest) {
@@ -28,12 +29,17 @@ export async function GET(request: NextRequest) {
   try {
     console.log('=== MARKET PULSE API START ===', bypassCache ? '(bypassing cache)' : '');
 
-    // Fetch all data in parallel
-    const [marketData, moversData, newsData] = await Promise.all([
-      fetchMarketData(bypassCache),
-      fetchMovers(bypassCache),
+    // OPTIMIZATION: Fetch ALL tickers in ONE batch call instead of 19+ individual calls
+    const [batchData, newsData] = await Promise.all([
+      fetchBatchSnapshots(bypassCache),
       fetchTopNews(bypassCache),
     ]);
+
+    // Extract market data from batch
+    const marketData = extractMarketData(batchData);
+    
+    // Extract movers from batch
+    const moversData = extractMovers(batchData);
 
     // Calculate derived metrics
     const fearGreedIndex = calculateFearGreedIndex(marketData);
@@ -89,30 +95,139 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Fetch core market data (SPY, QQQ, VIX)
-async function fetchMarketData(bypassCache = false): Promise<MarketData> {
+// OPTIMIZED: Single batch call for ALL tickers
+async function fetchBatchSnapshots(bypassCache = false): Promise<Map<string, any>> {
+  const tickerMap = new Map<string, any>();
+  
+  try {
+    // Polygon batch snapshot endpoint - ONE call for all tickers
+    const tickersParam = MOVERS_UNIVERSE.join(',');
+    const url = `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${tickersParam}&apiKey=${POLYGON_API_KEY}`;
+    
+    const response = await fetch(url, {
+      next: bypassCache ? { revalidate: 0 } : { revalidate: 10 },
+      cache: bypassCache ? 'no-store' : 'default',
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const tickers = data.tickers || [];
+      
+      for (const tickerData of tickers) {
+        const ticker = tickerData.ticker;
+        if (ticker) {
+          tickerMap.set(ticker, tickerData);
+        }
+      }
+      
+      console.log(`[Market Pulse] Batch fetched ${tickerMap.size} tickers in ONE call`);
+    }
+  } catch (error) {
+    console.error('[Market Pulse] Batch fetch error:', error);
+  }
+
+  // Fetch VIX separately (it's an index, not in stock snapshot)
+  try {
+    const vixUrl = `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers/VIX?apiKey=${POLYGON_API_KEY}`;
+    const vixResponse = await fetch(vixUrl, {
+      next: bypassCache ? { revalidate: 0 } : { revalidate: 10 },
+      cache: bypassCache ? 'no-store' : 'default',
+    });
+    
+    if (vixResponse.ok) {
+      const vixData = await vixResponse.json();
+      if (vixData.ticker) {
+        tickerMap.set('VIX', vixData.ticker);
+      }
+    }
+  } catch (error) {
+    console.error('[Market Pulse] VIX fetch error:', error);
+  }
+
+  return tickerMap;
+}
+
+// Extract SPY, QQQ, VIX from batch data
+function extractMarketData(batchData: Map<string, any>): MarketData {
   const results: MarketData = {
     spy: null,
     qqq: null,
     vix: null,
   };
 
-  // Fetch snapshots for SPY and QQQ
-  const spyPromise = fetchTickerSnapshot('SPY', bypassCache);
-  const qqqPromise = fetchTickerSnapshot('QQQ', bypassCache);
-  const vixPromise = fetchVixData(bypassCache);
+  // Extract SPY
+  const spyData = batchData.get('SPY');
+  if (spyData) {
+    results.spy = parseTickerSnapshot('SPY', spyData);
+  }
 
-  const [spyResult, qqqResult, vixResult] = await Promise.all([
-    spyPromise,
-    qqqPromise,
-    vixPromise,
-  ]);
+  // Extract QQQ
+  const qqqData = batchData.get('QQQ');
+  if (qqqData) {
+    results.qqq = parseTickerSnapshot('QQQ', qqqData);
+  }
 
-  results.spy = spyResult;
-  results.qqq = qqqResult;
-  results.vix = vixResult;
+  // Extract VIX
+  const vixData = batchData.get('VIX');
+  if (vixData) {
+    const price = vixData.lastTrade?.p || vixData.day?.c || vixData.prevDay?.c || 0;
+    const prevClose = vixData.prevDay?.c || price;
+    const change = price - prevClose;
+    const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+
+    results.vix = {
+      value: Math.round(price * 100) / 100,
+      change: Math.round(change * 100) / 100,
+      changePercent: Math.round(changePercent * 100) / 100,
+      level: getVixLevel(price),
+    };
+  }
 
   return results;
+}
+
+// Parse ticker data into TickerSnapshot
+function parseTickerSnapshot(ticker: string, tickerData: any): TickerSnapshot | null {
+  if (!tickerData) return null;
+
+  const price = tickerData.lastTrade?.p || tickerData.day?.c || tickerData.prevDay?.c;
+  if (!price) return null;
+
+  const prevClose = tickerData.prevDay?.c || price;
+  const change = tickerData.todaysChange || price - prevClose;
+  const changePercent = tickerData.todaysChangePerc || (prevClose > 0 ? (change / prevClose) * 100 : 0);
+
+  const high = tickerData.day?.h || tickerData.prevDay?.h || price;
+  const low = tickerData.day?.l || tickerData.prevDay?.l || price;
+  const close = tickerData.prevDay?.c || price;
+
+  const pivot = (high + low + close) / 3;
+  const r1 = 2 * pivot - low;
+  const s1 = 2 * pivot - high;
+
+  const lastTradeTimestamp = tickerData.lastTrade?.t;
+  let lastTradeTime: Date | null = null;
+  if (lastTradeTimestamp) {
+    const timestampMs = lastTradeTimestamp / 1_000_000;
+    lastTradeTime = new Date(timestampMs);
+  }
+
+  return {
+    ticker,
+    price: Math.round(price * 100) / 100,
+    change: Math.round(change * 100) / 100,
+    changePercent: Math.round(changePercent * 100) / 100,
+    high: Math.round(high * 100) / 100,
+    low: Math.round(low * 100) / 100,
+    volume: tickerData.day?.v || 0,
+    lastTradeTime,
+    levels: {
+      r1: Math.round(r1 * 100) / 100,
+      s1: Math.round(s1 * 100) / 100,
+      pivot: Math.round(pivot * 100) / 100,
+    },
+  };
 }
 
 // Fetch ticker snapshot
@@ -252,45 +367,32 @@ function getVixLevel(vix: number): 'LOW' | 'NORMAL' | 'ELEVATED' | 'HIGH' | 'EXT
   return 'EXTREME';
 }
 
-// Fetch top movers
-async function fetchMovers(bypassCache = false): Promise<{ gainers: Mover[]; losers: Mover[] }> {
-  // Fetch snapshot for all tickers in parallel
-  const promises = MOVERS_UNIVERSE.map(async (ticker) => {
-    try {
-      const url = `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers/${ticker}?apiKey=${POLYGON_API_KEY}`;
-      const response = await fetch(url, {
-        next: bypassCache ? { revalidate: 0 } : { revalidate: 10 },
-        cache: bypassCache ? 'no-store' : 'default',
-      });
+// Extract movers from batch data
+function extractMovers(batchData: Map<string, any>): { gainers: Mover[]; losers: Mover[] } {
+  const movers: Mover[] = [];
 
-      if (response.ok) {
-        const data = await response.json();
-        const tickerData = data.ticker;
+  // Exclude indices from movers list
+  const excludeFromMovers = ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX'];
 
-        if (tickerData) {
-          const price = tickerData.lastTrade?.p || tickerData.day?.c || tickerData.prevDay?.c;
-          const change = tickerData.todaysChange || 0;
-          const changePercent = tickerData.todaysChangePerc || 0;
+  for (const [ticker, tickerData] of batchData.entries()) {
+    if (excludeFromMovers.includes(ticker)) continue;
 
-          return {
-            ticker,
-            price: Math.round(price * 100) / 100,
-            change: Math.round(change * 100) / 100,
-            changePercent: Math.round(changePercent * 100) / 100,
-          };
-        }
-      }
-    } catch (error) {
-      // Silent fail for individual tickers
-    }
-    return null;
-  });
+    const price = tickerData.lastTrade?.p || tickerData.day?.c || tickerData.prevDay?.c;
+    if (!price) continue;
 
-  const results = await Promise.all(promises);
-  const validResults = results.filter((r): r is NonNullable<typeof r> => r !== null);
+    const change = tickerData.todaysChange || 0;
+    const changePercent = tickerData.todaysChangePerc || 0;
+
+    movers.push({
+      ticker,
+      price: Math.round(price * 100) / 100,
+      change: Math.round(change * 100) / 100,
+      changePercent: Math.round(changePercent * 100) / 100,
+    });
+  }
 
   // Sort by change percent
-  const sorted = validResults.sort((a, b) => b.changePercent - a.changePercent);
+  const sorted = movers.sort((a, b) => b.changePercent - a.changePercent);
 
   return {
     gainers: sorted.filter((m) => m.changePercent > 0).slice(0, 5),
