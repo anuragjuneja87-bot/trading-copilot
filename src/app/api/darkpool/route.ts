@@ -233,13 +233,17 @@ function getEmptyStats(): DarkPoolStats {
 
 export async function GET(request: NextRequest) {
   try {
-    // Check authentication
-    const session = await getServerSession();
-    if (!session?.user) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      );
+    // Allow public access for the free dark pool page
+    const isPublicRequest = request.headers.get('x-internal-public') === 'true';
+    if (!isPublicRequest) {
+      // Check authentication for protected requests
+      const session = await getServerSession();
+      if (!session?.user) {
+        return NextResponse.json(
+          { success: false, error: 'Unauthorized' },
+          { status: 401 }
+        );
+      }
     }
 
     const { searchParams } = new URL(request.url);

@@ -26,6 +26,7 @@ export interface TickerSnapshot {
   high: number;
   low: number;
   volume: number;
+  lastTradeTime?: Date | null;
   levels: {
     r1: number;
     s1: number;

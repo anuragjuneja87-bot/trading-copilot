@@ -26,8 +26,20 @@ export async function GET(request: NextRequest) {
     // Fetch from Polygon snapshot API
     const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${tickers.join(',')}&apiKey=${POLYGON_API_KEY}`;
     
+    // Check if market is open to adjust cache strategy
+    const now = new Date();
+    const etTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const hour = etTime.getHours();
+    const minute = etTime.getMinutes();
+    const dayOfWeek = etTime.getDay();
+    const timeInMinutes = hour * 60 + minute;
+    const isMarketOpen = dayOfWeek >= 1 && dayOfWeek <= 5 && timeInMinutes >= 570 && timeInMinutes < 960;
+    
+    // Shorter cache during market hours, longer when closed
+    const revalidateTime = isMarketOpen ? 5 : 60; // 5s when open, 60s when closed
+    
     const response = await fetch(url, {
-      next: { revalidate: 5 }, // Cache for 5 seconds
+      next: { revalidate: revalidateTime },
     });
 
     if (!response.ok) {

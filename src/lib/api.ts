@@ -138,10 +138,11 @@ export const newsAPI = {
     if (options?.severity && options.severity !== 'all') params.set('severity', options.severity);
     if (options?.limit) params.set('limit', options.limit.toString());
 
-    const response = await fetchAPI<APIResponse<{ news: NewsItem[] }>>(
+    const response = await fetchAPI<APIResponse<{ articles: any[] }>>(
       `/api/news?${params}`
     );
-    return response.data?.news || [];
+    // The API returns { articles: [] }, not { news: [] }
+    return response.data?.articles || [];
   },
 };
 

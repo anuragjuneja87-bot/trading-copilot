@@ -22,6 +22,8 @@ import {
 const navigation = [
   { name: 'Dashboard', href: '/app' },
   { name: 'Options Flow', href: '/flow' },
+  { name: 'Dark Pool', href: '/darkpool' },
+  { name: 'Gamma Levels', href: '/levels' },
   { name: 'Ask AI', href: '/ask', badge: 'Free' },
   { name: 'Pricing', href: '/pricing' },
 ];

@@ -22,15 +22,17 @@ const MOVERS_UNIVERSE = [
 
 export async function GET(request: NextRequest) {
   const startTime = Date.now();
+  const { searchParams } = new URL(request.url);
+  const bypassCache = searchParams.get('t') !== null; // If timestamp param exists, bypass cache
 
   try {
-    console.log('=== MARKET PULSE API START ===');
+    console.log('=== MARKET PULSE API START ===', bypassCache ? '(bypassing cache)' : '');
 
     // Fetch all data in parallel
     const [marketData, moversData, newsData] = await Promise.all([
-      fetchMarketData(),
-      fetchMovers(),
-      fetchTopNews(),
+      fetchMarketData(bypassCache),
+      fetchMovers(bypassCache),
+      fetchTopNews(bypassCache),
     ]);
 
     // Calculate derived metrics
@@ -67,7 +69,11 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          // Reduce cache time to ensure fresh data, especially at market open
+          // If bypassing cache, set no-cache
+          'Cache-Control': bypassCache
+            ? 'no-cache, no-store, must-revalidate'
+            : 'public, s-maxage=15, stale-while-revalidate=30',
         },
       }
     );
@@ -84,7 +90,7 @@ export async function GET(request: NextRequest) {
 }
 
 // Fetch core market data (SPY, QQQ, VIX)
-async function fetchMarketData(): Promise<MarketData> {
+async function fetchMarketData(bypassCache = false): Promise<MarketData> {
   const results: MarketData = {
     spy: null,
     qqq: null,
@@ -92,9 +98,9 @@ async function fetchMarketData(): Promise<MarketData> {
   };
 
   // Fetch snapshots for SPY and QQQ
-  const spyPromise = fetchTickerSnapshot('SPY');
-  const qqqPromise = fetchTickerSnapshot('QQQ');
-  const vixPromise = fetchVixData();
+  const spyPromise = fetchTickerSnapshot('SPY', bypassCache);
+  const qqqPromise = fetchTickerSnapshot('QQQ', bypassCache);
+  const vixPromise = fetchVixData(bypassCache);
 
   const [spyResult, qqqResult, vixResult] = await Promise.all([
     spyPromise,
@@ -110,11 +116,24 @@ async function fetchMarketData(): Promise<MarketData> {
 }
 
 // Fetch ticker snapshot
-async function fetchTickerSnapshot(ticker: string): Promise<TickerSnapshot | null> {
+async function fetchTickerSnapshot(ticker: string, bypassCache = false): Promise<TickerSnapshot | null> {
   try {
     const url = `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers/${ticker}?apiKey=${POLYGON_API_KEY}`;
+    
+    // Check if market is open to adjust cache strategy
+    const now = new Date();
+    const etTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const hour = etTime.getHours();
+    const minute = etTime.getMinutes();
+    const dayOfWeek = etTime.getDay();
+    const timeInMinutes = hour * 60 + minute;
+    const isMarketOpen = dayOfWeek >= 1 && dayOfWeek <= 5 && timeInMinutes >= 570 && timeInMinutes < 960;
+    
+    const revalidateTime = isMarketOpen ? 5 : 30; // 5s when open, 30s when closed
+    
     const response = await fetch(url, {
-      next: { revalidate: 5 },
+      next: bypassCache ? { revalidate: 0 } : { revalidate: revalidateTime },
+      cache: bypassCache ? 'no-store' : 'default',
     });
 
     if (response.ok) {
@@ -127,6 +146,15 @@ async function fetchTickerSnapshot(ticker: string): Promise<TickerSnapshot | nul
         const change = tickerData.todaysChange || price - prevClose;
         const changePercent =
           tickerData.todaysChangePerc || (change / prevClose) * 100;
+
+        // Extract last trade timestamp (Polygon returns nanoseconds)
+        const lastTradeTimestamp = tickerData.lastTrade?.t;
+        let lastTradeTime: Date | null = null;
+        if (lastTradeTimestamp) {
+          // Convert nanoseconds to milliseconds
+          const timestampMs = lastTradeTimestamp / 1_000_000;
+          lastTradeTime = new Date(timestampMs);
+        }
 
         // Calculate levels
         const high = tickerData.day?.h || tickerData.prevDay?.h || price;
@@ -145,6 +173,7 @@ async function fetchTickerSnapshot(ticker: string): Promise<TickerSnapshot | nul
           high: Math.round(high * 100) / 100,
           low: Math.round(low * 100) / 100,
           volume: tickerData.day?.v || 0,
+          lastTradeTime, // Add timestamp
           levels: {
             r1: Math.round(r1 * 100) / 100,
             s1: Math.round(s1 * 100) / 100,
@@ -160,12 +189,13 @@ async function fetchTickerSnapshot(ticker: string): Promise<TickerSnapshot | nul
 }
 
 // Fetch VIX data
-async function fetchVixData(): Promise<VixData | null> {
+async function fetchVixData(bypassCache = false): Promise<VixData | null> {
   try {
     // Try snapshot first
     const url = `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers/VIX?apiKey=${POLYGON_API_KEY}`;
     const response = await fetch(url, {
-      next: { revalidate: 5 },
+      next: bypassCache ? { revalidate: 0 } : { revalidate: 5 },
+      cache: bypassCache ? 'no-store' : 'default',
     });
 
     if (response.ok) {
@@ -190,7 +220,8 @@ async function fetchVixData(): Promise<VixData | null> {
     // Fallback: try previous day data
     const prevUrl = `${POLYGON_BASE_URL}/v2/aggs/ticker/VIX/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`;
     const prevResponse = await fetch(prevUrl, {
-      next: { revalidate: 5 },
+      next: bypassCache ? { revalidate: 0 } : { revalidate: 5 },
+      cache: bypassCache ? 'no-store' : 'default',
     });
 
     if (prevResponse.ok) {
@@ -222,13 +253,14 @@ function getVixLevel(vix: number): 'LOW' | 'NORMAL' | 'ELEVATED' | 'HIGH' | 'EXT
 }
 
 // Fetch top movers
-async function fetchMovers(): Promise<{ gainers: Mover[]; losers: Mover[] }> {
+async function fetchMovers(bypassCache = false): Promise<{ gainers: Mover[]; losers: Mover[] }> {
   // Fetch snapshot for all tickers in parallel
   const promises = MOVERS_UNIVERSE.map(async (ticker) => {
     try {
       const url = `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers/${ticker}?apiKey=${POLYGON_API_KEY}`;
       const response = await fetch(url, {
-        next: { revalidate: 10 },
+        next: bypassCache ? { revalidate: 0 } : { revalidate: 10 },
+        cache: bypassCache ? 'no-store' : 'default',
       });
 
       if (response.ok) {
@@ -267,11 +299,12 @@ async function fetchMovers(): Promise<{ gainers: Mover[]; losers: Mover[] }> {
 }
 
 // Fetch top news headlines
-async function fetchTopNews(): Promise<NewsItem[]> {
+async function fetchTopNews(bypassCache = false): Promise<NewsItem[]> {
   try {
     const url = `${POLYGON_BASE_URL}/v2/reference/news?limit=5&order=desc&sort=published_utc&apiKey=${POLYGON_API_KEY}`;
     const response = await fetch(url, {
-      next: { revalidate: 60 },
+      next: bypassCache ? { revalidate: 0 } : { revalidate: 60 },
+      cache: bypassCache ? 'no-store' : 'default',
     });
 
     if (response.ok) {

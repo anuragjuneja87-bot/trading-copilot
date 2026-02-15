@@ -4,9 +4,21 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 
+interface Card {
+  icon: string;
+  title: string;
+  subtitle: string;
+  metric: string;
+  metricColor: string;
+  query: string;
+  dimension: 1 | 2 | 3 | 4;
+  apiEndpoint?: string;
+  overrideTickers?: string[];  // Forces specific tickers instead of watchlist
+}
+
 interface MissionBriefingCardsProps {
   watchlist?: string[];
-  onCardClick?: (query: string) => void;
+  onCardClick?: (query: string, dimension?: number, apiEndpoint?: string, overrideTickers?: string[]) => void;
 }
 
 export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBriefingCardsProps) {
@@ -62,6 +74,9 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
     const month = new Date().getMonth() + 1;
 
     if (timeOfDay === 'pre-market') {
+      const watchlistTickers = watchlist.slice(0, 3).join(',') || 'SPY,QQQ,NVDA';
+      const highImpactEvents = 2; // Placeholder - would count from economic calendar
+      
       return [
         {
           icon: '📈',
@@ -70,6 +85,8 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
           metric: `${topTickerChange >= 0 ? '+' : ''}${topTickerChange.toFixed(2)}%`,
           metricColor: topTickerChange >= 0 ? '#00e676' : '#ff5252',
           query: `Analyze pre-market movers for ${watchlist.slice(0, 3).join(', ') || 'SPY, QQQ'}. Top mover: ${topTicker} at ${topTickerChange >= 0 ? '+' : ''}${topTickerChange.toFixed(2)}%. Include gap analysis and overnight flow.`,
+          dimension: 1 as const,
+          apiEndpoint: '/api/premarket-setup',
         },
         {
           icon: '🌙',
@@ -78,6 +95,8 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
           metric: `${spyChange >= 0 ? '+' : ''}${spyChange.toFixed(2)}%`,
           metricColor: spyChange >= 0 ? '#00e676' : '#ff5252',
           query: `Analyze SPY overnight gap: ${spyChange >= 0 ? '+' : ''}${spyChange.toFixed(2)}%. Current price $${spyPrice.toFixed(2)}. Include futures positioning, overnight options flow, and gap fill probability.`,
+          dimension: 1 as const,
+          apiEndpoint: '/api/overnight-gaps',
         },
         {
           icon: '🎯',
@@ -86,6 +105,18 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
           metric: `$${callWall.toFixed(0)}`,
           metricColor: '#00e5ff',
           query: `Analyze SPY key levels for today: Call wall at $${callWall.toFixed(0)}, Put wall at $${levels?.putWall?.toFixed(0) || 0}, Max gamma at $${levels?.maxGamma?.toFixed(0) || 0}. Include gamma squeeze risk and pinning probability.`,
+          dimension: 1 as const,
+          apiEndpoint: '/api/levels',
+        },
+        {
+          icon: '📅',
+          title: "Today's Economic Calendar",
+          subtitle: 'Key events, earnings, and data releases',
+          metric: `${highImpactEvents} events`,
+          metricColor: '#ffc107',
+          query: "Show me today's economic calendar",
+          dimension: 1 as const,
+          apiEndpoint: '/api/economic-calendar',
         },
         {
           icon: '💎',
@@ -94,9 +125,12 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
           metric: '$45M',
           metricColor: '#00e5ff',
           query: `Show me the highest conviction options flow right now. Focus on unusual activity, sweeps, and institutional positioning. Include premium, delta-adjusted flow, and smart money signals.`,
+          dimension: 3 as const,
         },
       ];
     } else if (timeOfDay === 'market') {
+      const highImpactEvents = 1; // Placeholder
+      
       return [
         {
           icon: '⚡',
@@ -105,6 +139,8 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
           metric: `+2.4B GEX`,
           metricColor: '#00e676',
           query: `Analyze SPY gamma squeeze risk. Call wall at $${callWall.toFixed(0)}, current GEX +2.4B. Include flow, positioning, and probability of squeeze.`,
+          dimension: 2 as const,
+          apiEndpoint: 'bullish_setups',
         },
         {
           icon: '💎',
@@ -113,6 +149,7 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
           metric: '$45M',
           metricColor: '#00e5ff',
           query: `Show me the highest conviction options flow for ${watchlist.slice(0, 2).join(', ') || 'SPY, QQQ'}. Focus on unusual activity, sweeps, and institutional positioning.`,
+          dimension: 3 as const,
         },
         {
           icon: '📊',
@@ -121,6 +158,18 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
           metric: '3 setups',
           metricColor: '#00e676',
           query: `Identify bullish trading setups right now for ${watchlist.slice(0, 3).join(', ') || 'SPY, QQQ, NVDA'}. Include entry, target, stop, and conviction level.`,
+          dimension: 2 as const,
+          apiEndpoint: 'bullish_setups',
+        },
+        {
+          icon: '📅',
+          title: 'Upcoming Events',
+          subtitle: 'Earnings and economic data today',
+          metric: `${highImpactEvents} events`,
+          metricColor: '#ffc107',
+          query: "Show me today's economic calendar",
+          dimension: 1 as const,
+          apiEndpoint: '/api/economic-calendar',
         },
         {
           icon: '🎯',
@@ -129,6 +178,7 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
           metric: `${topTickerChange >= 0 ? '+' : ''}${topTickerChange.toFixed(2)}%`,
           metricColor: topTickerChange >= 0 ? '#00e676' : '#ff5252',
           query: `Full trading thesis for ${topTicker}. Current price $${topTickerPrice.toFixed(2)} (${topTickerChange >= 0 ? '+' : ''}${topTickerChange.toFixed(2)}%). Include verdict, entry, target, stop, and key levels.`,
+          dimension: 4 as const,
         },
       ];
     } else {
@@ -136,10 +186,13 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
         {
           icon: '📋',
           title: 'End of Day Summary',
-          subtitle: 'Key moves and levels',
+          subtitle: 'SPY & QQQ — key moves and levels',
           metric: `${spyChange >= 0 ? '+' : ''}${spyChange.toFixed(2)}%`,
           metricColor: spyChange >= 0 ? '#00e676' : '#ff5252',
-          query: `End of day summary for SPY. Closed at $${spyPrice.toFixed(2)} (${spyChange >= 0 ? '+' : ''}${spyChange.toFixed(2)}%). Include key moves, levels hit, flow recap, and tomorrow's setup.`,
+          query: 'End of day summary for SPY and QQQ',
+          dimension: 2 as const,
+          apiEndpoint: 'eod_summary',
+          overrideTickers: ['SPY', 'QQQ'],
         },
         {
           icon: '🌙',
@@ -148,15 +201,19 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
           metric: `${topTickerChange >= 0 ? '+' : ''}${topTickerChange.toFixed(2)}%`,
           metricColor: topTickerChange >= 0 ? '#00e676' : '#ff5252',
           query: `Analyze after-hours movers. Top mover: ${topTicker} at ${topTickerChange >= 0 ? '+' : ''}${topTickerChange.toFixed(2)}%. Include AH flow and implications for tomorrow.`,
+          dimension: 2 as const,
+          apiEndpoint: 'afterhours_movers',
         },
         month === 2
           ? {
-              icon: '📅',
-              title: 'February Tech Seasonality',
+              icon: '⚠️',
+              title: 'February Tech Seasonality Risk',
               subtitle: 'Historical risk for QQQ/NVDA',
               metric: '-2.1% avg',
               metricColor: '#ff5252',
               query: `Analyze February tech seasonality. Historical average: -2.1% for QQQ/NVDA. Include historical patterns, risk factors, and current positioning vs history.`,
+              dimension: 2 as const,
+              apiEndpoint: 'seasonality',
             }
           : {
               icon: '💎',
@@ -165,6 +222,7 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
               metric: '$45M',
               metricColor: '#00e5ff',
               query: `Recap today's highest conviction options flow. Total premium $45M. Include top trades, smart money signals, and implications.`,
+              dimension: 3 as const,
             },
         {
           icon: '💎',
@@ -173,6 +231,7 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
           metric: '$45M',
           metricColor: '#00e5ff',
           query: `Recap today's highest conviction options flow. Total premium $45M. Include top trades, smart money signals, and implications.`,
+          dimension: 3 as const,
         },
       ];
     }
@@ -209,7 +268,7 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
         {cards.map((card, idx) => (
           <div
             key={idx}
-            onClick={() => onCardClick?.(card.query)}
+            onClick={() => onCardClick?.(card.query, card.dimension, card.apiEndpoint, card.overrideTickers)}
             onMouseEnter={() => setHoveredCard(idx)}
             onMouseLeave={() => setHoveredCard(null)}
             className={cn(
@@ -224,6 +283,22 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
               <div className="flex items-center gap-2">
                 <span className="text-sm">{card.icon}</span>
                 <span className="text-[13px] font-semibold text-white">{card.title}</span>
+                {card.dimension === 1 && (
+                  <span
+                    className="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
+                    style={{ background: 'rgba(0,230,118,0.15)', color: '#00e676' }}
+                  >
+                    ⚡ &lt;1s
+                  </span>
+                )}
+                {card.dimension === 2 && (
+                  <span
+                    className="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
+                    style={{ background: 'rgba(0,229,255,0.15)', color: '#00e5ff' }}
+                  >
+                    ⚡ 2-5s
+                  </span>
+                )}
               </div>
               {card.metric && (
                 <span

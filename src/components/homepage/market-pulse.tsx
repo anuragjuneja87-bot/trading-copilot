@@ -16,7 +16,7 @@ const MarketPulseContext = createContext<{
   data: MarketPulseData | null;
   isLoading: boolean;
   lastUpdated: Date | null;
-  refresh: () => void;
+  refresh: (bypassCache?: boolean) => void;
 }>({
   data: null,
   isLoading: true,
@@ -32,9 +32,13 @@ export function MarketPulseProvider({ children }: { children: React.ReactNode })
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const fetchMarketPulse = async () => {
+  const fetchMarketPulse = async (bypassCache = false) => {
     try {
-      const response = await fetch('/api/market-pulse');
+      // Add cache-busting query param if bypassing cache
+      const url = bypassCache ? `/api/market-pulse?t=${Date.now()}` : '/api/market-pulse';
+      const response = await fetch(url, {
+        cache: bypassCache ? 'no-store' : 'default',
+      });
       const result = await response.json();
 
       if (result.success) {
@@ -51,13 +55,18 @@ export function MarketPulseProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     fetchMarketPulse();
 
-    // Auto-refresh every 60 seconds
-    const interval = setInterval(fetchMarketPulse, 60000);
+    // Auto-refresh every 30 seconds (more frequent to catch market open)
+    const interval = setInterval(fetchMarketPulse, 30000);
     return () => clearInterval(interval);
   }, []);
 
+  const refresh = (bypassCache = false) => {
+    setIsLoading(true);
+    fetchMarketPulse(bypassCache);
+  };
+
   return (
-    <MarketPulseContext.Provider value={{ data, isLoading, lastUpdated, refresh: fetchMarketPulse }}>
+    <MarketPulseContext.Provider value={{ data, isLoading, lastUpdated, refresh }}>
       {children}
     </MarketPulseContext.Provider>
   );
@@ -68,7 +77,7 @@ export function MarketPulseProvider({ children }: { children: React.ReactNode })
 // ============================================
 
 export function MarketPulseLeftSidebar() {
-  const { data, isLoading } = useMarketPulse();
+  const { data, isLoading, lastUpdated } = useMarketPulse();
 
   if (isLoading) {
     return <LeftSidebarSkeleton />;
@@ -78,8 +87,44 @@ export function MarketPulseLeftSidebar() {
     return null;
   }
 
+  // Check if market is currently open
+  const now = new Date();
+  const etTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const hour = etTime.getHours();
+  const minute = etTime.getMinutes();
+  const dayOfWeek = etTime.getDay();
+  const timeInMinutes = hour * 60 + minute;
+  const isMarketOpen = dayOfWeek >= 1 && dayOfWeek <= 5 && timeInMinutes >= 570 && timeInMinutes < 960;
+
   return (
     <div className="w-64 space-y-4 p-4">
+      {/* Market Status & Last Updated */}
+      <div className="bg-background-card border border-background-elevated rounded-xl p-3">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-text-muted font-medium">Market Status</span>
+          <span
+            className={cn(
+              'text-[9px] px-2 py-0.5 rounded-full font-bold',
+              isMarketOpen
+                ? 'bg-[rgba(0,230,118,0.15)] text-[#00e676]'
+                : 'bg-[rgba(139,153,176,0.15)] text-[#8b99b0]'
+            )}
+          >
+            {isMarketOpen ? 'OPEN' : 'CLOSED'}
+          </span>
+        </div>
+        {lastUpdated && (
+          <div className="text-[10px] text-text-muted">
+            Updated {formatTimeAgo(lastUpdated)}
+          </div>
+        )}
+        {!isMarketOpen && (
+          <div className="text-[10px] text-text-muted mt-1">
+            Data from last market session
+          </div>
+        )}
+      </div>
+
       {/* Market Sentiment Badge */}
       <MarketSentimentBadge sentiment={data.marketSentiment} />
 
@@ -223,16 +268,47 @@ function IndexCard({ data }: { data: TickerSnapshot | null }) {
   if (!data) return null;
 
   const isPositive = data.changePercent >= 0;
+  
+  // Check if market is currently open (ET timezone)
+  const now = new Date();
+  const etTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const hour = etTime.getHours();
+  const minute = etTime.getMinutes();
+  const dayOfWeek = etTime.getDay(); // 0 = Sunday, 6 = Saturday
+  const timeInMinutes = hour * 60 + minute;
+  
+  // Market hours: 9:30 AM - 4:00 PM ET, Monday-Friday
+  const isMarketOpen = dayOfWeek >= 1 && dayOfWeek <= 5 && timeInMinutes >= 570 && timeInMinutes < 960;
+  
+  // Format last trade time if available
+  let lastTradeTimeStr = null;
+  if (data.lastTradeTime) {
+    const tradeTime = new Date(data.lastTradeTime);
+    const tradeET = new Date(tradeTime.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const hours = tradeET.getHours();
+    const minutes = tradeET.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const displayHours = hours % 12 || 12;
+    lastTradeTimeStr = `${displayHours}:${minutes.toString().padStart(2, '0')} ${ampm} ET`;
+  }
+  
+  // If market is closed, show a small indicator
+  const marketStatus = isMarketOpen ? null : (
+    <span className="text-[9px] text-text-muted">Market Closed</span>
+  );
 
   return (
     <div className="bg-background-card border border-background-elevated rounded-xl p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-bold text-text-primary">{data.ticker}</span>
-        {isPositive ? (
-          <TrendingUp className="w-4 h-4 text-bull" />
-        ) : (
-          <TrendingDown className="w-4 h-4 text-bear" />
-        )}
+        <div className="flex items-center gap-1">
+          {marketStatus}
+          {isPositive ? (
+            <TrendingUp className="w-4 h-4 text-bull" />
+          ) : (
+            <TrendingDown className="w-4 h-4 text-bear" />
+          )}
+        </div>
       </div>
       <div className="flex items-baseline gap-2">
         <span className="text-xl font-bold text-text-primary">${data.price.toFixed(2)}</span>
@@ -241,6 +317,16 @@ function IndexCard({ data }: { data: TickerSnapshot | null }) {
           {data.changePercent.toFixed(2)}%
         </span>
       </div>
+      {!isMarketOpen && lastTradeTimeStr && (
+        <div className="mt-1">
+          <span className="text-[9px] text-text-muted">Last trade: {lastTradeTimeStr}</span>
+        </div>
+      )}
+      {!isMarketOpen && !lastTradeTimeStr && (
+        <div className="mt-1">
+          <span className="text-[9px] text-text-muted">Last trade from market hours</span>
+        </div>
+      )}
       <div className="mt-3 pt-3 border-t border-background-elevated">
         <div className="grid grid-cols-2 gap-2 text-xs">
           <div>
@@ -294,9 +380,9 @@ export function MarketPulseRightSidebar() {
       <div className="flex items-center justify-between text-xs text-text-muted">
         <span>Updated {lastUpdated ? formatTimeAgo(lastUpdated) : 'just now'}</span>
         <button
-          onClick={refresh}
+          onClick={() => refresh(true)}
           className="p-1 hover:bg-background-elevated rounded transition-colors"
-          title="Refresh"
+          title="Force Refresh (bypass cache)"
         >
           <RefreshCw className="w-3 h-3" />
         </button>
