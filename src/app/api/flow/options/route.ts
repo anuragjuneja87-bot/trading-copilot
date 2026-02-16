@@ -175,29 +175,45 @@ function calculateDaysToExpiry(expiry: string): number {
 }
 
 export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const tickersParam = searchParams.get('tickers');
+  const minPremium = parseInt(searchParams.get('minPremium') || '0');
+  const callPut = searchParams.get('callPut') || 'all';
+  const limit = Math.min(parseInt(searchParams.get('limit') || '100'), 200);
+  const filterUnusual = searchParams.get('unusual') === 'true';
+  const filterSweeps = searchParams.get('sweeps') === 'true';
+  
+  // Date range filtering
+  const from = searchParams.get('from'); // YYYY-MM-DD format
+  const to = searchParams.get('to'); // YYYY-MM-DD format
+  let timestampGte: number | null = null;
+  let timestampLte: number | null = null;
+  
+  if (from) {
+    const fromDate = new Date(from + 'T00:00:00Z');
+    timestampGte = fromDate.getTime();
+  }
+  if (to) {
+    const toDate = new Date(to + 'T23:59:59Z');
+    timestampLte = toDate.getTime();
+  }
+
+  if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
+    return NextResponse.json(
+      { success: false, error: 'POLYGON_API_KEY not configured' },
+      { status: 500 }
+    );
+  }
+
+  const tickers = tickersParam 
+    ? tickersParam.split(',').map(t => t.trim().toUpperCase())
+    : DEFAULT_TICKERS;
+
+  let allTrades: EnhancedOptionTrade[] = [];
+  const errors: string[] = [];
+  const seenSequences = new Set<string>();
+
   try {
-    const { searchParams } = new URL(request.url);
-    const tickersParam = searchParams.get('tickers');
-    const minPremium = parseInt(searchParams.get('minPremium') || '0');
-    const callPut = searchParams.get('callPut') || 'all';
-    const limit = Math.min(parseInt(searchParams.get('limit') || '100'), 200);
-    const filterUnusual = searchParams.get('unusual') === 'true';
-    const filterSweeps = searchParams.get('sweeps') === 'true';
-
-    if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
-      return NextResponse.json(
-        { success: false, error: 'POLYGON_API_KEY not configured' },
-        { status: 500 }
-      );
-    }
-
-    const tickers = tickersParam 
-      ? tickersParam.split(',').map(t => t.trim().toUpperCase())
-      : DEFAULT_TICKERS;
-
-    const allTrades: EnhancedOptionTrade[] = [];
-    const errors: string[] = [];
-    const seenSequences = new Set<string>();
 
     // Step 1: Get active contracts for each underlying
     for (const underlying of tickers.slice(0, 5)) {
@@ -312,12 +328,18 @@ export async function GET(request: NextRequest) {
         }
 
         // Filter to contracts with volume > 0 (active today)
+        // BUT: If date range is provided, include all contracts (for historical data)
         const allActiveContracts = snapshotData.results.filter((r: any) => {
+          // If we have a date range, include all contracts (we'll filter trades by date)
+          if (timestampGte !== null || timestampLte !== null) {
+            return true; // Include all contracts for historical queries
+          }
+          // Otherwise, only include contracts with volume today
           const vol = r.day?.volume || 0;
           return vol > 0;
         });
         
-        console.log(`[Flow API] ${underlying}: ${allActiveContracts.length} contracts have volume > 0`);
+        console.log(`[Flow API] ${underlying}: ${allActiveContracts.length} contracts ${timestampGte !== null || timestampLte !== null ? '(historical mode - all contracts)' : '(active today with volume > 0)'}`);
 
         // BUG 5 FIX: Split into calls and puts, then take top from each
         // Use case-insensitive matching for contract_type
@@ -564,6 +586,16 @@ export async function GET(request: NextRequest) {
 
     // Sort by timestamp (newest first)
     allTrades.sort((a, b) => b.timestampMs - a.timestampMs);
+    
+    // Filter by date range if provided (before calculating stats)
+    if (timestampGte !== null || timestampLte !== null) {
+      allTrades = allTrades.filter(trade => {
+        const tradeTime = trade.timestampMs;
+        if (timestampGte !== null && tradeTime < timestampGte) return false;
+        if (timestampLte !== null && tradeTime > timestampLte) return false;
+        return true;
+      });
+    }
 
     // Calculate averages AFTER collecting all trades - BUG 3 & 4 FIX
     const avgPremium = allTrades.length > 0 

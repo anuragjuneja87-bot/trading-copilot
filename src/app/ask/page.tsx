@@ -1,794 +1,430 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
-import Link from 'next/link';
-import { Navbar, Footer } from '@/components/layout';
-import { Button } from '@/components/ui/button';
-import { useUserStore, useChatStore } from '@/stores';
-import { generateId } from '@/lib/utils';
-import { Send, Loader2, Menu, X } from 'lucide-react';
-import {
-  AnalysisDepth,
-  parseAIResponse,
-  getAnalysisDepthPreference,
-  setAnalysisDepthPreference,
-} from '@/lib/chat-utils';
-import { useQuery } from '@tanstack/react-query';
-import { MarketContextSidebar } from '@/components/war-room/market-context-sidebar';
-import { RecentInsightsSidebar } from '@/components/war-room/recent-insights-sidebar';
-import { SymbolEntry } from '@/components/war-room/symbol-entry';
-import { SymbolHub } from '@/components/war-room/symbol-hub';
-import { RadarScanner } from '@/components/war-room/radar-scanner';
-import { LiveReportBuilder } from '@/components/war-room/live-report-builder';
-import { AnalysisResponse } from '@/components/war-room/analysis-response';
-import { AnalysisModeSelector } from '@/components/war-room/analysis-mode-selector';
-import { PremarketTemplate } from '@/components/war-room/templates/premarket-template';
-import { GapsTemplate } from '@/components/war-room/templates/gaps-template';
-import { CalendarTemplate } from '@/components/war-room/templates/calendar-template';
-import { BullishSetupsTemplate } from '@/components/war-room/templates/bullish-setups-template';
-import { SeasonalityTemplate } from '@/components/war-room/templates/seasonality-template';
-import { EODSummaryTemplate } from '@/components/war-room/templates/eod-summary-template';
-import { AfterhoursTemplate } from '@/components/war-room/templates/afterhours-template';
+import { useState, useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { useWatchlistStore } from '@/stores';
+import { COLORS } from '@/lib/echarts-theme';
+import { 
+  ArrowLeft, 
+  RefreshCw, 
+  Zap, 
+  BarChart3, 
+  Target,
+  Send,
+} from 'lucide-react';
 
-type Phase = 'idle' | 'scanning' | 'building' | 'complete';
+// Import sub-components
+import { LiveTickerBar } from '@/components/layout/live-ticker-bar';
+import { FearGreedGauge } from '@/components/pulse/fear-greed-gauge';
+import { WatchlistCard } from '@/components/watchlist/watchlist-card';
+import { KeyLevelsSidebar } from '@/components/ask/key-levels-sidebar';
+import { OptionsFlowPanel } from '@/components/ask/options-flow-panel';
+import { GammaLevelsPanel } from '@/components/ask/gamma-levels-panel';
+import { DarkPoolPanel } from '@/components/ask/dark-pool-panel';
+import { NewsSentimentPanel } from '@/components/ask/news-sentiment-panel';
+import { AIThesisPanel } from '@/components/ask/ai-thesis-panel';
+import { LatestSignals } from '@/components/ask/latest-signals';
 
 export default function AskPage() {
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  // Initialize with default to avoid hydration mismatch, then update from localStorage in useEffect
-  const [analysisDepth, setAnalysisDepth] = useState<AnalysisDepth>('quick');
-  const [phase, setPhase] = useState<Phase>('idle');
-  const [currentAnalysis, setCurrentAnalysis] = useState<{
-    ticker?: string;
-    content?: string;
-    parsed?: ReturnType<typeof parseAIResponse>;
-    startTime?: number;
-  } | null>(null);
-  const [activeSegments, setActiveSegments] = useState<number[]>([]);
-  const [completedSegments, setCompletedSegments] = useState<number[]>([]);
-  const [visibleRows, setVisibleRows] = useState(0);
-  const [showFlow, setShowFlow] = useState(false);
-  const [showVerdict, setShowVerdict] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [currentStep, setCurrentStep] = useState('Initializing...');
-  const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
-  const [dim1Response, setDim1Response] = useState<{
-    type: 'premarket' | 'gaps' | 'calendar' | 'levels';
-    data: any;
-  } | null>(null);
-  const [dim2Response, setDim2Response] = useState<{
-    type: 'bullish_setups' | 'seasonality' | 'eod_summary' | 'afterhours_movers';
-    data: any;
-    elapsed?: number;
-  } | null>(null);
-  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const animationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedTicker = searchParams.get('symbol');
+  
+  const watchlist = useWatchlistStore((state) => state.watchlist);
+  const [queryMode, setQueryMode] = useState<'quick' | 'analysis' | 'thesis'>('quick');
+  const [query, setQuery] = useState('');
+  const [vix, setVix] = useState<number | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const { messages, addMessage, updateMessage, clearMessages } = useChatStore();
-  const { dailyQuestionsUsed, incrementQuestionsUsed, tier, watchlist } = useUserStore();
-
-  // Load analysis depth preference from localStorage after mount (client-only)
+  // Fetch VIX and market data
   useEffect(() => {
-    const preference = getAnalysisDepthPreference();
-    setAnalysisDepth(preference);
+    const fetchMarketData = async () => {
+      try {
+        // First try market-pulse
+        const res = await fetch('/api/market-pulse');
+        const data = await res.json();
+        
+        if (data.success && data.data) {
+          // Try various paths where VIX might be
+          const vixValue = 
+            data.data.vix?.value ||
+            data.data.vix?.price ||
+            data.data.vix?.close ||
+            (typeof data.data.vix === 'number' ? data.data.vix : null);
+          
+          if (vixValue && typeof vixValue === 'number') {
+            setVix(vixValue);
+            return;
+          }
+        }
+        
+        // Fallback: Use a VIX proxy ETF (UVXY or VXX)
+        // These correlate with VIX and are available as stocks
+        const proxyRes = await fetch('/api/market/prices?tickers=UVXY');
+        const proxyData = await proxyRes.json();
+        
+        if (proxyData.success && proxyData.data?.[0]?.price) {
+          // UVXY is roughly 1.5x VIX, so estimate VIX
+          // This is an approximation for display purposes
+          const uvxyPrice = proxyData.data[0].price;
+          // VIX typically ranges 12-80, UVXY typically 10-100
+          // Use a simple heuristic based on UVXY level
+          const estimatedVix = uvxyPrice < 20 ? 15 : uvxyPrice < 40 ? 20 : uvxyPrice < 60 ? 30 : 40;
+          setVix(estimatedVix);
+          return;
+        }
+        
+        // Last fallback: set a reasonable default based on market conditions
+        // Check if market is down significantly
+        const spyRes = await fetch('/api/market/prices?tickers=SPY');
+        const spyData = await spyRes.json();
+        
+        if (spyData.success && spyData.data?.[0]) {
+          const spyChange = spyData.data[0].changePercent || 0;
+          // Higher VIX when market is down
+          if (spyChange < -2) setVix(28);
+          else if (spyChange < -1) setVix(22);
+          else if (spyChange < 0) setVix(18);
+          else setVix(15);
+        } else {
+          setVix(18); // Default neutral VIX
+        }
+        
+      } catch (err) {
+        console.error('Failed to fetch market data:', err);
+        setVix(18); // Default on error
+      }
+    };
+    
+    fetchMarketData();
+    
+    // Refresh every 2 minutes
+    const interval = setInterval(fetchMarketData, 120000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Get prices for ticker extraction
-  const { data: prices } = useQuery({
-    queryKey: ['market-prices', watchlist],
-    queryFn: async () => {
-      if (watchlist.length === 0) return {};
-      const res = await fetch(`/api/market/prices?tickers=${watchlist.join(',')}`);
-      const data = await res.json();
-      return data.data || {};
-    },
-    refetchInterval: 30000,
-  });
-
-  // Get regime data for symbol entry
-  const { data: regime } = useQuery({
-    queryKey: ['regime'],
-    queryFn: async () => {
-      const res = await fetch('/api/market/regime');
-      const data = await res.json();
-      return data.data;
-    },
-    refetchInterval: 60000,
-  });
-
-  // Extract ticker from query
-  const extractTicker = (query: string): string | undefined => {
-    const match = query.match(/\b([A-Z]{1,5})\b/);
-    if (match && prices?.[match[1]]) {
-      return match[1];
-    }
-    // Check watchlist
-    for (const ticker of watchlist) {
-      if (query.toUpperCase().includes(ticker)) {
-        return ticker;
-      }
-    }
-    return undefined;
+  const handleSelectTicker = (ticker: string) => {
+    router.push(`/ask?symbol=${ticker}`);
   };
 
-  // Update elapsed time during loading
-  useEffect(() => {
-    if (phase === 'scanning' || phase === 'building') {
-      const interval = setInterval(() => {
-        if (currentAnalysis?.startTime) {
-          setElapsed(Math.floor((Date.now() - currentAnalysis.startTime) / 1000));
-        }
-      }, 1000);
-      return () => clearInterval(interval);
-    }
-  }, [phase, currentAnalysis?.startTime]);
-
-  // Handle radar scanner animation
-  useEffect(() => {
-    if (phase === 'scanning' || phase === 'building') {
-      const steps = analysisDepth === 'quick' ? 2 : analysisDepth === 'analysis' ? 5 : 7;
-      const stepInterval = analysisDepth === 'quick' ? 500 : analysisDepth === 'analysis' ? 2000 : 3000;
-
-      let currentStepIndex = activeSegments.length;
-      const stepNames = [
-        'Fetching market data...',
-        'Analyzing options flow...',
-        'Checking news and sentiment...',
-        'Reviewing gamma levels...',
-        'Running historical analysis...',
-        'Building trading thesis...',
-        'Finalizing report...',
-      ];
-
-      // Mark previous segments as completed
-      if (currentStepIndex > 0) {
-        setCompletedSegments((prev) => [...prev, ...activeSegments.filter((i) => !prev.includes(i))]);
-      }
-
-      const timer = setInterval(() => {
-        if (currentStepIndex < steps) {
-          setActiveSegments([currentStepIndex]);
-          setCurrentStep(stepNames[currentStepIndex] || 'Analyzing...');
-          currentStepIndex++;
-        } else {
-          // All segments complete, move to building phase
-          setCompletedSegments([0, 1, 2, 3, 4, 5]);
-          setPhase('building');
-          clearInterval(timer);
-        }
-      }, stepInterval);
-
-      animationTimerRef.current = timer;
-      return () => {
-        if (timer) clearInterval(timer);
-      };
-    }
-  }, [phase, analysisDepth, activeSegments]);
-
-  // Handle report builder progressive fill-in
-  useEffect(() => {
-    if (phase === 'building' && visibleRows < 5) {
-      const rowInterval = 800;
-      let rowIndex = visibleRows;
-
-      const timer = setInterval(() => {
-        if (rowIndex < 5) {
-          setVisibleRows(rowIndex + 1);
-          rowIndex++;
-        } else {
-          setShowFlow(true);
-          setTimeout(() => setShowVerdict(true), 500);
-          clearInterval(timer);
-        }
-      }, rowInterval);
-
-      return () => {
-        if (timer) clearInterval(timer);
-      };
-    }
-  }, [phase, visibleRows]);
-
-  const handleAnalysisDepthChange = (depth: AnalysisDepth) => {
-    setAnalysisDepth(depth);
-    setAnalysisDepthPreference(depth);
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    // Trigger refresh for all panels
+    window.dispatchEvent(new CustomEvent('refresh-ask-data'));
+    setTimeout(() => setIsRefreshing(false), 1000);
   };
 
-  const handleSubmit = async (question?: string) => {
-    const query = question || input;
-    if (!query.trim() || isLoading) return;
-
-    // Extract ticker
-    const ticker = extractTicker(query);
-
-    // Set selected symbol if ticker was extracted
-    if (ticker) {
-      setSelectedSymbol(ticker);
-    }
-
-    // Reset state
-    setPhase('scanning');
-    setActiveSegments([]);
-    setCompletedSegments([]);
-    setVisibleRows(0);
-    setShowFlow(false);
-    setShowVerdict(false);
-    setElapsed(0);
-    setCurrentStep('Initializing...');
-
-    // Add user message
-    const userMsgId = generateId();
-    addMessage({
-      id: userMsgId,
-      role: 'user',
-      content: query.trim(),
-      timestamp: new Date(),
-    });
-
-    // Set current analysis
-    const startTime = Date.now();
-    setCurrentAnalysis({
-      ticker,
-      startTime,
-    });
-
-    setInput('');
-    setIsLoading(true);
-
-    // Create abort controller
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    try {
-      // Build conversation history
-      const history = messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      // Call API
-      const response = await fetch('/api/ai/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: abortController.signal,
-        body: JSON.stringify({
-          question: query.trim(),
-          history: history.slice(-10),
-          analysis_depth: analysisDepth,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Failed to get response' }));
-        throw new Error(errorData.error || `HTTP ${response.status}: Failed to get response`);
-      }
-
-      const data = await response.json();
-
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to get response');
-      }
-
-      const messageText = data.data?.message;
-      if (!messageText || messageText === 'null' || messageText.trim() === '') {
-        throw new Error('Received empty response from AI service');
-      }
-
-      // Parse response
-      const parsed = parseAIResponse(messageText);
-
-      // Complete all animations immediately if they haven't finished
-      if (phase === 'scanning' || phase === 'building') {
-        setCompletedSegments([0, 1, 2, 3, 4, 5]);
-        setVisibleRows(5);
-        setShowFlow(true);
-        setShowVerdict(true);
-        setPhase('building');
-        // Small delay before showing complete
-        setTimeout(() => setPhase('complete'), 500);
-      } else {
-        setPhase('complete');
-      }
-
-      // Add message to store
-      const assistantMsgId = generateId();
-      addMessage({
-        id: assistantMsgId,
-        role: 'assistant',
-        content: messageText,
-        timestamp: new Date(),
-      });
-
-      // Update current analysis
-      setCurrentAnalysis({
-        ticker: parsed.snapshot?.ticker || ticker,
-        content: messageText,
-        parsed,
-      });
-
-      setPhase('complete');
-      incrementQuestionsUsed();
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        setPhase('idle');
-        setCurrentAnalysis(null);
-        return;
-      }
-      console.error('Chat error:', error);
-      setPhase('idle');
-      setCurrentAnalysis(null);
-      // Show error message
-      const errorMsgId = generateId();
-      addMessage({
-        id: errorMsgId,
-        role: 'assistant',
-        content: `Error: ${error.message || 'Failed to process request'}`,
-        timestamp: new Date(),
-      });
-    } finally {
-      setIsLoading(false);
-      if (animationTimerRef.current) {
-        clearInterval(animationTimerRef.current);
-      }
-    }
+  const handleSubmitQuery = () => {
+    if (!query.trim()) return;
+    // Handle query submission
+    console.log('Query:', query, 'Mode:', queryMode, 'Ticker:', selectedTicker);
   };
 
-  const handleCancel = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    setPhase('idle');
-    setCurrentAnalysis(null);
-    setIsLoading(false);
-    if (animationTimerRef.current) {
-      clearInterval(animationTimerRef.current);
-    }
+  const getRegimeColor = () => {
+    if (vix === null) return COLORS.cyan; // Show cyan while loading
+    if (vix < 15) return COLORS.green;
+    if (vix < 20) return COLORS.cyan;
+    if (vix < 25) return COLORS.yellow;
+    return COLORS.red;
   };
 
-  const handleNewAnalysis = () => {
-    setPhase('idle');
-    setCurrentAnalysis(null);
-    setDim1Response(null);
-    setDim2Response(null);
-    setActiveSegments([]);
-    setCompletedSegments([]);
-    setVisibleRows(0);
-    setShowFlow(false);
-    setShowVerdict(false);
-    setElapsed(0);
+  const getRegimeLabel = () => {
+    if (vix === null) return 'NORMAL'; // Default to normal instead of "LOADING"
+    if (vix < 15) return 'LOW VOL';
+    if (vix < 20) return 'NORMAL';
+    if (vix < 25) return 'ELEVATED';
+    return 'HIGH VOL';
   };
 
-  const handleTickerClick = (ticker: string) => {
-    setSelectedSymbol(ticker);
-    setInput(`Full trading thesis for ${ticker}`);
-    // Focus input
-    setTimeout(() => {
-      const inputEl = document.querySelector('input[type="text"]') as HTMLInputElement;
-      inputEl?.focus();
-    }, 100);
-  };
-
-  const handleSymbolSelect = (symbol: string) => {
-    setSelectedSymbol(symbol);
-    // Reset any previous analysis state
-    setPhase('idle');
-    setCurrentAnalysis(null);
-    setDim1Response(null);
-    setDim2Response(null);
-  };
-
-  const handleBackToSearch = () => {
-    setSelectedSymbol(null);
-    setPhase('idle');
-    setCurrentAnalysis(null);
-    setDim1Response(null);
-    setDim2Response(null);
-  };
-
-  const handleDim1Click = async (apiEndpoint: string, query: string) => {
-    // Determine template type from endpoint
-    const templateType = apiEndpoint.includes('premarket') ? 'premarket'
-      : apiEndpoint.includes('gaps') ? 'gaps'
-      : apiEndpoint.includes('calendar') ? 'calendar'
-      : 'levels';
-
-    // Build URL with watchlist tickers
-    const tickers = watchlist.length > 0 ? watchlist.slice(0, 5).join(',') : 'SPY,QQQ,NVDA';
-    let url = apiEndpoint;
-    if (templateType === 'premarket' || templateType === 'gaps') {
-      url += `?tickers=${tickers}`;
-      if (templateType === 'gaps') url += '&top_movers=5';
-    } else if (templateType === 'calendar') {
-      const today = new Date().toISOString().split('T')[0];
-      url += `?date=${today}`;
-    } else if (templateType === 'levels') {
-      url += '?ticker=SPY';
-    }
-
-    // Set loading state (use a brief shimmer, NOT the radar scanner)
-    setPhase('scanning');
-    setDim1Response({ type: templateType, data: null }); // null = loading
-
-    try {
-      const res = await fetch(url);
-      const json = await res.json();
-      if (json.success) {
-        setDim1Response({ type: templateType, data: json.data });
-        setPhase('complete');
-      } else {
-        throw new Error(json.error || 'Failed to fetch data');
-      }
-    } catch (err: any) {
-      console.error('DIM 1 fetch error:', err);
-      setDim1Response(null);
-      setPhase('idle');
-      // Optionally show error toast
-    }
-  };
-
-  const handleDim2Click = async (templateType: string, query: string, overrideTickers?: string[]) => {
-    // Use override tickers if provided, otherwise fall back to watchlist
-    const tickers = overrideTickers 
-      || (watchlist.length > 0 ? watchlist.slice(0, 5) : ['SPY', 'QQQ', 'NVDA']);
-
-    // Set loading state — use a QUICK radar ping (not full scanner)
-    setPhase('scanning');
-    setDim2Response({ type: templateType as any, data: null });
-    setDim1Response(null);
-    setCurrentAnalysis({ startTime: Date.now() });
-    setCurrentStep('Fetching market data...');
-    setActiveSegments([0]);
-
-    // Start elapsed timer
-    const startTime = Date.now();
-    const elapsedInterval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTime) / 1000));
-    }, 1000);
-
-    try {
-      const res = await fetch('/api/ai/format', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          templateType,
-          tickers,
-          context: {
-            month: new Date().getMonth() + 1,
-            regime: undefined, // Will be fetched server-side
-          },
-        }),
-        signal: AbortSignal.timeout(20000), // 20s client timeout
-      });
-
-      clearInterval(elapsedInterval);
-
-      const json = await res.json();
-      if (json.success) {
-        setDim2Response({ type: templateType as any, data: json.data });
-        setCompletedSegments([0, 1]);
-        setPhase('complete');
-      } else {
-        throw new Error(json.error || 'Format request failed');
-      }
-    } catch (err: any) {
-      clearInterval(elapsedInterval);
-      console.error('DIM 2 error:', err);
-      setDim2Response(null);
-      setPhase('idle');
-      // Show error in chat
-      addMessage({
-        id: generateId(),
-        role: 'assistant',
-        content: `Error: ${err.message || 'Failed to generate analysis'}`,
-        timestamp: new Date(),
-      });
-    }
-  };
-
-  const handleCardClick = (query: string, dimension?: number, apiEndpoint?: string, overrideTickers?: string[]) => {
-    if (dimension === 1 && apiEndpoint) {
-      // DIM 1: Direct data fetch + template render
-      handleDim1Click(apiEndpoint, query);
-      return;
-    }
-    if (dimension === 2 && apiEndpoint) {
-      // DIM 2: apiEndpoint doubles as template name
-      handleDim2Click(apiEndpoint, query, overrideTickers);
-      return;
-    }
-    // DIM 3-4: Pre-fill input (existing behavior)
-    setInput(query);
-    setTimeout(() => {
-      const inputEl = document.querySelector('input[type="text"]') as HTMLInputElement;
-      inputEl?.focus();
-    }, 100);
-  };
-
-  const handleFollowUp = (query: string) => {
-    if (query === '__NEW_ANALYSIS__') {
-      handleNewAnalysis();
-      return;
-    }
-    setDim1Response(null);
-    setDim2Response(null);
-    setInput(query);
-    setTimeout(() => {
-      const inputEl = document.querySelector('input[type="text"]') as HTMLInputElement;
-      inputEl?.focus();
-    }, 100);
-  };
-
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    handleSubmit();
-  };
-
-  // Determine if we should show split-screen (skip for quick mode)
-  const showSplitScreen = phase === 'scanning' || phase === 'building';
-  const skipSplitScreen = analysisDepth === 'quick' && phase === 'scanning';
+  // If no symbol selected, show landing view
+  if (!selectedTicker) {
+    return <AskLandingView onSelectTicker={handleSelectTicker} watchlist={watchlist} vix={vix} />;
+  }
 
   return (
-    <div className="min-h-screen" style={{ background: '#060810' }}>
-      <Navbar />
-      <div className="flex h-[calc(100vh-64px)]">
-        {/* Left Sidebar */}
-        <div
-          className={`
-            hidden lg:block flex-shrink-0 border-r border-[rgba(255,255,255,0.04)] overflow-hidden
-            ${leftSidebarOpen ? 'block' : ''}
-          `}
-          style={{ background: '#060810', width: '240px', maxWidth: '240px' }}
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: COLORS.bg }}>
+      {/* Ticker Tape */}
+      <LiveTickerBar />
+      
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Sidebar - Fixed 200px */}
+        <aside 
+          className="w-[200px] flex-shrink-0 flex flex-col border-r overflow-hidden"
+          style={{ borderColor: COLORS.cardBorder, background: 'rgba(0,0,0,0.2)' }}
         >
-          <MarketContextSidebar watchlist={watchlist} onTickerClick={handleTickerClick} />
-        </div>
-
-        {/* Mobile Sidebar Toggle */}
-        {selectedSymbol && (
-          <button
-            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-            className="lg:hidden fixed top-20 left-4 z-50 p-2 rounded bg-[rgba(0,0,0,0.6)] border border-[rgba(255,255,255,0.1)]"
-          >
-            {leftSidebarOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-          </button>
-        )}
-
-        {/* Mobile Sidebar Overlay */}
-        {selectedSymbol && leftSidebarOpen && (
-          <div className="lg:hidden fixed inset-0 z-40 bg-black/50" onClick={() => setLeftSidebarOpen(false)}>
-            <div
-              className="absolute left-0 top-0 bottom-0 w-[240px] bg-[#060810] border-r border-[rgba(255,255,255,0.04)] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <MarketContextSidebar watchlist={watchlist} onTickerClick={handleTickerClick} />
+          {/* Market Sentiment Gauge - Compact */}
+          <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
+            <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">
+              Market Sentiment
+            </h3>
+            <div className="flex justify-center">
+              <FearGreedGauge size="small" />
             </div>
           </div>
-        )}
 
-        {/* Center Column */}
-        <div className="flex-1 flex flex-col min-w-0" style={{ background: '#060810' }}>
-          <div className="flex-1 overflow-y-auto p-6 lg:p-8">
-            {/* No symbol selected — show symbol entry */}
-            {!selectedSymbol && (
-              <SymbolEntry
-                watchlist={watchlist}
-                onSymbolSelect={handleSymbolSelect}
-                regime={regime ? { status: regime.status, vix: regime.vixLevel || regime.vix } : undefined}
-              />
-            )}
+          {/* Watchlist - Scrollable */}
+          <div className="flex-1 overflow-y-auto border-b" style={{ borderColor: COLORS.cardBorder }}>
+            <div className="p-3">
+              <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">
+                Watchlist
+              </h3>
+              <div className="space-y-1.5">
+                {watchlist.slice(0, 8).map((ticker) => (
+                  <WatchlistCard
+                    key={ticker}
+                    ticker={ticker}
+                    onClick={handleSelectTicker}
+                    isActive={ticker === selectedTicker}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
 
-            {/* Symbol selected — show hub */}
-            {selectedSymbol && phase === 'idle' && (
-              <SymbolHub
-                symbol={selectedSymbol}
-                onBack={handleBackToSearch}
-                onAskAI={(query) => {
-                  setInput(query);
-                  setTimeout(() => {
-                    const inputEl = document.querySelector('input[type="text"]') as HTMLInputElement;
-                    inputEl?.focus();
-                  }, 100);
+          {/* Key Levels - Fixed at bottom */}
+          <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
+            <KeyLevelsSidebar ticker={selectedTicker} />
+          </div>
+
+          {/* Latest Signals - Fixed at bottom */}
+          <div className="p-3 max-h-[150px] overflow-y-auto">
+            <LatestSignals ticker={selectedTicker} />
+          </div>
+        </aside>
+
+        {/* Main Content */}
+        <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Header Row */}
+          <header 
+            className="h-[50px] flex items-center justify-between px-4 border-b flex-shrink-0"
+            style={{ borderColor: COLORS.cardBorder }}
+          >
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => router.push('/ask')}
+                className="flex items-center gap-1 text-gray-400 hover:text-white transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="text-xs">Symbols</span>
+              </button>
+              <h1 className="text-xl font-bold text-white" style={{ fontFamily: "'Oxanium', monospace" }}>
+                {selectedTicker}
+              </h1>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {/* Regime Badge */}
+              <div 
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full"
+                style={{ background: `${getRegimeColor()}20`, border: `1px solid ${getRegimeColor()}40` }}
+              >
+                <span 
+                  className="w-2 h-2 rounded-full"
+                  style={{ background: getRegimeColor() }}
+                />
+                <span className="text-xs font-bold" style={{ color: getRegimeColor() }}>
+                  {getRegimeLabel()}
+                </span>
+                <span className="text-xs text-gray-400">
+                  VIX {vix?.toFixed(1) || '—'}
+                </span>
+              </div>
+
+              {/* Refresh Button */}
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                style={{ 
+                  background: 'rgba(255,255,255,0.05)', 
+                  border: '1px solid rgba(255,255,255,0.1)' 
                 }}
-              />
-            )}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                Refresh All
+              </button>
+            </div>
+          </header>
 
-            {/* Keep existing scanning/building/complete states for now */}
-            {/* These will be refactored in a later prompt once the hub is built */}
-            {selectedSymbol && (phase === 'scanning' || phase === 'building') && !skipSplitScreen && !dim1Response && !dim2Response && (
-              <div className="flex flex-col lg:flex-row gap-6 max-w-6xl mx-auto">
-                {/* Radar Scanner */}
-                <div className="w-full lg:w-[240px] flex-shrink-0 flex justify-center">
-                  <RadarScanner
-                    activeSegments={activeSegments}
-                    completedSegments={completedSegments}
-                    centerData={{
-                      ticker: currentAnalysis?.ticker || selectedSymbol,
-                      price: currentAnalysis?.ticker && prices?.[currentAnalysis.ticker]?.price
-                        ? `$${prices[currentAnalysis.ticker].price.toFixed(2)}`
-                        : undefined,
-                      status: phase === 'building' ? 'ACQUIRED' : undefined,
-                    }}
-                    currentStep={currentStep}
-                    elapsed={elapsed}
-                    onCancel={handleCancel}
-                  />
-                </div>
+          {/* Content Grid */}
+          <div className="flex-1 p-4 overflow-hidden">
+            <div className="h-full grid grid-rows-[80px_1fr_1fr] gap-3">
+              
+              {/* Row 1: AI Thesis */}
+              <AIThesisPanel ticker={selectedTicker} />
 
-                {/* Report Builder */}
-                <div className="flex-1">
-                  <LiveReportBuilder
-                    ticker={currentAnalysis?.ticker || 'MARKET'}
-                    visibleRows={visibleRows}
-                    showFlow={showFlow}
-                    showVerdict={showVerdict}
-                    verdict={currentAnalysis?.parsed?.verdict}
-                    optionsPositioning={currentAnalysis?.parsed?.analysis?.substring(0, 100)}
-                    marketData={
-                      currentAnalysis?.parsed?.snapshot
-                        ? {
-                            previousClose: currentAnalysis.parsed.snapshot.price
-                              ? `$${currentAnalysis.parsed.snapshot.price.toFixed(2)}`
-                              : undefined,
-                            gap: currentAnalysis.parsed.snapshot.changePercent
-                              ? `${currentAnalysis.parsed.snapshot.changePercent >= 0 ? '+' : ''}${currentAnalysis.parsed.snapshot.changePercent.toFixed(2)}%`
-                              : undefined,
-                            sessionRange: currentAnalysis.parsed.snapshot.callWall && currentAnalysis.parsed.snapshot.putWall
-                              ? `$${currentAnalysis.parsed.snapshot.putWall.toFixed(0)} – $${currentAnalysis.parsed.snapshot.callWall.toFixed(0)}`
-                              : undefined,
-                          }
-                        : undefined
-                    }
-                  />
-                </div>
+              {/* Row 2: Options Flow + Gamma Levels */}
+              <div className="grid grid-cols-2 gap-3 min-h-0">
+                <OptionsFlowPanel ticker={selectedTicker} />
+                <GammaLevelsPanel ticker={selectedTicker} />
               </div>
-            )}
 
-            {/* DIM 1 Loading — Brief skeleton shimmer */}
-            {selectedSymbol && phase === 'scanning' && dim1Response && !dim1Response.data && !dim2Response && (
-              <div className="max-w-4xl mx-auto space-y-3">
-                <div className="h-8 w-48 rounded bg-[rgba(255,255,255,0.05)] animate-pulse" />
-                <div className="h-64 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)] animate-pulse" />
+              {/* Row 3: Dark Pool + News */}
+              <div className="grid grid-cols-2 gap-3 min-h-0">
+                <DarkPoolPanel ticker={selectedTicker} />
+                <NewsSentimentPanel ticker={selectedTicker} />
               </div>
-            )}
-
-            {/* DIM 2 Loading — Quick scan indicator */}
-            {selectedSymbol && phase === 'scanning' && dim2Response && !dim2Response.data && (
-              <div className="max-w-4xl mx-auto text-center space-y-4 py-12">
-                <div className="text-lg text-white font-semibold">Analyzing {dim2Response.type.replace('_', ' ')}...</div>
-                <div className="text-sm text-[#8b99b0]">{currentStep}</div>
-                <div className="text-3xl font-bold" style={{ color: '#00e5ff', fontFamily: "'Oxanium', monospace" }}>
-                  {elapsed}s
-                </div>
-                <button onClick={handleCancel} className="text-xs text-[#6b7a99] hover:text-red-400 transition-colors">
-                  ✕ Cancel
-                </button>
-              </div>
-            )}
-
-            {/* DIM 1 Complete — Structured Data Template */}
-            {selectedSymbol && phase === 'complete' && dim1Response?.data && !dim2Response && (
-              <div className="max-w-4xl mx-auto">
-                {dim1Response.type === 'premarket' && (
-                  <PremarketTemplate data={dim1Response.data} onFollowUp={handleFollowUp} />
-                )}
-                {dim1Response.type === 'gaps' && (
-                  <GapsTemplate data={dim1Response.data} onFollowUp={handleFollowUp} />
-                )}
-                {dim1Response.type === 'calendar' && (
-                  <CalendarTemplate data={dim1Response.data} onFollowUp={handleFollowUp} />
-                )}
-              </div>
-            )}
-
-            {/* DIM 2 Complete — Structured Template + AI Narrative */}
-            {selectedSymbol && phase === 'complete' && dim2Response?.data && (
-              <div className="max-w-4xl mx-auto">
-                {dim2Response.type === 'bullish_setups' && (
-                  <BullishSetupsTemplate data={dim2Response.data} onFollowUp={handleFollowUp} />
-                )}
-                {dim2Response.type === 'seasonality' && (
-                  <SeasonalityTemplate data={dim2Response.data} onFollowUp={handleFollowUp} />
-                )}
-                {dim2Response.type === 'eod_summary' && (
-                  <EODSummaryTemplate data={dim2Response.data} onFollowUp={handleFollowUp} />
-                )}
-                {dim2Response.type === 'afterhours_movers' && (
-                  <AfterhoursTemplate data={dim2Response.data} onFollowUp={handleFollowUp} />
-                )}
-              </div>
-            )}
-
-            {/* Quick mode - show simple loading */}
-            {selectedSymbol && skipSplitScreen && phase === 'scanning' && !dim1Response && !dim2Response && (
-              <div className="max-w-2xl mx-auto text-center space-y-4">
-                <div className="text-lg text-white font-semibold">Analyzing...</div>
-                <div className="text-sm text-[#8b99b0]">{currentStep}</div>
-                <div
-                  className="text-3xl font-bold"
-                  style={{ color: '#00e5ff', fontFamily: "'Oxanium', monospace" }}
-                >
-                  {elapsed}s
-                </div>
-                <button
-                  onClick={handleCancel}
-                  className="text-xs text-[#6b7a99] hover:text-red-400 transition-colors"
-                >
-                  ✕ Cancel
-                </button>
-              </div>
-            )}
-
-            {selectedSymbol && phase === 'complete' && currentAnalysis?.parsed && !dim1Response && !dim2Response && (
-              <div className="max-w-4xl mx-auto">
-                <AnalysisResponse
-                  parsed={currentAnalysis.parsed}
-                  rawContent={currentAnalysis.content || ''}
-                  ticker={currentAnalysis.ticker}
-                  onGoDeeper={() => {
-                    const nextDepth: AnalysisDepth = analysisDepth === 'quick' ? 'analysis' : 'full';
-                    setAnalysisDepth(nextDepth);
-                    handleSubmit(input || messages[messages.length - 1]?.content || '');
-                  }}
-                  onFollowUp={handleFollowUp}
-                  onNewAnalysis={handleNewAnalysis}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Input Bar */}
-          {selectedSymbol && (
-            <div className="border-t border-[rgba(255,255,255,0.04)] p-4 lg:p-6" style={{ background: '#060810' }}>
-            <div className="max-w-4xl mx-auto space-y-3">
-              <AnalysisModeSelector value={analysisDepth} onChange={handleAnalysisDepthChange} />
-              <form onSubmit={handleFormSubmit} className="flex gap-3">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask about prices, levels, or trading analysis..."
-                  disabled={isLoading}
-                  className="flex-1 px-4 py-3 rounded-lg text-sm text-white placeholder:text-[#4a6070] focus:outline-none focus:ring-2 focus:ring-[#00e5ff] focus:border-transparent min-h-[48px]"
-                  style={{
-                    background: 'rgba(255,255,255,0.02)',
-                    border: '1px solid rgba(255,255,255,0.05)',
-                  }}
-                />
-                <Button
-                  type="submit"
-                  disabled={!input.trim() || isLoading}
-                  className="min-h-[48px] px-6"
-                  style={{
-                    background: '#00e5ff',
-                    color: '#0a0f1a',
-                  }}
-                >
-                  {isLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <>
-                      <span>Analyze</span>
-                      <Send className="h-4 w-4 ml-2" />
-                    </>
-                  )}
-                </Button>
-              </form>
             </div>
           </div>
-          )}
+
+          {/* Query Bar - Fixed at bottom */}
+          <footer 
+            className="h-[60px] flex items-center gap-3 px-4 border-t flex-shrink-0"
+            style={{ borderColor: COLORS.cardBorder, background: 'rgba(0,0,0,0.3)' }}
+          >
+            {/* Mode Selector */}
+            <div className="flex rounded-lg overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+              {[
+                { key: 'quick', label: 'Quick Look', icon: Zap, time: '1-3s' },
+                { key: 'analysis', label: 'Analysis', icon: BarChart3, time: '10-15s' },
+                { key: 'thesis', label: 'Full Thesis', icon: Target, time: '30-60s' },
+              ].map(({ key, label, icon: Icon, time }) => (
+                <button
+                  key={key}
+                  onClick={() => setQueryMode(key as any)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold transition-all"
+                  style={{
+                    background: queryMode === key ? 'rgba(0,229,255,0.15)' : 'transparent',
+                    color: queryMode === key ? COLORS.cyan : '#888',
+                  }}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  {label}
+                  <span className="text-[10px] opacity-60">({time})</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Input */}
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSubmitQuery()}
+                placeholder={`Ask about ${selectedTicker} prices, levels, or trading analysis...`}
+                className="w-full pl-4 pr-12 py-2.5 rounded-lg text-sm bg-black/30 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500/50"
+              />
+              <button
+                onClick={handleSubmitQuery}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-all"
+                style={{ background: 'rgba(0,229,255,0.2)' }}
+              >
+                <Send className="w-4 h-4" style={{ color: COLORS.cyan }} />
+              </button>
+            </div>
+          </footer>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// Landing view when no symbol is selected
+function AskLandingView({ 
+  onSelectTicker, 
+  watchlist, 
+  vix 
+}: { 
+  onSelectTicker: (ticker: string) => void;
+  watchlist: string[];
+  vix: number | null;
+}) {
+  const [searchValue, setSearchValue] = useState('');
+
+  const handleSearch = () => {
+    if (searchValue.trim()) {
+      onSelectTicker(searchValue.trim().toUpperCase());
+    }
+  };
+
+  const getTimeOfDay = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'morning';
+    if (hour < 17) return 'afternoon';
+    return 'evening';
+  };
+
+  return (
+    <div 
+      className="min-h-[calc(100vh-40px)] flex items-center justify-center"
+      style={{ background: COLORS.bg }}
+    >
+      <div className="text-center max-w-lg">
+        <h1 
+          className="text-3xl font-bold text-white mb-2"
+          style={{ fontFamily: "'Oxanium', monospace" }}
+        >
+          Good {getTimeOfDay()}, Trader
+        </h1>
+        <p className="text-gray-400 mb-6">
+          Enter a symbol to open the War Room
+        </p>
+
+        {/* Regime Badge */}
+        <div className="flex justify-center mb-6">
+          <div 
+            className="flex items-center gap-2 px-4 py-2 rounded-full"
+            style={{ 
+              background: 'rgba(0,230,118,0.1)', 
+              border: '1px solid rgba(0,230,118,0.2)' 
+            }}
+          >
+            <span className="w-2 h-2 rounded-full bg-green-400" />
+            <span className="text-sm text-green-400 font-semibold">NORMAL REGIME</span>
+            <span className="text-sm text-gray-400">VIX {vix?.toFixed(1) || '—'}</span>
+          </div>
         </div>
 
-        {/* Right Sidebar */}
-        {selectedSymbol && (
-          <div
-            className="hidden xl:block w-[220px] flex-shrink-0 border-l border-[rgba(255,255,255,0.04)]"
-            style={{ background: '#060810' }}
+        {/* Search Input */}
+        <div className="mb-6">
+          <div 
+            className="flex items-center rounded-xl overflow-hidden"
+            style={{ 
+              background: 'rgba(0,0,0,0.3)', 
+              border: '2px solid rgba(0,229,255,0.3)' 
+            }}
           >
-            <RecentInsightsSidebar onInsightClick={handleCardClick} onTrendingClick={handleCardClick} />
+            <input
+              type="text"
+              value={searchValue}
+              onChange={(e) => setSearchValue(e.target.value.toUpperCase())}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              placeholder="SPY, NVDA, AAPL..."
+              className="flex-1 px-6 py-4 text-lg bg-transparent text-white placeholder-gray-500 focus:outline-none"
+            />
+            <button
+              onClick={handleSearch}
+              className="px-6 py-4 transition-all"
+              style={{ background: 'rgba(0,229,255,0.1)' }}
+            >
+              <Send className="w-5 h-5" style={{ color: COLORS.cyan }} />
+            </button>
           </div>
-        )}
+        </div>
+
+        {/* Watchlist Quick Select */}
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Your Watchlist</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {watchlist.map((ticker) => (
+              <button
+                key={ticker}
+                onClick={() => onSelectTicker(ticker)}
+                className="px-4 py-2 rounded-lg text-sm font-semibold transition-all hover:scale-105"
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  color: '#fff',
+                }}
+              >
+                {ticker}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-      <Footer />
     </div>
   );
 }

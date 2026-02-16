@@ -217,3 +217,9 @@ export function throttle<T extends (...args: unknown[]) => unknown>(
     }
   };
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  HTML UTILITIES
+// ═══════════════════════════════════════════════════════════════
+
+export { decodeHTMLEntities } from './utils/decode-html';

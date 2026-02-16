@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     // Extract market data from batch
-    const marketData = extractMarketData(batchData);
+    const marketData = await extractMarketData(batchData);
     
     // Extract movers from batch
     const moversData = extractMovers(batchData);
@@ -149,7 +149,7 @@ async function fetchBatchSnapshots(bypassCache = false): Promise<Map<string, any
 }
 
 // Extract SPY, QQQ, VIX from batch data
-function extractMarketData(batchData: Map<string, any>): MarketData {
+async function extractMarketData(batchData: Map<string, any>): Promise<MarketData> {
   const results: MarketData = {
     spy: null,
     qqq: null,
@@ -171,10 +171,31 @@ function extractMarketData(batchData: Map<string, any>): MarketData {
   // Extract VIX
   const vixData = batchData.get('VIX');
   if (vixData) {
-    const price = vixData.lastTrade?.p || vixData.day?.c || vixData.prevDay?.c || 0;
-    const prevClose = vixData.prevDay?.c || price;
-    const change = price - prevClose;
-    const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+    let price = parseFloat(vixData.lastTrade?.p) || parseFloat(vixData.day?.c) || parseFloat(vixData.prevDay?.c) || 0;
+    const prevClose = parseFloat(vixData.prevDay?.c) || 0;
+    let change = parseFloat(vixData.todaysChange) || 0;
+    let changePercent = parseFloat(vixData.todaysChangePerc) || 0;
+    
+    // CRITICAL FIX: If price is 0 but we have prevClose and change, calculate it
+    if (price === 0 && prevClose > 0 && change !== 0) {
+      price = prevClose + change;
+    }
+    
+    // If still 0, try calculating from prevClose and changePercent
+    if (price === 0 && prevClose > 0 && changePercent !== 0) {
+      price = prevClose * (1 + changePercent / 100);
+    }
+    
+    // If still 0, calculate change from prevClose
+    if (price > 0 && prevClose > 0 && change === 0) {
+      change = price - prevClose;
+      changePercent = (change / prevClose) * 100;
+    }
+    
+    // Last resort: use prevClose as current price (market closed)
+    if (price === 0 && prevClose > 0) {
+      price = prevClose;
+    }
 
     results.vix = {
       value: Math.round(price * 100) / 100,
@@ -182,6 +203,46 @@ function extractMarketData(batchData: Map<string, any>): MarketData {
       changePercent: Math.round(changePercent * 100) / 100,
       level: getVixLevel(price),
     };
+  } else {
+    // Fallback: try fetching VIX directly as an index
+    try {
+      const yesterday = getYesterdayDate();
+      const vixUrl = `${POLYGON_BASE_URL}/v1/open-close/I:VIX/${yesterday}?apiKey=${POLYGON_API_KEY}`;
+      const vixRes = await fetch(vixUrl, {
+        next: { revalidate: 300 },
+      });
+      
+      if (vixRes.ok) {
+        const vixData = await vixRes.json();
+        const price = vixData.close || vixData.afterHours || 20;
+        const change = (vixData.close || 0) - (vixData.open || 0);
+        const changePercent = vixData.open > 0 ? (change / vixData.open) * 100 : 0;
+        
+        results.vix = {
+          value: Math.round(price * 100) / 100,
+          change: Math.round(change * 100) / 100,
+          changePercent: Math.round(changePercent * 100) / 100,
+          level: getVixLevel(price),
+        };
+      } else {
+        // Default fallback if fetch fails
+        results.vix = {
+          value: 20,
+          change: 0,
+          changePercent: 0,
+          level: 'normal',
+        };
+      }
+    } catch (err) {
+      console.error('[Market Pulse] VIX fallback fetch error:', err);
+      // Default fallback
+      results.vix = {
+        value: 20,
+        change: 0,
+        changePercent: 0,
+        level: 'normal',
+      };
+    }
   }
 
   return results;
@@ -356,6 +417,17 @@ async function fetchVixData(bypassCache = false): Promise<VixData | null> {
     console.error('Error fetching VIX:', error);
   }
   return null;
+}
+
+// Get yesterday's date (skip weekends)
+function getYesterdayDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  // Skip weekends
+  while (d.getDay() === 0 || d.getDay() === 6) {
+    d.setDate(d.getDate() - 1);
+  }
+  return d.toISOString().split('T')[0];
 }
 
 // Determine VIX level

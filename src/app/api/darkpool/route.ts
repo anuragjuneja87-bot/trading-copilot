@@ -237,8 +237,27 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const tickerFilter = searchParams.get('ticker'); // Single ticker
     const tickersParam = searchParams.get('tickers'); // Multiple tickers (comma-separated)
-    const minSize = parseInt(searchParams.get('minSize') || '100000');
     const timeFilter = searchParams.get('time') || 'hour';
+    
+    // Date range filtering (takes precedence over time filter)
+    const from = searchParams.get('from'); // YYYY-MM-DD format
+    const to = searchParams.get('to'); // YYYY-MM-DD format
+    let timestampGte: number | null = null;
+    let timestampLte: number | null = null;
+    
+    if (from) {
+      const fromDate = new Date(from + 'T00:00:00Z');
+      timestampGte = fromDate.getTime();
+    }
+    if (to) {
+      const toDate = new Date(to + 'T23:59:59Z');
+      timestampLte = toDate.getTime();
+    }
+    
+    // Use lower minSize for historical queries (more lenient)
+    // Default: $100K for real-time, $5K for historical (very lenient to catch more prints)
+    const defaultMinSize = (timestampGte !== null || timestampLte !== null) ? 5000 : 100000;
+    const minSize = parseInt(searchParams.get('minSize') || defaultMinSize.toString());
     
     // Priority: single ticker > multiple tickers param > empty (return empty result)
     let tickers: string[] = [];
@@ -298,23 +317,35 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Calculate timestamp filter
+    // Calculate timestamp filter (use date range if provided, otherwise use time filter)
     const now = Date.now();
-    let timestampGte = now - 60 * 60 * 1000; // Default: last hour
-    if (timeFilter === 'day') {
-      timestampGte = now - 24 * 60 * 60 * 1000;
-    } else if (timeFilter === 'week') {
-      timestampGte = now - 7 * 24 * 60 * 60 * 1000;
+    if (timestampGte === null) {
+      // Default: last hour
+      timestampGte = now - 60 * 60 * 1000;
+      if (timeFilter === 'day') {
+        timestampGte = now - 24 * 60 * 60 * 1000;
+      } else if (timeFilter === 'week') {
+        timestampGte = now - 7 * 24 * 60 * 60 * 1000;
+      }
+    }
+    if (timestampLte === null) {
+      timestampLte = now;
     }
     
-    console.log(`[Dark Pool API] Time filter: ${timeFilter}, timestampGte: ${new Date(timestampGte).toISOString()}`);
+    const isHistoricalQuery = timestampGte !== null || timestampLte !== null;
+    console.log(`[Dark Pool API] Time filter: ${timeFilter}, timestampGte: ${new Date(timestampGte).toISOString()}, timestampLte: ${new Date(timestampLte).toISOString()}, isHistorical: ${isHistoricalQuery}, minSize: $${minSize}`);
 
     // Fetch trades for each ticker
     for (const ticker of tickers.slice(0, 10)) {
       try {
         // Fetch trades - use nanoseconds
         const timestampGteNs = timestampGte * 1000000;
-        const tradesUrl = `${POLYGON_BASE_URL}/v3/trades/${ticker}?timestamp.gte=${timestampGteNs}&limit=1000&order=desc&apiKey=${POLYGON_API_KEY}`;
+        const timestampLteNs = timestampLte * 1000000;
+        let tradesUrl = `${POLYGON_BASE_URL}/v3/trades/${ticker}?timestamp.gte=${timestampGteNs}`;
+        if (timestampLte !== null) {
+          tradesUrl += `&timestamp.lte=${timestampLteNs}`;
+        }
+        tradesUrl += `&limit=1000&order=desc&apiKey=${POLYGON_API_KEY}`;
         
         console.log(`[Dark Pool API] Fetching trades for ${ticker} from ${new Date(timestampGte).toISOString()}`);
         
@@ -341,14 +372,18 @@ export async function GET(request: NextRequest) {
           const size = parseInt(trade.size || 0);
           const value = price * size;
           
-          // Skip if value is too small
-          if (value < minSize) continue;
+          // For historical queries, be more lenient with filters
+          const isHistoricalQuery = timestampGte !== null || timestampLte !== null;
+          const effectiveMinSize = isHistoricalQuery ? Math.min(minSize, 5000) : minSize; // Cap at $5K for historical
+          const blockSizeThreshold = isHistoricalQuery ? 250 : 1000; // Very low threshold for historical (250 shares)
+          
+          // Skip if value is too small AND size is too small
+          if (value < effectiveMinSize && size < blockSizeThreshold) continue;
 
           // Check if dark pool exchange OR large block trade
           const exchangeId = trade.exchange || 0;
           const isDarkPool = DARK_POOL_EXCHANGES.includes(exchangeId);
-          // Lower threshold: large block is value >= minSize OR size >= 1000 shares (more lenient)
-          const isLargeBlock = value >= minSize || size >= 1000;
+          const isLargeBlock = value >= effectiveMinSize || size >= blockSizeThreshold;
           
           if (!isDarkPool && !isLargeBlock) {
             continue;
@@ -400,7 +435,34 @@ export async function GET(request: NextRequest) {
         if (printsForTicker === 0 && trades.length > 0) {
           const sampleTrade = trades[0];
           const sampleValue = (parseFloat(sampleTrade.price || 0) * parseInt(sampleTrade.size || 0));
-          console.log(`[Dark Pool API] ${ticker}: No prints found. Sample trade: value=$${sampleValue.toFixed(0)}, size=${sampleTrade.size}, exchange=${sampleTrade.exchange}`);
+          const sampleExchange = sampleTrade.exchange || 0;
+          const isDarkPoolExchange = DARK_POOL_EXCHANGES.includes(sampleExchange);
+          const isHistoricalQuery = timestampGte !== null || timestampLte !== null;
+          const effectiveMinSize = isHistoricalQuery ? Math.min(minSize, 5000) : minSize;
+          const blockSizeThreshold = isHistoricalQuery ? 250 : 1000;
+          const isLargeBlock = sampleValue >= effectiveMinSize || parseInt(sampleTrade.size || 0) >= blockSizeThreshold;
+          
+          console.log(`[Dark Pool API] ${ticker}: No prints found. Sample trade: value=$${sampleValue.toFixed(0)}, size=${sampleTrade.size}, exchange=${sampleExchange} (${getExchangeName(sampleExchange)}), isDarkPool=${isDarkPoolExchange}, isLargeBlock=${isLargeBlock}, effectiveMinSize=$${effectiveMinSize}, blockSizeThreshold=${blockSizeThreshold}`);
+          
+          // Log summary of why trades were filtered out
+          let filteredByValue = 0;
+          let filteredByExchange = 0;
+          let passed = 0;
+          
+          trades.slice(0, 100).forEach((t: any) => {
+            const val = parseFloat(t.price || 0) * parseInt(t.size || 0);
+            const exch = t.exchange || 0;
+            const isDP = DARK_POOL_EXCHANGES.includes(exch);
+            const isLB = val >= effectiveMinSize || parseInt(t.size || 0) >= blockSizeThreshold;
+            
+            if (val < effectiveMinSize && parseInt(t.size || 0) < blockSizeThreshold) filteredByValue++;
+            else if (!isDP && !isLB) filteredByExchange++;
+            else passed++;
+          });
+          
+          console.log(`[Dark Pool API] ${ticker}: Filter summary (first 100 trades): passed=${passed}, filteredByValue=${filteredByValue}, filteredByExchange=${filteredByExchange}`);
+        } else if (trades.length === 0) {
+          console.log(`[Dark Pool API] ${ticker}: No trades returned from Polygon API for date range`);
         }
       } catch (tickerError) {
         console.error(`[Dark Pool API] Error processing ${ticker}:`, tickerError);
