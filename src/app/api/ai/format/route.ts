@@ -657,58 +657,64 @@ export async function POST(request: NextRequest) {
     const baseUrl = request.nextUrl.origin;
     const fetchInternal = async (path: string): Promise<any> => {
       try {
+        console.log(`[AI Format] Fetching: ${baseUrl}${path}`);
         const res = await fetch(`${baseUrl}${path}`, {
           headers: { 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(10000),
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          console.error(`[AI Format] Fetch failed for ${path}: ${res.status} ${res.statusText}`);
+          return null;
+        }
         const json = await res.json();
-        return json.success ? json.data : null;
+        // Handle both { success: true, data: {...} } and direct {...} responses
+        const result = json.success ? json.data : json;
+        console.log(`[AI Format] Fetched ${path}:`, {
+          hasSuccess: !!json.success,
+          hasData: !!json.data,
+          resultKeys: result ? Object.keys(result) : [],
+        });
+        return result;
       } catch (err) {
-        console.error(`[Format API] Failed to fetch ${path}:`, err);
+        console.error(`[AI Format] Failed to fetch ${path}:`, err);
         return null;
       }
     };
 
-    // Build fetch promises based on what this template needs
-    if (dataNeedsList.includes('prices')) {
-      dataFetches.prices = fetchPolygonSnapshot(tickers);
-    }
-    if (dataNeedsList.includes('levels')) {
-      // For symbol_thesis, fetch from internal API to get real gamma levels
-      if (templateType === 'symbol_thesis') {
-        dataFetches.levels = fetchInternal(`/api/market/levels/${tickers[0]}`);
-      } else {
+    // For symbol_thesis, ALWAYS fetch ALL market data regardless of TEMPLATE_DATA_NEEDS
+    if (templateType === 'symbol_thesis') {
+      const ticker = tickers[0];
+      console.log(`[AI Format] Fetching ALL market data for symbol_thesis: ${ticker}`);
+      
+      // Fetch ALL required data in parallel
+      dataFetches.prices = fetchInternal(`/api/market/prices?tickers=${ticker}`);
+      dataFetches.levels = fetchInternal(`/api/market/levels/${ticker}`);
+      dataFetches.flow = fetchInternal(`/api/flow/options?tickers=${ticker}&limit=100`);
+      dataFetches.darkPool = fetchInternal(`/api/darkpool?tickers=${ticker}`);
+      dataFetches.news = fetchInternal(`/api/news?tickers=${ticker}&limit=5`);
+      dataFetches.pulse = fetchInternal(`/api/market-pulse`);
+      
+      console.log('[AI Format] All data fetch promises created for symbol_thesis');
+    } else {
+      // For other templates, use dataNeedsList
+      if (dataNeedsList.includes('prices')) {
+        dataFetches.prices = fetchPolygonSnapshot(tickers);
+      }
+      if (dataNeedsList.includes('levels')) {
         dataFetches.levels = fetchKeyLevels('SPY');
       }
-    }
-    if (dataNeedsList.includes('regime')) {
-      dataFetches.regime = fetchRegime();
-    }
-    if (dataNeedsList.includes('flow')) {
-      // For symbol_thesis, fetch full flow data from internal API
-      if (templateType === 'symbol_thesis') {
-        dataFetches.flow = fetchInternal(`/api/flow/options?tickers=${tickers[0]}&limit=100`);
-      } else {
+      if (dataNeedsList.includes('regime')) {
+        dataFetches.regime = fetchRegime();
+      }
+      if (dataNeedsList.includes('flow')) {
         dataFetches.flow = fetchFlowSummary(tickers);
       }
-    }
-    if (dataNeedsList.includes('news')) {
-      // For symbol_thesis, fetch from internal API
-      if (templateType === 'symbol_thesis') {
-        dataFetches.news = fetchInternal(`/api/news?tickers=${tickers[0]}&limit=5`);
-      } else {
+      if (dataNeedsList.includes('news')) {
         dataFetches.news = fetchNews(tickers, 10);
       }
-    }
-    if (dataNeedsList.includes('gaps')) {
-      dataFetches.gaps = fetchOvernightGaps(tickers);
-    }
-    
-    // For symbol_thesis, also fetch dark pool and market pulse
-    if (templateType === 'symbol_thesis') {
-      dataFetches.darkPool = fetchInternal(`/api/darkpool?tickers=${tickers[0]}`);
-      dataFetches.pulse = fetchInternal(`/api/market-pulse`);
+      if (dataNeedsList.includes('gaps')) {
+        dataFetches.gaps = fetchOvernightGaps(tickers);
+      }
     }
 
     // Await all in parallel
@@ -718,6 +724,40 @@ export async function POST(request: NextRequest) {
     dataKeys.forEach((key, i) => {
       marketData[key] = dataValues[i];
     });
+    
+    // ========================================
+    // IMMEDIATE DEBUG: Log raw API responses BEFORE any extraction
+    // ========================================
+    console.log('[DEBUG] ===== RAW API RESPONSES AFTER Promise.all =====');
+    if (templateType === 'symbol_thesis') {
+      const flowData = marketData.flow;
+      const newsData = marketData.news;
+      
+      console.log('[DEBUG] flowData:', JSON.stringify(flowData, null, 2));
+      console.log('[DEBUG] newsData:', JSON.stringify(newsData, null, 2));
+      
+      // Check structure
+      console.log('[DEBUG] flowData structure check:', {
+        hasData: !!flowData?.data,
+        hasStats: !!flowData?.stats,
+        hasDataStats: !!flowData?.data?.stats,
+        callRatioFromData: flowData?.data?.stats?.callRatio,
+        callRatioFromStats: flowData?.stats?.callRatio,
+        keys: flowData ? Object.keys(flowData) : [],
+        dataKeys: flowData?.data ? Object.keys(flowData.data) : [],
+      });
+      
+      console.log('[DEBUG] newsData structure check:', {
+        hasData: !!newsData?.data,
+        hasArticles: !!newsData?.articles,
+        hasDataArticles: !!newsData?.data?.articles,
+        articlesLengthFromData: newsData?.data?.articles?.length,
+        articlesLengthFromRoot: newsData?.articles?.length,
+        keys: newsData ? Object.keys(newsData) : [],
+        dataKeys: newsData?.data ? Object.keys(newsData.data) : [],
+      });
+    }
+    console.log('[DEBUG] ===== END RAW API RESPONSES =====');
     
     // ========================================
     // DEBUG: Log raw flowData immediately after fetch
@@ -802,20 +842,47 @@ export async function POST(request: NextRequest) {
       flowStatsKeys: marketData.flow?.stats ? Object.keys(marketData.flow.stats) : [],
     });
     
-    // Try stats first, then check if flow itself is the stats object
+    // Try multiple extraction paths based on API response structure
+    // fetchInternal returns json.data, so if API is { success: true, data: { stats: {...} } }
+    // then marketData.flow should be { stats: {...} } (data already extracted)
+    // But if fetchInternal doesn't extract, it might be { data: { stats: {...} } }
     let flowStats: any = null;
-    if (marketData.flow?.stats) {
-      // Structure: { flow: [...], stats: { callRatio: 40, putRatio: 60, ... } }
+    console.log('[AI Format] 3. Flow extraction - checking structure:', {
+      hasFlow: !!marketData.flow,
+      hasData: !!marketData.flow?.data,
+      hasStats: !!marketData.flow?.stats,
+      hasDataStats: !!marketData.flow?.data?.stats,
+      flowType: typeof marketData.flow,
+      flowKeys: marketData.flow ? Object.keys(marketData.flow) : [],
+      dataKeys: marketData.flow?.data ? Object.keys(marketData.flow.data) : [],
+      statsKeys: marketData.flow?.stats ? Object.keys(marketData.flow.stats) : [],
+      dataStatsKeys: marketData.flow?.data?.stats ? Object.keys(marketData.flow.data.stats) : [],
+      callRatioFromDataStats: marketData.flow?.data?.stats?.callRatio,
+      callRatioFromStats: marketData.flow?.stats?.callRatio,
+      callRatioDirect: marketData.flow?.callRatio,
+    });
+    
+    // Try: flowData.data.stats (if fetchInternal didn't extract data wrapper)
+    if (marketData.flow?.data?.stats) {
+      flowStats = marketData.flow.data.stats;
+      console.log('[AI Format] 3. Using marketData.flow.data.stats - SUCCESS');
+      console.log('[AI Format] 3. flowStats contents:', JSON.stringify(flowStats, null, 2));
+    }
+    // Try: flowData.stats (if fetchInternal already extracted data)
+    else if (marketData.flow?.stats) {
       flowStats = marketData.flow.stats;
-      console.log('[AI Format] 3. Using marketData.flow.stats');
-    } else if (marketData.flow && typeof marketData.flow === 'object' && 'callRatio' in marketData.flow) {
-      // Structure: { callRatio: 40, putRatio: 60, ... } (stats is the root)
+      console.log('[AI Format] 3. Using marketData.flow.stats - SUCCESS');
+      console.log('[AI Format] 3. flowStats contents:', JSON.stringify(flowStats, null, 2));
+    }
+    // Try: flowData directly (if stats is the root)
+    else if (marketData.flow && typeof marketData.flow === 'object' && 'callRatio' in marketData.flow) {
       flowStats = marketData.flow;
-      console.log('[AI Format] 3. Using marketData.flow directly (it is the stats object)');
+      console.log('[AI Format] 3. Using marketData.flow directly (it is the stats object) - SUCCESS');
+      console.log('[AI Format] 3. flowStats contents:', JSON.stringify(flowStats, null, 2));
     } else {
-      // Fallback to empty object
       flowStats = {};
-      console.log('[AI Format] 3. Using empty object fallback');
+      console.log('[AI Format] 3. Using empty object fallback - FAILED TO EXTRACT');
+      console.log('[AI Format] 3. marketData.flow was:', JSON.stringify(marketData.flow, null, 2));
     }
     
     console.log('[AI Format] 3. After extraction - flowStats:', {
@@ -864,29 +931,60 @@ export async function POST(request: NextRequest) {
       directArrayLength: Array.isArray(marketData.news) ? marketData.news.length : 0,
     });
     
-    // Try multiple extraction strategies
+    // Try multiple extraction strategies based on API response structure
+    // fetchInternal returns json.data, so if API is { success: true, data: { articles: [...] } }
+    // then marketData.news should be { articles: [...] } (data already extracted)
+    // But if fetchInternal doesn't extract, it might be { data: { articles: [...] } }
     let rawArticles: any[] = [];
-    if (marketData.news?.articles && Array.isArray(marketData.news.articles)) {
-      // Structure: { articles: [...], tickerSentiments: [...], marketMood: {...} }
+    console.log('[AI Format] 3. News extraction - checking structure:', {
+      hasNews: !!marketData.news,
+      hasData: !!marketData.news?.data,
+      hasArticles: !!marketData.news?.articles,
+      hasDataArticles: !!marketData.news?.data?.articles,
+      newsType: typeof marketData.news,
+      newsKeys: marketData.news ? Object.keys(marketData.news) : [],
+      dataKeys: marketData.news?.data ? Object.keys(marketData.news.data) : [],
+      articlesLengthFromData: marketData.news?.data?.articles?.length,
+      articlesLengthFromRoot: marketData.news?.articles?.length,
+      isArray: Array.isArray(marketData.news),
+    });
+    
+    // Try: newsData.data.articles (if fetchInternal didn't extract data wrapper)
+    if (marketData.news?.data?.articles && Array.isArray(marketData.news.data.articles)) {
+      rawArticles = marketData.news.data.articles;
+      console.log('[AI Format] 3. Using marketData.news.data.articles - SUCCESS (found', rawArticles.length, 'articles)');
+    }
+    // Try: newsData.articles (if fetchInternal already extracted data)
+    else if (marketData.news?.articles && Array.isArray(marketData.news.articles)) {
       rawArticles = marketData.news.articles;
-      console.log('[AI Format] 3. Using marketData.news.articles (found', rawArticles.length, 'articles)');
-    } else if (Array.isArray(marketData.news)) {
-      // Structure: [...] (direct array)
+      console.log('[AI Format] 3. Using marketData.news.articles - SUCCESS (found', rawArticles.length, 'articles)');
+    }
+    // Try: newsData directly (if it's an array)
+    else if (Array.isArray(marketData.news)) {
       rawArticles = marketData.news;
-      console.log('[AI Format] 3. Using marketData.news directly (it is an array,', rawArticles.length, 'items)');
-    } else if (marketData.news && typeof marketData.news === 'object') {
-      // Try to find articles in any property
-      const possibleKeys = Object.keys(marketData.news);
+      console.log('[AI Format] 3. Using marketData.news directly (it is an array) - SUCCESS (found', rawArticles.length, 'items)');
+    }
+    // Try: search for articles in any property
+    else if (marketData.news && typeof marketData.news === 'object') {
+      const searchObj = marketData.news.data || marketData.news;
+      const possibleKeys = Object.keys(searchObj);
+      console.log('[AI Format] 3. Searching for articles in keys:', possibleKeys);
       for (const key of possibleKeys) {
-        if (Array.isArray(marketData.news[key]) && marketData.news[key].length > 0) {
-          const firstItem = marketData.news[key][0];
+        if (Array.isArray(searchObj[key]) && searchObj[key].length > 0) {
+          const firstItem = searchObj[key][0];
           if (firstItem && (firstItem.title || firstItem.headline || firstItem.description)) {
-            rawArticles = marketData.news[key];
-            console.log('[AI Format] 3. Found articles in marketData.news.' + key, '(', rawArticles.length, 'items)');
+            rawArticles = searchObj[key];
+            console.log('[AI Format] 3. Found articles in', key, '- SUCCESS (found', rawArticles.length, 'items)');
             break;
           }
         }
       }
+      if (rawArticles.length === 0) {
+        console.log('[AI Format] 3. Failed to find articles - NO ARTICLES EXTRACTED');
+        console.log('[AI Format] 3. marketData.news was:', JSON.stringify(marketData.news, null, 2));
+      }
+    } else {
+      console.log('[AI Format] 3. marketData.news is null/undefined/not object - NO ARTICLES EXTRACTED');
     }
     
     const articleCount = rawArticles.length;
@@ -951,7 +1049,7 @@ export async function POST(request: NextRequest) {
       regime: marketRegime,
     };
     
-    // Debug: Verify stored values
+    // Debug: Verify stored values BEFORE prompt building
     console.log('[AI Format] ===== STORED VALUES VERIFICATION =====');
     console.log('[AI Format] marketData.flow.callRatio:', marketData.flow?.callRatio);
     console.log('[AI Format] marketData.flow.putRatio:', marketData.flow?.putRatio);
@@ -963,6 +1061,19 @@ export async function POST(request: NextRequest) {
       keys: marketData.prices && typeof marketData.prices === 'object' ? Object.keys(marketData.prices) : [],
       firstPriceVolume: Array.isArray(marketData.prices) ? marketData.prices[0]?.volume : marketData.prices?.[tickers[0]]?.volume,
     });
+    
+    // CRITICAL: Log final extracted values that will be used in prompt
+    if (templateType === 'symbol_thesis') {
+      console.log('[AI Format] FINAL EXTRACTED VALUES FOR PROMPT:', {
+        callRatio: flowStats.callRatio,
+        putRatio: flowStats.putRatio,
+        sweepRatio: (flowStats.sweepRatio ?? 0) * 100,
+        articleCount: rawArticles.length,
+        volume: Array.isArray(marketData.prices) ? marketData.prices[0]?.volume : marketData.prices?.[tickers[0]]?.volume,
+        vix: vix,
+        fearGreed: fearGreed,
+      });
+    }
     console.log('[AI Format] ===== END STORED VALUES VERIFICATION =====');
 
     // Validation log after all fetches
