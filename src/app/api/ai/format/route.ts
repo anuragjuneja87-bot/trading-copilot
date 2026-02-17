@@ -372,11 +372,43 @@ RESPOND WITH ONLY THE JSON. No markdown, no backticks, no preamble.`;
 
     case 'symbol_thesis':
       // Extract all data with proper fallbacks (data already extracted above)
-      const price = Array.isArray(marketData.prices) ? marketData.prices[0] : marketData.prices?.[tickers[0]] || marketData.prices || {};
-      const currentPrice = price.price || 0;
-      const priceChange = price.change || 0;
-      const priceChangePct = price.changePercent || 0;
-      const volume = price.volume || 0;
+      // Extract price data with debug logging
+      // fetchPolygonSnapshot returns Record<string, any> = { SPY: { price, volume, ... }, ... }
+      // So marketData.prices should be { SPY: {...}, QQQ: {...} }
+      let price: any = {};
+      if (Array.isArray(marketData.prices)) {
+        // If it's an array, use first element (shouldn't happen with fetchPolygonSnapshot)
+        price = marketData.prices[0] || {};
+        console.log('[AI Format] WARNING: prices is an array, using first element');
+      } else if (marketData.prices && typeof marketData.prices === 'object') {
+        // Try to get price for the first ticker
+        const ticker = tickers[0]?.toUpperCase() || 'SPY';
+        price = marketData.prices[ticker] || marketData.prices[Object.keys(marketData.prices)[0]] || {};
+      }
+      
+      console.log('[AI Format] Price extraction debug:', {
+        pricesType: Array.isArray(marketData.prices) ? 'array' : typeof marketData.prices,
+        pricesKeys: marketData.prices && typeof marketData.prices === 'object' && !Array.isArray(marketData.prices) ? Object.keys(marketData.prices) : [],
+        ticker: tickers[0],
+        priceObject: JSON.stringify(price, null, 2),
+        priceVolume: price.volume,
+        priceVolumeType: typeof price.volume,
+        priceVolumeValue: price.volume,
+      });
+      
+      const currentPrice = typeof price.price === 'number' ? price.price : 0;
+      const priceChange = typeof price.change === 'number' ? price.change : 0;
+      const priceChangePct = typeof price.changePercent === 'number' ? price.changePercent : 0;
+      // CRITICAL: Use exact value from API, preserve 0
+      const volume = typeof price.volume === 'number' ? price.volume : 0;
+      
+      console.log('[AI Format] Extracted volume:', {
+        rawVolume: price.volume,
+        extractedVolume: volume,
+        volumeIsZero: volume === 0,
+        volumeIsNumber: typeof volume === 'number',
+        volumeValue: volume,
+      });
       
       const levels = marketData.levels || {};
       const callWall = levels.callWall || 0;
@@ -396,14 +428,41 @@ RESPOND WITH ONLY THE JSON. No markdown, no backticks, no preamble.`;
       const distanceToCallWall = currentPrice > 0 ? ((callWall - currentPrice) / currentPrice * 100) : 0;
       const distanceToPutWall = currentPrice > 0 ? ((currentPrice - putWall) / currentPrice * 100) : 0;
       
-      // Flow data (already extracted above)
+      // Flow data (already extracted and stored in marketData.flow above)
+      // marketData.flow should already be the stats object at this point
+      console.log('[AI Format] ===== PROMPT BUILDING - EXTRACTION =====');
+      console.log('[AI Format] marketData.flow at prompt build:', {
+        type: typeof marketData.flow,
+        isObject: typeof marketData.flow === 'object',
+        keys: marketData.flow ? Object.keys(marketData.flow) : [],
+        hasCallRatio: 'callRatio' in (marketData.flow || {}),
+        callRatio: marketData.flow?.callRatio,
+        putRatio: marketData.flow?.putRatio,
+        sweepRatio: marketData.flow?.sweepRatio,
+        fullObject: JSON.stringify(marketData.flow, null, 2),
+      });
+      
       const flowStats = marketData.flow || {};
       const netFlow = flowStats.netDeltaAdjustedFlow ?? 0;
-      const callRatio = flowStats.callRatio ?? 50;
-      const putRatio = flowStats.putRatio ?? 50;
-      const sweepRatio = (flowStats.sweepRatio ?? 0) * 100; // Already converted to percentage
+      // CRITICAL: Use explicit checks to preserve actual values (40, 60) instead of defaulting to 50
+      const callRatio = flowStats.callRatio !== undefined && flowStats.callRatio !== null ? flowStats.callRatio : 50;
+      const putRatio = flowStats.putRatio !== undefined && flowStats.putRatio !== null ? flowStats.putRatio : 50;
+      // sweepRatio is a decimal (0.0126), convert to percentage (1.26%)
+      const sweepRatio = flowStats.sweepRatio !== undefined && flowStats.sweepRatio !== null ? (flowStats.sweepRatio * 100) : 0;
       const unusualCount = flowStats.unusualCount ?? 0;
       const flowRegime = flowStats.regime || 'UNKNOWN';
+      
+      // Debug: Log what we're using in the prompt
+      console.log('[AI Format] Extracted flow values for prompt:', {
+        callRatio,
+        putRatio,
+        sweepRatio: sweepRatio.toFixed(2),
+        netFlow,
+        flowStatsKeys: Object.keys(flowStats),
+        flowStatsCallRatio: flowStats.callRatio,
+        flowStatsPutRatio: flowStats.putRatio,
+        flowStatsSweepRatio: flowStats.sweepRatio,
+      });
       
       // Dark pool data (already extracted above)
       const dpStats = marketData.darkPool || {};
@@ -413,13 +472,44 @@ RESPOND WITH ONLY THE JSON. No markdown, no backticks, no preamble.`;
       const dpRegime = dpStats.regime || 'UNKNOWN';
       const dpPrintCount = dpStats.printCount ?? 0;
       
-      // News data (already extracted above)
+      // News data (already extracted and stored in marketData.news above)
+      // marketData.news should already have articles, bullish, bearish, neutral, sentiment
+      console.log('[AI Format] marketData.news at prompt build:', {
+        type: typeof marketData.news,
+        isObject: typeof marketData.news === 'object',
+        keys: marketData.news ? Object.keys(marketData.news) : [],
+        hasArticles: 'articles' in (marketData.news || {}),
+        articlesLength: marketData.news?.articles?.length,
+        articlesIsArray: Array.isArray(marketData.news?.articles),
+        fullObject: JSON.stringify(marketData.news, null, 2),
+      });
+      
       const articles = marketData.news?.articles || [];
       const articleCount = articles.length;
       const bullishNews = marketData.news?.bullish ?? 0;
       const bearishNews = marketData.news?.bearish ?? 0;
       const neutralNews = marketData.news?.neutral ?? 0;
       const newsSentiment = marketData.news?.sentiment || 'MIXED';
+      
+      // Debug: Log what we're using in the prompt
+      console.log('[AI Format] Extracted news values for prompt:', {
+        articleCount,
+        articlesLength: articles.length,
+        bullishNews,
+        bearishNews,
+        neutralNews,
+        newsSentiment,
+        firstArticleTitle: articles[0]?.title?.substring(0, 50) || 'N/A',
+      });
+      
+      console.log('[AI Format] Volume value for prompt:', {
+        volume,
+        volumeType: typeof volume,
+        volumeIsZero: volume === 0,
+        volumeValue: volume,
+      });
+      
+      console.log('[AI Format] ===== END PROMPT BUILDING VALUES =====');
       
       // Market pulse (already extracted above)
       const vix = marketData.pulse?.vix ?? 20;
@@ -453,7 +543,7 @@ PRICE
 • Current Price: $${currentPrice.toFixed(2)}
 • Change: ${priceChange >= 0 ? '+' : ''}$${priceChange.toFixed(2)} (${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toFixed(2)}%)
 • Day Range: $${levels.low?.toFixed(2) || 'N/A'} - $${levels.high?.toFixed(2) || 'N/A'}
-• Volume: ${volume > 0 ? (volume / 1e6).toFixed(1) + 'M shares' : 'N/A (market closed)'}
+• Volume: ${volume > 0 ? (volume / 1e6).toFixed(1) + 'M shares' : 'Market closed (0 shares)'} ← USE THIS EXACT VALUE: ${volume === 0 ? '0 (market closed)' : volume.toLocaleString() + ' shares'}. DO NOT invent a different volume number.
 
 VOLATILITY (USE THESE EXACT VALUES)
 • VIX: ${vix.toFixed(1)} ← USE THIS NUMBER, DO NOT INVENT ANOTHER
@@ -476,8 +566,8 @@ GAMMA POSITIONING
 
 OPTIONS FLOW
 • Net Delta-Adjusted Flow: ${netFlow >= 0 ? '+' : ''}$${(netFlow / 1000).toFixed(1)}K
-• Call/Put Split: ${callRatio}% calls / ${putRatio}% puts
-• Sweep Activity: ${sweepRatio.toFixed(2)}%${sweepRatio > 10 ? ' (elevated)' : sweepRatio < 3 ? ' (low)' : ''}
+• Call/Put Split: ${callRatio}% calls / ${putRatio}% puts ← USE THESE EXACT VALUES: ${callRatio}% calls, ${putRatio}% puts. DO NOT say "50/50" if the data shows ${callRatio}/${putRatio}.
+• Sweep Activity: ${sweepRatio.toFixed(2)}%${sweepRatio > 10 ? ' (elevated)' : sweepRatio < 3 ? ' (low)' : ''} ← USE THIS EXACT VALUE: ${sweepRatio.toFixed(2)}%. DO NOT say "zero sweep activity" if this shows ${sweepRatio.toFixed(2)}%.
 • Unusual Trades: ${unusualCount}
 • Flow Regime: ${flowRegime}
 
@@ -487,10 +577,13 @@ DARK POOL
 • Regime: ${dpRegime}
 ${dpPrintCount === 0 ? '• ⚠️ NO DATA — Market may be closed, cannot assess institutional positioning' : ''}
 
-NEWS SENTIMENT (${articleCount} articles analyzed)
+NEWS SENTIMENT (${articleCount} articles analyzed) ← USE THIS EXACT COUNT: ${articleCount} articles. DO NOT say "no news articles" if this shows ${articleCount} articles.
 • Breakdown: ${bullishNews} bullish, ${bearishNews} bearish, ${neutralNews} neutral
 • Overall: ${newsSentiment}
-${articleCount > 0 ? articles.slice(0, 3).map((a: any) => `• "${(a.title || 'Untitled').substring(0, 60)}..."`).join('\n') : '• No news articles available'}
+${articleCount > 0 ? articles.slice(0, 3).map((a: any) => {
+  const title = a.title || a.headline || 'Untitled';
+  return `• "${title.substring(0, 60)}${title.length > 60 ? '...' : ''}"`;
+}).join('\n') : '• No news articles available'}
 
 ══════════════════════════════════════════════════════════════════════
 ANALYSIS TASK
@@ -513,7 +606,9 @@ Write a 4-6 sentence thesis following this structure:
    - "BEARISH with [high/medium/low] confidence"
    - "NEUTRAL with [high/medium/low] confidence"
 
-REMINDER: Use ONLY the data above. The VIX is ${vix.toFixed(1)} — do not say it is any other number.
+REMINDER: Use ONLY the data above. 
+- The VIX is ${vix.toFixed(1)} — do not say it is any other number.
+- The volume is ${volume === 0 ? '0 (market closed)' : volume.toLocaleString() + ' shares'} — do not invent a different volume number like "96.3M shares" if the data shows 0.
 
 Write in plain text. No markdown, no JSON.`;
 
@@ -623,6 +718,30 @@ export async function POST(request: NextRequest) {
     dataKeys.forEach((key, i) => {
       marketData[key] = dataValues[i];
     });
+    
+    // ========================================
+    // DEBUG: Log raw flowData immediately after fetch
+    // ========================================
+    if (templateType === 'symbol_thesis' && marketData.flow) {
+      console.log('[AI Format] ===== RAW FLOW DATA DEBUG =====');
+      console.log('[AI Format] 1. flowData type:', typeof marketData.flow);
+      console.log('[AI Format] 1. flowData is array?', Array.isArray(marketData.flow));
+      console.log('[AI Format] 1. flowData keys:', Object.keys(marketData.flow));
+      console.log('[AI Format] 1. flowData full object:', JSON.stringify(marketData.flow, null, 2));
+      
+      if (marketData.flow.stats) {
+        console.log('[AI Format] 2. flowData.stats exists');
+        console.log('[AI Format] 2. flowData.stats keys:', Object.keys(marketData.flow.stats));
+        console.log('[AI Format] 2. flowData.stats.callRatio:', marketData.flow.stats.callRatio);
+        console.log('[AI Format] 2. flowData.stats.putRatio:', marketData.flow.stats.putRatio);
+        console.log('[AI Format] 2. flowData.stats full object:', JSON.stringify(marketData.flow.stats, null, 2));
+      } else {
+        console.log('[AI Format] 2. flowData.stats does NOT exist');
+        console.log('[AI Format] 2. flowData.callRatio (direct):', marketData.flow.callRatio);
+        console.log('[AI Format] 2. flowData.putRatio (direct):', marketData.flow.putRatio);
+      }
+      console.log('[AI Format] ===== END RAW FLOW DATA DEBUG =====');
+    }
 
     // ========================================
     // DEBUG: Log raw responses
@@ -634,32 +753,97 @@ export async function POST(request: NextRequest) {
     console.log('[AI Format] Flow keys:', marketData.flow ? Object.keys(marketData.flow) : 'NULL');
     console.log('[AI Format] Flow stats keys:', marketData.flow?.stats ? Object.keys(marketData.flow.stats) : 'NULL');
     console.log('[AI Format] Dark Pool keys:', marketData.darkPool ? Object.keys(marketData.darkPool) : 'NULL');
-    console.log('[AI Format] News keys:', marketData.news ? Object.keys(marketData.news) : 'NULL');
-    console.log('[AI Format] News articles count:', marketData.news?.articles?.length || (Array.isArray(marketData.news) ? marketData.news.length : 0));
     console.log('[AI Format] Pulse keys:', marketData.pulse ? Object.keys(marketData.pulse) : 'NULL');
     console.log('[AI Format] ===== END DATA FETCH =====');
+    
+    // ========================================
+    // DEBUG: Log raw newsData immediately after fetch
+    // ========================================
+    if (templateType === 'symbol_thesis' && marketData.news !== undefined) {
+      console.log('[AI Format] ===== RAW NEWS DATA DEBUG =====');
+      console.log('[AI Format] 1. newsData type:', typeof marketData.news);
+      console.log('[AI Format] 1. newsData is array?', Array.isArray(marketData.news));
+      console.log('[AI Format] 1. newsData is null?', marketData.news === null);
+      console.log('[AI Format] 1. newsData keys:', marketData.news && typeof marketData.news === 'object' ? Object.keys(marketData.news) : 'N/A');
+      console.log('[AI Format] 1. newsData full object:', JSON.stringify(marketData.news, null, 2));
+      
+      if (marketData.news?.articles) {
+        console.log('[AI Format] 2. newsData.articles exists');
+        console.log('[AI Format] 2. newsData.articles is array?', Array.isArray(marketData.news.articles));
+        console.log('[AI Format] 2. newsData.articles length:', marketData.news.articles.length);
+        console.log('[AI Format] 2. First article:', marketData.news.articles[0] ? {
+          title: marketData.news.articles[0].title,
+          sentiment: marketData.news.articles[0].sentiment,
+        } : 'N/A');
+      } else {
+        console.log('[AI Format] 2. newsData.articles does NOT exist');
+      }
+      
+      if (Array.isArray(marketData.news)) {
+        console.log('[AI Format] 2. newsData is direct array, length:', marketData.news.length);
+        console.log('[AI Format] 2. First item:', marketData.news[0] ? {
+          title: marketData.news[0].title,
+          sentiment: marketData.news[0].sentiment,
+        } : 'N/A');
+      }
+      console.log('[AI Format] ===== END RAW NEWS DATA DEBUG =====');
+    }
     
     // ========================================
     // EXTRACT & FORMAT DATA (with correct paths)
     // ========================================
     
     // Flow data - handle both {stats: {...}} and direct {...} structures
-    const flowStats = marketData.flow?.stats || marketData.flow || {};
+    console.log('[AI Format] ===== FLOW EXTRACTION DEBUG =====');
+    console.log('[AI Format] 3. Before extraction - marketData.flow:', {
+      hasFlow: !!marketData.flow,
+      hasStats: !!marketData.flow?.stats,
+      flowKeys: marketData.flow ? Object.keys(marketData.flow) : [],
+      flowStatsKeys: marketData.flow?.stats ? Object.keys(marketData.flow.stats) : [],
+    });
+    
+    // Try stats first, then check if flow itself is the stats object
+    let flowStats: any = null;
+    if (marketData.flow?.stats) {
+      // Structure: { flow: [...], stats: { callRatio: 40, putRatio: 60, ... } }
+      flowStats = marketData.flow.stats;
+      console.log('[AI Format] 3. Using marketData.flow.stats');
+    } else if (marketData.flow && typeof marketData.flow === 'object' && 'callRatio' in marketData.flow) {
+      // Structure: { callRatio: 40, putRatio: 60, ... } (stats is the root)
+      flowStats = marketData.flow;
+      console.log('[AI Format] 3. Using marketData.flow directly (it is the stats object)');
+    } else {
+      // Fallback to empty object
+      flowStats = {};
+      console.log('[AI Format] 3. Using empty object fallback');
+    }
+    
+    console.log('[AI Format] 3. After extraction - flowStats:', {
+      flowStatsKeys: Object.keys(flowStats),
+      flowStatsCallRatio: flowStats.callRatio,
+      flowStatsPutRatio: flowStats.putRatio,
+      flowStatsSweepRatio: flowStats.sweepRatio,
+      flowStatsFull: JSON.stringify(flowStats, null, 2),
+    });
+    
     const netFlow = flowStats.netDeltaAdjustedFlow ?? 0;
-    const callRatio = flowStats.callRatio ?? 50;
-    const putRatio = flowStats.putRatio ?? 50;
-    const sweepRatio = (flowStats.sweepRatio ?? 0) * 100; // Convert decimal to %
+    // CRITICAL: Use explicit checks to preserve actual values (40, 60) instead of defaulting to 50
+    const callRatio = flowStats.callRatio !== undefined && flowStats.callRatio !== null ? flowStats.callRatio : 50;
+    const putRatio = flowStats.putRatio !== undefined && flowStats.putRatio !== null ? flowStats.putRatio : 50;
+    // sweepRatio is a decimal (0.0126), convert to percentage (1.26%)
+    const sweepRatio = flowStats.sweepRatio !== undefined && flowStats.sweepRatio !== null ? (flowStats.sweepRatio * 100) : 0;
     const unusualCount = flowStats.unusualCount ?? 0;
     const flowRegime = flowStats.regime || 'UNKNOWN';
     
-    console.log('[AI Format] Extracted Flow:', { 
+    console.log('[AI Format] 3. Final extracted values:', { 
       callRatio, 
       putRatio, 
       sweepRatio: sweepRatio.toFixed(2), 
       netFlow: (netFlow / 1000).toFixed(1) + 'K',
       unusualCount,
-      flowStatsKeys: Object.keys(flowStats),
+      flowRegime,
     });
+    console.log('[AI Format] ===== END FLOW EXTRACTION DEBUG =====');
     
     // Dark pool data - handle both {stats: {...}} and direct {...} structures
     const dpStats = marketData.darkPool?.stats || marketData.darkPool || {};
@@ -670,16 +854,49 @@ export async function POST(request: NextRequest) {
     const dpPrintCount = dpStats.printCount ?? 0;
     
     // News data - handle both {articles: [...]} and direct [...] structures
-    const rawArticles = marketData.news?.articles || (Array.isArray(marketData.news) ? marketData.news : []);
+    console.log('[AI Format] ===== NEWS EXTRACTION DEBUG =====');
+    console.log('[AI Format] 3. Before extraction - marketData.news:', {
+      hasNews: !!marketData.news,
+      isArray: Array.isArray(marketData.news),
+      hasArticles: !!marketData.news?.articles,
+      newsKeys: marketData.news && typeof marketData.news === 'object' ? Object.keys(marketData.news) : [],
+      articlesLength: marketData.news?.articles?.length,
+      directArrayLength: Array.isArray(marketData.news) ? marketData.news.length : 0,
+    });
+    
+    // Try multiple extraction strategies
+    let rawArticles: any[] = [];
+    if (marketData.news?.articles && Array.isArray(marketData.news.articles)) {
+      // Structure: { articles: [...], tickerSentiments: [...], marketMood: {...} }
+      rawArticles = marketData.news.articles;
+      console.log('[AI Format] 3. Using marketData.news.articles (found', rawArticles.length, 'articles)');
+    } else if (Array.isArray(marketData.news)) {
+      // Structure: [...] (direct array)
+      rawArticles = marketData.news;
+      console.log('[AI Format] 3. Using marketData.news directly (it is an array,', rawArticles.length, 'items)');
+    } else if (marketData.news && typeof marketData.news === 'object') {
+      // Try to find articles in any property
+      const possibleKeys = Object.keys(marketData.news);
+      for (const key of possibleKeys) {
+        if (Array.isArray(marketData.news[key]) && marketData.news[key].length > 0) {
+          const firstItem = marketData.news[key][0];
+          if (firstItem && (firstItem.title || firstItem.headline || firstItem.description)) {
+            rawArticles = marketData.news[key];
+            console.log('[AI Format] 3. Found articles in marketData.news.' + key, '(', rawArticles.length, 'items)');
+            break;
+          }
+        }
+      }
+    }
+    
     const articleCount = rawArticles.length;
     
-    console.log('[AI Format] News articles found:', articleCount);
-    if (articleCount > 0) {
-      console.log('[AI Format] First article:', {
-        title: rawArticles[0]?.title?.substring(0, 50),
-        sentiment: rawArticles[0]?.sentiment,
-      });
-    }
+    console.log('[AI Format] 3. After extraction - rawArticles:', {
+      articleCount,
+      firstArticleTitle: rawArticles[0]?.title || rawArticles[0]?.headline || 'N/A',
+      firstArticleSentiment: rawArticles[0]?.sentiment || 'N/A',
+    });
+    console.log('[AI Format] ===== END NEWS EXTRACTION DEBUG =====');
     
     // Calculate news sentiment from articles
     let bullishNews = 0;
@@ -733,6 +950,20 @@ export async function POST(request: NextRequest) {
       fearGreedLabel,
       regime: marketRegime,
     };
+    
+    // Debug: Verify stored values
+    console.log('[AI Format] ===== STORED VALUES VERIFICATION =====');
+    console.log('[AI Format] marketData.flow.callRatio:', marketData.flow?.callRatio);
+    console.log('[AI Format] marketData.flow.putRatio:', marketData.flow?.putRatio);
+    console.log('[AI Format] marketData.flow.sweepRatio:', marketData.flow?.sweepRatio);
+    console.log('[AI Format] marketData.news.articles.length:', marketData.news?.articles?.length);
+    console.log('[AI Format] marketData.prices structure:', {
+      isArray: Array.isArray(marketData.prices),
+      isObject: typeof marketData.prices === 'object' && !Array.isArray(marketData.prices),
+      keys: marketData.prices && typeof marketData.prices === 'object' ? Object.keys(marketData.prices) : [],
+      firstPriceVolume: Array.isArray(marketData.prices) ? marketData.prices[0]?.volume : marketData.prices?.[tickers[0]]?.volume,
+    });
+    console.log('[AI Format] ===== END STORED VALUES VERIFICATION =====');
 
     // Validation log after all fetches
     console.log('[Format API] Data fetch results:', {
