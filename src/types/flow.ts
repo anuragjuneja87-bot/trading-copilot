@@ -32,6 +32,8 @@ export interface EnhancedOptionTrade {
   isSweep?: boolean;
   isGolden?: boolean;
   heatScore?: number;
+  aggression?: 'ABOVE_ASK' | 'AT_ASK' | 'AT_MID' | 'AT_BID' | 'BELOW_BID' | 'UNKNOWN';
+  aggressionScore?: number;
 }
 
 // GEX Strike Data
@@ -75,6 +77,11 @@ export interface EnhancedFlowStats {
   regime: 'RISK_ON' | 'RISK_OFF' | 'NEUTRAL';
   gexByStrike: GexStrike[];
   flowTimeSeries: FlowTimeSeries[];
+  // Aggression metrics
+  aggressionRatio?: number; // % of premium above ask
+  aggressionBias?: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  aboveAskPremium?: number;
+  belowBidPremium?: number;
   // Legacy fields for compatibility
   bullishPremium: number;
   bearishPremium: number;

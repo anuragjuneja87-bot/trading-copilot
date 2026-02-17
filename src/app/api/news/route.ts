@@ -31,7 +31,54 @@ function classifySeverity(text: string): 'CRISIS' | 'ELEVATED' | 'NORMAL' {
   return 'NORMAL';
 }
 
-// Keyword-based sentiment analysis
+// Enhanced sentiment analysis - returns 'positive' | 'negative' | 'neutral'
+function parseSentiment(article: any): 'positive' | 'negative' | 'neutral' {
+  // First, check if Polygon provides sentiment (some plans include it)
+  if (article.insights?.sentiment) {
+    const s = article.insights.sentiment.toLowerCase();
+    if (s === 'positive' || s === 'bullish') return 'positive';
+    if (s === 'negative' || s === 'bearish') return 'negative';
+    return 'neutral';
+  }
+  
+  // Fallback: keyword analysis
+  const title = article.title || '';
+  const description = article.description || article.teaser || article.body || '';
+  const text = `${title} ${description}`.toLowerCase();
+  
+  const bullishWords = [
+    'surge', 'soar', 'jump', 'rally', 'gain', 'rise', 'climb', 'up',
+    'beat', 'exceed', 'outperform', 'upgrade', 'buy', 'bullish', 
+    'record high', 'all-time high', 'growth', 'profit', 'boom',
+    'breakout', 'momentum', 'strong', 'robust', 'optimistic', 'positive'
+  ];
+  
+  const bearishWords = [
+    'fall', 'drop', 'plunge', 'crash', 'decline', 'tumble', 'sink', 'down',
+    'miss', 'disappoint', 'downgrade', 'sell', 'bearish',
+    'record low', 'loss', 'weak', 'concern', 'fear', 'risk', 'warning',
+    'selloff', 'correction', 'recession', 'layoff', 'cut', 'negative',
+    'slump', 'plummet', 'tank', 'struggle'
+  ];
+  
+  let bullScore = 0;
+  let bearScore = 0;
+  
+  bullishWords.forEach(word => {
+    if (text.includes(word)) bullScore++;
+  });
+  
+  bearishWords.forEach(word => {
+    if (text.includes(word)) bearScore++;
+  });
+  
+  // Need clear signal (at least 2 point difference)
+  if (bullScore >= bearScore + 2) return 'positive';
+  if (bearScore >= bullScore + 2) return 'negative';
+  return 'neutral';
+}
+
+// Keyword-based sentiment analysis (legacy support)
 function analyzeArticleSentiment(title: string, description: string): {
   score: number;
   label: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
@@ -54,7 +101,7 @@ function analyzeArticleSentiment(title: string, description: string): {
     'bankruptcy', 'default', 'fraud', 'investigation', 'lawsuit', 'scandal',
     'missed estimates', 'lowered guidance', 'concern', 'fear', 'crisis', 'risk'
   ];
-
+  
   const foundBullish: string[] = [];
   const foundBearish: string[] = [];
 
@@ -351,21 +398,45 @@ export async function GET(request: NextRequest) {
       signal: AbortSignal.timeout(30000), // 30 second timeout
     });
     
+    let rawArticles: any[] = [];
+    let data: any;
+    
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[News API] Massive.com Benzinga API error:', response.status, errorText);
-      throw new Error(`Benzinga API error: ${response.status}`);
+      const errorText = await response.text().catch(() => '');
+      console.warn('[News API] Massive.com Benzinga API failed:', response.status, errorText);
+      // Fallback to Polygon native news endpoint
+      const polygonUrl = tickers.length > 0
+        ? `https://api.polygon.io/v2/reference/news?ticker=${tickers[0]}&limit=${limit}&order=desc&apiKey=${POLYGON_API_KEY}`
+        : `https://api.polygon.io/v2/reference/news?limit=${limit}&order=desc&apiKey=${POLYGON_API_KEY}`;
+      
+      console.log('[News API] Falling back to Polygon native endpoint:', polygonUrl.replace(POLYGON_API_KEY!, '***'));
+      try {
+        const polygonRes = await fetch(polygonUrl, { signal: AbortSignal.timeout(10000) });
+        
+        if (polygonRes.ok) {
+          const polygonData = await polygonRes.json();
+          rawArticles = polygonData.results || [];
+          console.log('[News API] Polygon fallback returned:', rawArticles.length, 'articles');
+        } else {
+          const polygonError = await polygonRes.text().catch(() => '');
+          console.error('[News API] Polygon fallback also failed:', polygonRes.status, polygonError);
+          rawArticles = [];
+        }
+      } catch (polygonErr) {
+        console.error('[News API] Polygon fallback error:', polygonErr);
+        rawArticles = [];
+      }
+    } else {
+      data = await response.json();
+      rawArticles = data.results || [];
+      console.log('[News API] Benzinga response:', { 
+        resultsCount: rawArticles.length,
+        hasResults: !!rawArticles,
+        isArray: Array.isArray(rawArticles),
+      });
     }
     
-    const data = await response.json();
-    console.log('[News API] Benzinga response:', { 
-      resultsCount: data.results?.length || 0,
-      hasResults: !!data.results,
-      isArray: Array.isArray(data.results),
-      status: data.status
-    });
-    
-    if (!data.results || !Array.isArray(data.results)) {
+    if (!rawArticles || !Array.isArray(rawArticles) || rawArticles.length === 0) {
       console.error('[News API] Unexpected Benzinga API response format:', data);
       return NextResponse.json({
         success: true,
@@ -389,46 +460,114 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    console.log(`Fetched ${data.results.length} articles`);
+    console.log(`Fetched ${rawArticles.length} articles`);
 
     // Process articles with sentiment analysis
-    // Benzinga API response format: https://massive.com/docs/rest/partners/benzinga/news
-    const processedArticles: NewsArticle[] = data.results.map((article: any) => {
-      // Benzinga API uses: title, teaser (summary), body (full text), tickers, author, published, url, images, channels, tags
-      const combinedText = `${article.title || ''} ${article.teaser || ''} ${article.body || ''}`;
-      const articleSeverity = classifySeverity(combinedText);
-      const sentiment = analyzeArticleSentiment(article.title || '', article.teaser || article.body || '');
+      // Handle both Benzinga and Polygon formats
+      const processedArticles: NewsArticle[] = rawArticles.map((article: any) => {
+      // Handle both Benzinga and Polygon formats
+      const articleId = article.benzinga_id?.toString() || article.id || `news-${Date.now()}-${Math.random()}`;
+      const articleTitle = article.title || 'No headline';
+      const articleDescription = article.teaser || article.body || article.description || '';
+      const articleUrl = article.url || article.article_url || null;
+      const articleImageUrl = (article.images && article.images.length > 0 ? article.images[0] : null) || article.image_url || null;
+      const articlePublished = article.published || article.published_utc || new Date().toISOString();
+      const articleTickers = article.tickers || [];
+      const articleAuthor = article.author || null;
       
-      // Use first image if available
-      const imageUrl = article.images && article.images.length > 0 ? article.images[0] : null;
+      // Parse source properly - Polygon provides publisher object
+      // PRIORITY: publisher.name > publisher.title > domain from homepage_url > domain from article_url > "Market News"
+      let articlePublisher = article.publisher?.name || article.publisher?.title;
+      
+      if (!articlePublisher && article.publisher?.homepage_url) {
+        // Extract domain name from URL
+        try {
+          const url = new URL(article.publisher.homepage_url);
+          const domain = url.hostname
+            .replace('www.', '')
+            .split('.')[0]; // Get first part of domain (e.g., "benzinga" from "benzinga.com")
+          articlePublisher = domain.charAt(0).toUpperCase() + domain.slice(1);
+        } catch {
+          // If URL parsing fails, try simple string extraction
+          const url = article.publisher.homepage_url
+            .replace('https://', '')
+            .replace('http://', '')
+            .replace('www.', '')
+            .split('/')[0]
+            .split('.')[0];
+          articlePublisher = url.charAt(0).toUpperCase() + url.slice(1);
+        }
+      }
+      
+      // Fallback: extract from article URL
+      if (!articlePublisher && article.article_url) {
+        try {
+          const url = new URL(article.article_url);
+          const domain = url.hostname
+            .replace('www.', '')
+            .split('.')[0];
+          articlePublisher = domain.charAt(0).toUpperCase() + domain.slice(1);
+        } catch {
+          // Ignore if URL parsing fails
+        }
+      }
+      
+      // DO NOT use author as source - keep it separate
+      if (!articlePublisher) {
+        articlePublisher = 'Market News';
+      }
+      
+      // Capitalize first letter
+      articlePublisher = articlePublisher.charAt(0).toUpperCase() + articlePublisher.slice(1);
+      
+      // Debug logging
+      if (articlePublisher === 'Market News' && article.publisher) {
+        console.log('[News API] Could not extract publisher name:', {
+          publisher: article.publisher,
+          homepage_url: article.publisher.homepage_url,
+          article_url: article.article_url,
+        });
+      }
+      
+      const articleKeywords = article.tags || article.channels || article.keywords || [];
+      
+      // Benzinga API uses: title, teaser (summary), body (full text), tickers, author, published, url, images, channels, tags
+      const combinedText = `${articleTitle} ${articleDescription}`;
+      const articleSeverity = classifySeverity(combinedText);
+      const sentiment = analyzeArticleSentiment(articleTitle, articleDescription);
+      
+      // Use enhanced sentiment parsing
+      const sentimentValue = parseSentiment(article);
       
       return {
-        id: article.benzinga_id?.toString() || article.id || `news-${Date.now()}-${Math.random()}`,
-        title: article.title || 'No headline',
-        description: article.teaser || article.body || '',
-        articleUrl: article.url || null,
-        imageUrl: imageUrl,
-        publishedUtc: article.published || new Date().toISOString(),
-        tickers: article.tickers || [],
-        author: article.author || 'Unknown',
+        id: articleId,
+        title: articleTitle,
+        description: articleDescription,
+        articleUrl: articleUrl,
+        imageUrl: articleImageUrl,
+        publishedUtc: articlePublished,
+        tickers: articleTickers,
+        author: articleAuthor || 'Market News',
         publisher: {
-          name: 'Benzinga',
-          logoUrl: undefined,
+          name: articlePublisher,
+          logoUrl: article.publisher?.logo_url || undefined,
         },
-        keywords: article.tags || article.channels || [],
-        // Sentiment analysis
+        keywords: articleKeywords,
+        // Sentiment analysis - use enhanced parsing
         sentiment: sentiment.score,
         sentimentLabel: sentiment.label,
         sentimentKeywords: sentiment.keywords,
+        // Add sentiment field for frontend (positive/negative/neutral)
+        sentimentValue: sentimentValue,
         impactScore: calculateImpactScore(article),
-        eventType: detectEventType(article.title || '', article.tags || article.channels || []),
+        eventType: detectEventType(articleTitle, articleKeywords),
         // Legacy fields for backward compatibility
-        headline: article.title || 'No headline',
-        summary: article.teaser || article.body || '',
-        source: 'Benzinga',
-        url: article.url || null,
+        headline: articleTitle,
+        summary: articleDescription,
+        source: articlePublisher,
+        url: articleUrl,
         severity: articleSeverity,
-        publishedAt: article.published || new Date().toISOString(),
+        publishedAt: articlePublished,
       };
     });
 
@@ -470,7 +609,7 @@ export async function GET(request: NextRequest) {
         },
         meta: {
           timestamp: new Date().toISOString(),
-          nextUrl: data.next_url || null,
+          nextUrl: data?.next_url || null,
         },
       },
     }, {

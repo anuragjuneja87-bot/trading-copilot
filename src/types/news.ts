@@ -15,6 +15,7 @@ export interface NewsArticle {
   sentiment: number;
   sentimentLabel: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
   sentimentKeywords: string[];
+  sentimentValue?: 'positive' | 'negative' | 'neutral'; // For frontend display
   impactScore: number;
   eventType: string;
   // Legacy fields for backward compatibility

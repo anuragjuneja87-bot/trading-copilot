@@ -4,3 +4,4 @@ export * from './use-darkpool-data';
 export * from './use-ai-insight';
 export * from './use-realtime-price';
 export * from './use-watchlist-data';
+export * from './use-war-room-data';

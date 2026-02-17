@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  MarketData,
   TickerSnapshot,
   VixData,
   Mover,
@@ -60,6 +59,12 @@ export async function GET(request: NextRequest) {
           // Derived metrics
           fearGreedIndex,
           marketSentiment,
+          // Add regime based on VIX value
+          regime: marketData.vix ? (
+            marketData.vix.value > 30 ? 'CRISIS' : 
+            marketData.vix.value > 20 ? 'ELEVATED' : 
+            'NORMAL'
+          ) : 'NORMAL',
 
           // Movers
           topGainers: moversData.gainers,
@@ -230,7 +235,7 @@ async function extractMarketData(batchData: Map<string, any>): Promise<MarketDat
           value: 20,
           change: 0,
           changePercent: 0,
-          level: 'normal',
+          level: 'NORMAL',
         };
       }
     } catch (err) {
@@ -240,7 +245,7 @@ async function extractMarketData(batchData: Map<string, any>): Promise<MarketDat
         value: 20,
         change: 0,
         changePercent: 0,
-        level: 'normal',
+        level: 'NORMAL',
       };
     }
   }

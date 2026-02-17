@@ -1,285 +1,298 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { COLORS } from '@/lib/echarts-theme';
 import ReactECharts from 'echarts-for-react';
 
+// Safety check
+if (!COLORS) {
+  console.error('[DarkPoolPanel] COLORS is undefined!');
+}
+
+import { DataSourceBadge } from '@/components/war-room/data-source-badge';
+
 interface DarkPoolPanelProps {
-  ticker: string;
+  prints: any[];
+  stats: any;
+  loading: boolean;
+  error: string | null;
+  currentPrice: number;
+  vwap: number | null;
+  timeframeRange?: {
+    from: number;
+    to: number;
+    label: string;
+    isMarketClosed: boolean;
+    tradingDay?: string;
+  };
+  meta?: {
+    isMarketClosed?: boolean;
+    tradingDay?: string;
+    dataFrom?: string;
+    dataTo?: string;
+  };
 }
 
-type Timeframe = '1D' | '1W' | '1M' | '3M';
+export function DarkPoolPanel({ 
+  prints, 
+  stats, 
+  loading, 
+  error,
+  currentPrice,
+  vwap,
+  timeframeRange,
+  meta,
+}: DarkPoolPanelProps) {
+  // Guard against undefined stats
+  if (!stats && !loading) {
+    return (
+      <div className="h-full flex items-center justify-center text-gray-500 text-xs">
+        No data available
+      </div>
+    );
+  }
 
-interface DarkPoolPrint {
-  timestamp?: string | number;
-  price: number;
-  size: number;
-  value: number;
-  sentiment?: 'bullish' | 'bearish' | 'neutral';
-  side?: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-}
+  const regime = stats?.regime || 'NEUTRAL';
+  const regimeColor = regime === 'ACCUMULATION' ? COLORS.green : 
+                      regime === 'DISTRIBUTION' ? COLORS.red : COLORS.yellow;
 
-const TIMEFRAMES: { key: Timeframe; label: string; days: number }[] = [
-  { key: '1D', label: 'Today', days: 1 },
-  { key: '1W', label: '1W', days: 7 },
-  { key: '1M', label: '1M', days: 30 },
-  { key: '3M', label: '3M', days: 90 },
-];
+  // Calculate if dark pool activity is above or below VWAP
+  const avgDpPrice = useMemo(() => {
+    if (!prints.length) return null;
+    const totalValue = prints.reduce((sum, p) => sum + (p.value || p.price * p.size), 0);
+    const totalShares = prints.reduce((sum, p) => sum + p.size, 0);
+    return totalShares > 0 ? totalValue / totalShares : null;
+  }, [prints]);
 
-export function DarkPoolPanel({ ticker }: DarkPoolPanelProps) {
-  const [prints, setPrints] = useState<DarkPoolPrint[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [timeframe, setTimeframe] = useState<Timeframe>('1W');
-  const [summary, setSummary] = useState<{
-    totalValue: number;
-    bullishPercent: number;
-    avgPrice: number;
-    regime: string;
-  } | null>(null);
+  const dpVsVwap = useMemo(() => {
+    if (!avgDpPrice || !vwap) return null;
+    return avgDpPrice > vwap ? 'ABOVE' : 'BELOW';
+  }, [avgDpPrice, vwap]);
 
-  useEffect(() => {
-    const fetchDarkPool = async () => {
-      setLoading(true);
-      setError(null);
-      
-      try {
-        const tf = TIMEFRAMES.find(t => t.key === timeframe);
-        const days = tf?.days || 7;
-        
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - days);
-        
-        const from = startDate.toISOString().split('T')[0];
-        const to = endDate.toISOString().split('T')[0];
-        
-        const res = await fetch(
-          `/api/darkpool?tickers=${ticker}&from=${from}&to=${to}&limit=100`
-        );
-        const json = await res.json();
-        
-        if (json.success) {
-          const dpPrints = json.data?.prints || json.data || [];
-          setPrints(Array.isArray(dpPrints) ? dpPrints : []);
-          
-          // Debug logging
-          if (dpPrints.length === 0) {
-            console.log('[Dark Pool Panel] No prints returned. Response:', {
-              success: json.success,
-              hasData: !!json.data,
-              printsLength: json.data?.prints?.length,
-              stats: json.data?.stats,
-            });
-          }
-          
-          // Calculate summary
-          if (dpPrints.length > 0) {
-            let totalValue = 0;
-            let bullishValue = 0;
-            let priceSum = 0;
-            
-            dpPrints.forEach((p: DarkPoolPrint) => {
-              const val = p.value || (p.price * p.size);
-              totalValue += val;
-              priceSum += p.price;
-              
-              const side = p.side || (p.sentiment === 'bullish' ? 'BULLISH' : p.sentiment === 'bearish' ? 'BEARISH' : 'NEUTRAL');
-              if (side === 'BULLISH') {
-                bullishValue += val;
-              }
-            });
-            
-            const bullishPercent = totalValue > 0 ? (bullishValue / totalValue) * 100 : 50;
-            const avgPrice = priceSum / dpPrints.length;
-            
-            setSummary({
-              totalValue,
-              bullishPercent,
-              avgPrice,
-              regime: bullishPercent >= 55 ? 'ACCUMULATION' : 
-                      bullishPercent <= 45 ? 'DISTRIBUTION' : 'NEUTRAL',
-            });
-          } else {
-            setSummary(null);
-          }
-        } else {
-          setError(json.error || 'Failed to fetch');
-        }
-      } catch (err) {
-        console.error('Failed to fetch dark pool:', err);
-        setError('Failed to fetch dark pool data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDarkPool();
-
-    const handleRefresh = () => fetchDarkPool();
-    window.addEventListener('refresh-ask-data', handleRefresh);
-    return () => window.removeEventListener('refresh-ask-data', handleRefresh);
-  }, [ticker, timeframe]);
-
-  const getRegimeColor = () => {
-    if (!summary) return COLORS.yellow;
-    if (summary.regime === 'ACCUMULATION') return COLORS.green;
-    if (summary.regime === 'DISTRIBUTION') return COLORS.red;
-    return COLORS.yellow;
+  const formatValue = (v: number) => {
+    if (v >= 1000000000) return `$${(v / 1000000000).toFixed(1)}B`;
+    if (v >= 1000000) return `$${(v / 1000000).toFixed(1)}M`;
+    if (v >= 1000) return `$${(v / 1000).toFixed(0)}K`;
+    return `$${v}`;
   };
 
   return (
     <div 
-      className="rounded-xl p-4 flex flex-col overflow-hidden"
+      className="rounded-xl p-3 flex flex-col h-full"
       style={{ background: COLORS.cardBg, border: `1px solid ${COLORS.cardBorder}` }}
     >
-      {/* Header with Timeframe Selector */}
-      <div className="flex items-center justify-between mb-2 flex-shrink-0">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-            Dark Pool Activity
+            Dark Pool
           </h3>
+          {/* Timeframe + Market Status */}
+          {timeframeRange && (
+            <span className={`text-[10px] px-2 py-0.5 rounded ${
+              timeframeRange.isMarketClosed 
+                ? 'text-yellow-500 bg-yellow-500/10' 
+                : 'text-gray-500 bg-white/5'
+            }`}>
+              {timeframeRange.isMarketClosed 
+                ? `⚠️ ${timeframeRange.tradingDay || timeframeRange.label}` 
+                : timeframeRange.label
+              }
+            </span>
+          )}
           <span 
             className="px-2 py-0.5 rounded text-[10px] font-bold"
-            style={{ background: `${getRegimeColor()}20`, color: getRegimeColor() }}
+            style={{ background: `${regimeColor}20`, color: regimeColor }}
           >
-            {summary?.regime || 'NEUTRAL'}
+            {regime}
           </span>
         </div>
         
-        {/* Timeframe Selector */}
-        <div className="flex rounded-md overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
-          {TIMEFRAMES.map(tf => (
-            <button
-              key={tf.key}
-              onClick={() => setTimeframe(tf.key)}
-              className="px-2 py-1 text-[10px] font-semibold transition-all"
-              style={{
-                background: timeframe === tf.key ? 'rgba(0,229,255,0.2)' : 'transparent',
-                color: timeframe === tf.key ? COLORS.cyan : '#666',
+        <div className="flex items-center gap-2">
+          {/* VWAP Indicator */}
+          {dpVsVwap && (
+            <div 
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
+              style={{ 
+                background: dpVsVwap === 'ABOVE' ? 'rgba(0,230,118,0.1)' : 'rgba(255,82,82,0.1)',
+                color: dpVsVwap === 'ABOVE' ? COLORS.green : COLORS.red,
               }}
             >
-              {tf.label}
-            </button>
-          ))}
+              {dpVsVwap === 'ABOVE' ? '↑' : '↓'} VWAP
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Stats Bar */}
-      {summary && (
-        <div className="flex items-center gap-4 text-[10px] mb-2 flex-shrink-0">
-          <span>
-            <span className="text-gray-500">Volume:</span>{' '}
-            <span className="text-white">${formatValue(summary.totalValue)}</span>
-          </span>
-          <span>
-            <span className="text-gray-500">Bullish:</span>{' '}
-            <span style={{ color: summary.bullishPercent >= 50 ? COLORS.green : COLORS.red }}>
-              {summary.bullishPercent.toFixed(0)}%
-            </span>
-          </span>
-          <span>
-            <span className="text-gray-500">Prints:</span>{' '}
-            <span className="text-white">{prints.length}</span>
-          </span>
-        </div>
-      )}
+      {/* Key Stats */}
+      <div className="grid grid-cols-3 gap-2 mb-2 text-center">
+        <StatBox 
+          label="Volume" 
+          value={formatValue(stats?.totalValue || 0)}
+          color={COLORS.white}
+        />
+        <StatBox 
+          label="Bullish" 
+          value={`${stats?.bullishPct || 0}%`}
+          color={(stats?.bullishPct || 0) > 50 ? COLORS.green : COLORS.red}
+        />
+        <StatBox 
+          label="Prints" 
+          value={prints.length.toString()}
+          color="#888"
+        />
+      </div>
 
-      {/* Chart or List */}
+      {/* Chart */}
       <div className="flex-1 min-h-0">
         {loading ? (
           <div className="h-full flex items-center justify-center text-gray-500 text-xs">
-            Loading {timeframe} data...
+            Loading...
           </div>
         ) : error ? (
-          <div className="h-full flex items-center justify-center text-gray-500 text-xs">
+          <div className="h-full flex items-center justify-center text-red-400 text-xs">
             {error}
           </div>
         ) : prints.length > 0 ? (
-          <div className="h-full flex flex-col">
-            {/* Mini Chart */}
-            <div className="h-1/2 mb-2">
-              <DarkPoolChart prints={prints} />
-            </div>
-            
-            {/* Top Prints */}
-            <div className="flex-1 overflow-y-auto space-y-1">
-              {prints.slice(0, 5).map((print, i) => (
-                <div 
-                  key={i}
-                  className="flex items-center justify-between p-1.5 rounded-lg"
-                  style={{ background: 'rgba(255,255,255,0.03)' }}
-                >
-                  <div className="flex items-center gap-2">
-                    <span 
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ 
-                        background: (print.side === 'BULLISH' || print.sentiment === 'bullish') ? COLORS.green : 
-                                   (print.side === 'BEARISH' || print.sentiment === 'bearish') ? COLORS.red : COLORS.yellow 
-                      }}
-                    />
-                    <span className="text-[11px] text-white font-mono">
-                      ${print.price?.toFixed(2)}
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-gray-400">
-                    ${formatValue(print.value || print.price * print.size)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <DarkPoolChart prints={prints} vwap={vwap} />
         ) : (
-          <div className="h-full flex items-center justify-center text-gray-500 text-xs text-center">
-            No dark pool prints for {ticker}<br />
-            in the last {TIMEFRAMES.find(t => t.key === timeframe)?.label || timeframe}
+          <div className="h-full flex flex-col items-center justify-center text-gray-500 text-xs text-center">
+            <div className="text-2xl mb-2">📊</div>
+            <div className="text-sm">No dark pool prints</div>
+            <div className="text-xs text-gray-600 mt-1">
+              {timeframeRange?.isMarketClosed 
+                ? `Market was closed. Showing ${timeframeRange.tradingDay} data.`
+                : `No block trades in selected timeframe.`
+              }
+            </div>
           </div>
         )}
       </div>
+
+      {/* Top Prints List */}
+      {prints.length > 0 && (
+        <div className="mt-2 space-y-1 max-h-20 overflow-y-auto">
+          {prints.slice(0, 3).map((print, i) => (
+            <div 
+              key={i}
+              className="flex items-center justify-between p-1.5 rounded text-[11px]"
+              style={{ background: 'rgba(255,255,255,0.02)' }}
+            >
+              <div className="flex items-center gap-2">
+                <span 
+                  className="w-2 h-2 rounded-full"
+                  style={{ 
+                    background: print.side === 'BULLISH' ? COLORS.green : 
+                               print.side === 'BEARISH' ? COLORS.red : COLORS.yellow 
+                  }}
+                />
+                <span className="font-mono text-white">${print.price?.toFixed(2)}</span>
+              </div>
+              <span className="text-gray-400">{formatValue(print.value || print.price * print.size)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function DarkPoolChart({ prints }: { prints: DarkPoolPrint[] }) {
-  // Group by date/time for visualization
-  const buckets: Record<string, { bullish: number; bearish: number }> = {};
+function StatBox({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="p-1.5 rounded" style={{ background: 'rgba(255,255,255,0.02)' }}>
+      <div className="text-[9px] text-gray-500 uppercase">{label}</div>
+      <div className="text-sm font-bold font-mono" style={{ color }}>{value}</div>
+    </div>
+  );
+}
+
+function DarkPoolChart({ prints, vwap }: { prints: any[]; vwap: number | null }) {
+  // Debug log
+  console.log('[DarkPoolChart] Prints sample:', prints?.slice(0, 3));
   
-  prints.forEach(print => {
-    const ts = print.timestamp;
-    let key = 'Recent';
+  // Group prints by price level
+  const priceLevels = useMemo(() => {
+    if (!prints || prints.length === 0) return [];
     
-    if (ts) {
-      try {
-        const date = new Date(typeof ts === 'number' ? (ts > 1e12 ? ts / 1000000 : ts * 1000) : ts);
-        if (!isNaN(date.getTime())) {
-          key = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        }
-      } catch {
-        // Keep default 'Recent'
+    const levels = new Map<string, { price: number; total: number; bullish: number; bearish: number; neutral: number }>();
+    
+    prints.forEach(p => {
+      if (!p.price || p.price === 0) return;
+      
+      // Round to nearest dollar for cleaner grouping
+      const priceKey = Math.round(p.price).toString();
+      const value = p.value || (p.price * (p.size || 0));
+      
+      if (value === 0) return;
+      
+      const existing = levels.get(priceKey) || { 
+        price: Math.round(p.price), 
+        total: 0, 
+        bullish: 0, 
+        bearish: 0, 
+        neutral: 0 
+      };
+      
+      existing.total += value;
+      
+      // Determine side - handle various formats
+      const side = (p.side || p.sentiment || 'NEUTRAL').toString().toUpperCase();
+      
+      if (side.includes('BULL') || side === 'POSITIVE' || side === 'BUY') {
+        existing.bullish += value;
+      } else if (side.includes('BEAR') || side === 'NEGATIVE' || side === 'SELL') {
+        existing.bearish += value;
+      } else {
+        existing.neutral += value;
       }
-    }
+      
+      levels.set(priceKey, existing);
+    });
     
-    if (!buckets[key]) buckets[key] = { bullish: 0, bearish: 0 };
+    // Convert to array, sort by total, take top 8
+    const result = Array.from(levels.values())
+      .filter(l => l.total > 0)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 8)
+      .sort((a, b) => a.price - b.price); // Re-sort by price for display
     
-    const value = print.value || print.price * print.size;
-    const side = print.side || (print.sentiment === 'bullish' ? 'BULLISH' : print.sentiment === 'bearish' ? 'BEARISH' : 'NEUTRAL');
-    if (side === 'BULLISH') {
-      buckets[key].bullish += value;
-    } else if (side === 'BEARISH') {
-      buckets[key].bearish += value;
+    console.log('[DarkPoolChart] Grouped data:', result);
+    
+    return result;
+  }, [prints]);
+
+  if (priceLevels.length === 0) {
+    // Even if no grouped data, show the raw prints summary
+    if (prints && prints.length > 0) {
+      const totalValue = prints.reduce((sum, p) => sum + (p.value || p.price * p.size || 0), 0);
+      return (
+        <div className="h-full flex flex-col items-center justify-center text-gray-400 text-xs">
+          <div>{prints.length} prints</div>
+          <div className="text-white font-mono">${(totalValue / 1000000).toFixed(1)}M total</div>
+          <div className="text-[10px] mt-1">(No price level grouping)</div>
+        </div>
+      );
     }
-  });
-  
-  const labels = Object.keys(buckets);
-  
+    return (
+      <div className="h-full flex items-center justify-center text-gray-500 text-xs">
+        No chart data
+      </div>
+    );
+  }
+
   const option = {
-    grid: { top: 5, right: 5, bottom: 20, left: 40 },
+    grid: { top: 10, right: 10, bottom: 30, left: 50 },
     xAxis: {
       type: 'category',
-      data: labels,
+      data: priceLevels.map(l => `$${l.price}`),
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { fontSize: 8, color: '#666' },
+      axisLabel: { 
+        fontSize: 8, 
+        color: '#666',
+        rotate: 45,
+        interval: 0,
+      },
     },
     yAxis: {
       type: 'value',
@@ -289,31 +302,45 @@ function DarkPoolChart({ prints }: { prints: DarkPoolPrint[] }) {
       axisLabel: { 
         fontSize: 8, 
         color: '#666',
-        formatter: (v: number) => `$${(v/1000000).toFixed(0)}M`
+        formatter: (v: number) => v >= 1000000 ? `$${(v/1000000).toFixed(0)}M` : `$${(v/1000).toFixed(0)}K`
       },
     },
     series: [
       {
+        name: 'Bullish',
         type: 'bar',
         stack: 'total',
-        data: labels.map(l => buckets[l].bullish),
-        itemStyle: { color: COLORS.green, borderRadius: [2, 2, 0, 0] },
+        data: priceLevels.map(l => l.bullish),
+        itemStyle: { color: '#00e676' },
+        barMaxWidth: 30,
       },
       {
+        name: 'Neutral',
         type: 'bar',
         stack: 'total',
-        data: labels.map(l => buckets[l].bearish),
-        itemStyle: { color: COLORS.red, borderRadius: [2, 2, 0, 0] },
+        data: priceLevels.map(l => l.neutral),
+        itemStyle: { color: '#ffc107' },
+        barMaxWidth: 30,
+      },
+      {
+        name: 'Bearish',
+        type: 'bar',
+        stack: 'total',
+        data: priceLevels.map(l => l.bearish),
+        itemStyle: { color: '#ff5252' },
+        barMaxWidth: 30,
       },
     ],
+    // VWAP reference line
+    ...(vwap ? {
+      markLine: {
+        silent: true,
+        data: [{ xAxis: `$${vwap.toFixed(2)}` }],
+        lineStyle: { color: COLORS.cyan, type: 'dashed' },
+        label: { show: false },
+      },
+    } : {}),
   };
-  
-  return <ReactECharts option={option} style={{ height: '100%' }} />;
-}
 
-function formatValue(value: number): string {
-  if (value >= 1000000000) return `${(value / 1000000000).toFixed(1)}B`;
-  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
-  if (value >= 1000) return `${(value / 1000).toFixed(0)}K`;
-  return value.toFixed(0);
+  return <ReactECharts option={option} style={{ height: '100%' }} />;
 }

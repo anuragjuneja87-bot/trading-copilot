@@ -70,13 +70,33 @@ export async function GET(request: NextRequest) {
       const lastTradePrice = parseFloat(t.lastTrade?.p) || 0;
       const dayClose = parseFloat(t.day?.c) || 0;
       const prevDayClose = parseFloat(t.prevDay?.c) || 0;
+      const dayOpen = parseFloat(t.day?.o) || 0;
+      const prevDayOpen = parseFloat(t.prevDay?.o) || 0;
       
       // Use the first non-zero price found
       let price = lastTradePrice || dayClose || prevDayClose;
       
       // Get change values
-      const change = parseFloat(t.todaysChange) || 0;
-      const changePercent = parseFloat(t.todaysChangePerc) || 0;
+      let change = parseFloat(t.todaysChange) || 0;
+      let changePercent = parseFloat(t.todaysChangePerc) || 0;
+      
+      // WEEKEND FIX: If change is 0 but we have day data, calculate from that
+      if (change === 0 && dayClose > 0 && dayOpen > 0) {
+        change = dayClose - dayOpen; // Day's change (close - open)
+        changePercent = (change / dayOpen) * 100;
+      }
+      
+      // If still 0 but we have prevDay data, calculate from that (Friday's change)
+      if (change === 0 && prevDayClose > 0 && prevDayOpen > 0) {
+        change = prevDayClose - prevDayOpen;
+        changePercent = (change / prevDayOpen) * 100;
+      }
+      
+      // If still 0 but we have prevDay close, use that as the change reference
+      if (change === 0 && prevDayClose > 0 && dayClose > 0) {
+        change = dayClose - prevDayClose;
+        changePercent = (change / prevDayClose) * 100;
+      }
       
       // CRITICAL FIX: If price is still 0 but we have prevClose and change, calculate it
       if (price === 0 && prevDayClose > 0 && change !== 0) {

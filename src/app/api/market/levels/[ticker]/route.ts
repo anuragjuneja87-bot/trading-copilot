@@ -88,10 +88,163 @@ export async function GET(
     const change = price - prevClose;
     const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
 
+    // Get nearest Friday expiry for options
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const daysUntilFriday = (5 - dayOfWeek + 7) % 7 || 7;
+    const friday = new Date(today);
+    friday.setDate(today.getDate() + daysUntilFriday);
+    const expiryStr = friday.toISOString().split('T')[0];
+    
+    // Fetch options chain to calculate gamma levels
+    let callWall = null;
+    let putWall = null;
+    let maxGamma = null;
+    let gexFlip = null;
+    let maxPain = null;
+    let expectedMove = null;
+    
+    try {
+      const optionsUrl = `https://api.polygon.io/v3/snapshot/options/${ticker}?expiration_date=${expiryStr}&limit=250&apiKey=${POLYGON_API_KEY}`;
+      const optionsRes = await fetch(optionsUrl, { 
+        next: { revalidate: 60 },
+        signal: AbortSignal.timeout(15000) 
+      });
+      
+      if (optionsRes.ok) {
+        const optionsData = await optionsRes.json();
+        const options = optionsData.results || [];
+        
+        if (options.length > 0) {
+          // Calculate gamma levels
+          const gammaByStrike: Record<number, { callGamma: number; putGamma: number; callOI: number; putOI: number; callPremium: number; putPremium: number }> = {};
+          
+          options.forEach((opt: any) => {
+            const strike = opt.details?.strike_price;
+            const gamma = opt.greeks?.gamma || 0;
+            const oi = opt.open_interest || 0;
+            const isCall = opt.details?.contract_type === 'call';
+            const premium = (opt.last_quote?.midpoint || opt.day?.close || 0) * (oi * 100);
+            
+            if (!strike) return;
+            
+            if (!gammaByStrike[strike]) {
+              gammaByStrike[strike] = { callGamma: 0, putGamma: 0, callOI: 0, putOI: 0, callPremium: 0, putPremium: 0 };
+            }
+            
+            if (isCall) {
+              gammaByStrike[strike].callGamma += gamma * oi * 100;
+              gammaByStrike[strike].callOI += oi;
+              gammaByStrike[strike].callPremium += premium;
+            } else {
+              gammaByStrike[strike].putGamma += gamma * oi * 100;
+              gammaByStrike[strike].putOI += oi;
+              gammaByStrike[strike].putPremium += premium;
+            }
+          });
+          
+          const strikes = Object.keys(gammaByStrike).map(Number).sort((a, b) => a - b);
+          
+          // Find Call Wall (highest call premium/OI)
+          let maxCallPremium = 0;
+          strikes.forEach(strike => {
+            if (gammaByStrike[strike].callPremium > maxCallPremium) {
+              maxCallPremium = gammaByStrike[strike].callPremium;
+              callWall = strike;
+            }
+          });
+          
+          // Find Put Wall (highest put premium/OI)
+          let maxPutPremium = 0;
+          strikes.forEach(strike => {
+            if (gammaByStrike[strike].putPremium > maxPutPremium) {
+              maxPutPremium = gammaByStrike[strike].putPremium;
+              putWall = strike;
+            }
+          });
+          
+          // Find Max Gamma (highest total gamma)
+          let maxTotalGamma = 0;
+          strikes.forEach(strike => {
+            const totalGamma = Math.abs(gammaByStrike[strike].callGamma) + Math.abs(gammaByStrike[strike].putGamma);
+            if (totalGamma > maxTotalGamma) {
+              maxTotalGamma = totalGamma;
+              maxGamma = strike;
+            }
+          });
+          
+          // Find GEX Flip (where net gamma crosses zero)
+          let prevNetGex = null;
+          for (const strike of strikes) {
+            const netGex = gammaByStrike[strike].callGamma - gammaByStrike[strike].putGamma;
+            if (prevNetGex !== null && prevNetGex < 0 && netGex >= 0) {
+              gexFlip = strike;
+              break;
+            }
+            prevNetGex = netGex;
+          }
+          
+          // Calculate Max Pain
+          let minPain = Infinity;
+          for (const testPrice of strikes) {
+            let totalPain = 0;
+            
+            options.forEach((opt: any) => {
+              const strike = opt.details?.strike_price;
+              const oi = opt.open_interest || 0;
+              const isCall = opt.details?.contract_type === 'call';
+              
+              if (isCall && testPrice > strike) {
+                totalPain += (testPrice - strike) * oi * 100;
+              } else if (!isCall && testPrice < strike) {
+                totalPain += (strike - testPrice) * oi * 100;
+              }
+            });
+            
+            if (totalPain < minPain) {
+              minPain = totalPain;
+              maxPain = testPrice;
+            }
+          }
+          
+          // Calculate Expected Move from ATM straddle
+          const atmStrike = strikes.reduce((prev, curr) => 
+            Math.abs(curr - price) < Math.abs(prev - price) ? curr : prev
+          );
+          
+          const atmCall = options.find((o: any) => 
+            o.details?.strike_price === atmStrike && o.details?.contract_type === 'call'
+          );
+          const atmPut = options.find((o: any) => 
+            o.details?.strike_price === atmStrike && o.details?.contract_type === 'put'
+          );
+          
+          if (atmCall && atmPut) {
+            const callMid = atmCall.last_quote?.midpoint || atmCall.day?.close || 0;
+            const putMid = atmPut.last_quote?.midpoint || atmPut.day?.close || 0;
+            if (callMid > 0 && putMid > 0) {
+              expectedMove = (callMid + putMid) * 0.85;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Levels API] Options fetch error:', err);
+    }
+    
+    // Fallback estimates if options data unavailable
+    if (!callWall) callWall = Math.round(price * 1.02);
+    if (!putWall) putWall = Math.round(price * 0.98);
+    if (!gexFlip) gexFlip = Math.round(price);
+    if (!maxPain) maxPain = Math.round(price);
+    if (!expectedMove) expectedMove = price * 0.015;
+    if (!maxGamma) maxGamma = Math.round(price * 1.01);
+
     // Build response
     const levels = {
       ticker,
-      price: r(price),
+      currentPrice: r(price),
+      price: r(price), // Keep for backward compatibility
       change: r(change),
       changePercent: r(changePercent),
       
@@ -119,6 +272,17 @@ export async function GET(
       s2: r(camarilla.s2),
       s3: r(camarilla.s3),
       s4: r(camarilla.s4),
+      
+      // Gamma levels
+      callWall,
+      putWall,
+      maxGamma,
+      gexFlip,
+      maxPain,
+      expectedMove: r(expectedMove),
+      expectedMovePercent: r((expectedMove / price) * 100),
+      expiry: expiryStr,
+      daysToExpiry: daysUntilFriday,
       
       // Metadata
       range: r(range),

@@ -49,6 +49,34 @@ function parseTradeType(conditions: number[]): string {
 
 // Helper functions for enhanced calculations
 
+// Detect trade aggression based on price vs bid/ask
+function detectAggression(tradePrice: number, bid: number, ask: number): {
+  aggression: 'ABOVE_ASK' | 'AT_ASK' | 'AT_MID' | 'AT_BID' | 'BELOW_BID' | 'UNKNOWN';
+  aggressionScore: number;
+} {
+  if (!bid || !ask || bid >= ask) {
+    return { aggression: 'UNKNOWN', aggressionScore: 0 };
+  }
+  
+  const spread = ask - bid;
+  const mid = (bid + ask) / 2;
+  
+  if (tradePrice >= ask) {
+    return { aggression: 'ABOVE_ASK', aggressionScore: 100 };
+  }
+  if (tradePrice >= ask - spread * 0.1) {
+    return { aggression: 'AT_ASK', aggressionScore: 75 };
+  }
+  if (tradePrice <= bid) {
+    return { aggression: 'BELOW_BID', aggressionScore: -100 };
+  }
+  if (tradePrice <= bid + spread * 0.1) {
+    return { aggression: 'AT_BID', aggressionScore: -75 };
+  }
+  
+  return { aggression: 'AT_MID', aggressionScore: tradePrice > mid ? 25 : -25 };
+}
+
 function getMoneyness(strike: number, underlyingPrice: number, callPut: 'C' | 'P'): 'ITM' | 'ATM' | 'OTM' {
   if (!underlyingPrice || !strike) return 'OTM';
   const pctFromSpot = Math.abs(strike - underlyingPrice) / underlyingPrice;
@@ -212,6 +240,32 @@ export async function GET(request: NextRequest) {
   let allTrades: EnhancedOptionTrade[] = [];
   const errors: string[] = [];
   const seenSequences = new Set<string>();
+  const quoteCache = new Map<string, { bid: number; ask: number }>();
+
+  // Fetch quotes for each underlying (for aggression detection)
+  for (const underlying of tickers.slice(0, 5)) {
+    try {
+      const quoteUrl = `https://api.polygon.io/v2/last/nbbo/${underlying}?apiKey=${POLYGON_API_KEY}`;
+      const quoteRes = await fetch(quoteUrl, {
+        next: { revalidate: 5 },
+        signal: AbortSignal.timeout(5000),
+      });
+      
+      if (quoteRes.ok) {
+        const quoteData = await quoteRes.json();
+        const result = quoteData.results?.[0];
+        if (result) {
+          const bid = parseFloat(result.bid || result.P || 0);
+          const ask = parseFloat(result.ask || result.p || 0);
+          if (bid > 0 && ask > 0 && bid < ask) {
+            quoteCache.set(underlying, { bid, ask });
+          }
+        }
+      }
+    } catch (e) {
+      // Quote fetch failed, continue without it
+    }
+  }
 
   try {
 
@@ -509,6 +563,14 @@ export async function GET(request: NextRequest) {
               // Infer side (this is approximate - would need quote data for accuracy)
               // Sweeps are typically aggressive buys
               const side: 'BUY' | 'SELL' | 'UNKNOWN' = isSweep ? 'BUY' : 'UNKNOWN';
+              
+              // Detect aggression (for options, use underlying quote)
+              const quote = quoteCache.get(underlying);
+              const { aggression, aggressionScore } = detectAggression(
+                spotPrice, // Use underlying price for aggression detection
+                quote?.bid || 0,
+                quote?.ask || 0
+              );
 
               // Calculate OTM percentage
               let otmPercent = 0;
@@ -533,7 +595,7 @@ export async function GET(request: NextRequest) {
               );
               
               // Store base trade data (unusual and smart money score calculated later)
-              const baseTrade = {
+              const baseTrade: EnhancedOptionTrade = {
                 id: sequenceKey,
                 ticker: underlying,
                 optionTicker,
@@ -565,6 +627,8 @@ export async function GET(request: NextRequest) {
                 isUnusual: false, // Will be calculated after all trades
                 moneyness,
                 daysToExpiry,
+                aggression,
+                aggressionScore,
               };
               
               // Debug logging for puts
@@ -940,6 +1004,10 @@ function getEmptyStats(): EnhancedFlowStats {
     regime: 'NEUTRAL',
     gexByStrike: [],
     flowTimeSeries: [],
+    aggressionRatio: 50,
+    aggressionBias: 'NEUTRAL',
+    aboveAskPremium: 0,
+    belowBidPremium: 0,
     bullishPremium: 0,
     bearishPremium: 0,
   };

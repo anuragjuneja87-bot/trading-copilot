@@ -207,18 +207,26 @@ function MarketSentimentBadge({ sentiment }: { sentiment: 'RISK_ON' | 'RISK_OFF'
 // ============================================
 
 function VixGauge({ vix }: { vix: VixData | null }) {
-  if (!vix) return null;
+  if (!vix || !vix.value) return null;
 
-  const levelConfig = {
-    LOW: { color: COLORS.green, description: 'Low volatility' },
+  const levelConfig: Record<string, { color: string; description: string }> = {
+    LOW: { color: COLORS.green || '#00e676', description: 'Low volatility' },
     NORMAL: { color: '#4ade80', description: 'Normal' },
-    ELEVATED: { color: COLORS.yellow, description: 'Elevated' },
+    ELEVATED: { color: COLORS.yellow || '#ffc107', description: 'Elevated' },
     HIGH: { color: '#f97316', description: 'High volatility' },
-    EXTREME: { color: COLORS.red, description: 'Extreme fear' },
+    EXTREME: { color: COLORS.red || '#ff5252', description: 'Extreme fear' },
   };
 
-  const config = levelConfig[vix.level];
+  // Ensure we have a valid config with fallback
+  const level = vix.level || 'NORMAL';
+  const config = levelConfig[level] || levelConfig.NORMAL || { color: '#4ade80', description: 'Normal' };
   const gaugePercent = Math.min(100, (vix.value / 40) * 100);
+
+  // Safety check - ensure config has color
+  if (!config || !config.color) {
+    console.error('[VixGauge] Invalid config:', { level, config, vix });
+    return null;
+  }
 
   return (
     <div 
@@ -258,17 +266,28 @@ function VixGauge({ vix }: { vix: VixData | null }) {
 // COMPONENT: Fear & Greed Gauge
 // ============================================
 
-function FearGreedGauge({ fearGreed }: { fearGreed: FearGreedIndex }) {
+function FearGreedGauge({ fearGreed }: { fearGreed: FearGreedIndex | null }) {
+  if (!fearGreed) return null;
+  
   const labelConfig: Record<string, { color: string; emoji: string }> = {
-    EXTREME_FEAR: { color: COLORS.red, emoji: '😱' },
+    EXTREME_FEAR: { color: COLORS.red || '#ff5252', emoji: '😱' },
     FEAR: { color: '#f97316', emoji: '😰' },
-    NEUTRAL: { color: COLORS.yellow, emoji: '😐' },
+    NEUTRAL: { color: COLORS.yellow || '#ffc107', emoji: '😐' },
     GREED: { color: '#4ade80', emoji: '😊' },
-    EXTREME_GREED: { color: COLORS.green, emoji: '🤑' },
+    EXTREME_GREED: { color: COLORS.green || '#00e676', emoji: '🤑' },
   };
 
-  const config = labelConfig[fearGreed.label] || labelConfig.NEUTRAL;
-  const displayLabel = fearGreed.label.replace(/_/g, ' ');
+  // Ensure we have a valid config with fallback
+  const label = fearGreed.label || 'NEUTRAL';
+  const config = labelConfig[label] || labelConfig.NEUTRAL || { color: '#ffc107', emoji: '😐' };
+  
+  // Safety check
+  if (!config || !config.color) {
+    console.error('[FearGreedGauge] Invalid config:', { label, config, fearGreed });
+    return null;
+  }
+  
+  const displayLabel = (fearGreed.label || 'NEUTRAL').replace(/_/g, ' ');
 
   return (
     <div 

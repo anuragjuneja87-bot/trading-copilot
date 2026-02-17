@@ -1,90 +1,101 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
-import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
 
-interface Price {
-  ticker: string;
-  price: number;
-  change: number;
-  changePercent: number;
-}
-
-interface RegimeData {
-  status: 'normal' | 'elevated' | 'crisis';
-  vixLevel: number;
+interface FearGreedData {
+  score: number;
+  label: string;
+  components?: {
+    vix?: number;
+    putCallRatio?: number;
+    breadth?: number;
+    momentum?: number;
+  };
 }
 
 interface FearGreedGaugeProps {
   size?: 'small' | 'medium' | 'large';
   hideDetails?: boolean;
+  className?: string;
 }
 
-// TODO: Calculate Fear & Greed Index from real data
-// Components: VIX, Put/Call Ratio, Market Breadth, Options GEX, Unusual Flow
-function calculateFearGreedIndex(vix?: number, putCallRatio?: number): number {
-  // Mock calculation - replace with real logic
-  if (!vix) return 50;
-  
-  // VIX component (0-20 points)
-  let vixScore = 0;
-  if (vix < 15) vixScore = 20; // Low VIX = Greed
-  else if (vix < 20) vixScore = 15;
-  else if (vix < 25) vixScore = 10;
-  else if (vix < 30) vixScore = 5;
-  else vixScore = 0; // High VIX = Fear
+export function FearGreedGauge({ size = 'medium', hideDetails = false, className }: FearGreedGaugeProps) {
+  const [data, setData] = useState<FearGreedData | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Put/Call Ratio component (0-20 points)
-  let pcScore = 0;
-  if (putCallRatio && putCallRatio < 0.7) pcScore = 20; // Low P/C = Greed
-  else if (putCallRatio && putCallRatio < 0.85) pcScore = 15;
-  else if (putCallRatio && putCallRatio < 1.0) pcScore = 10;
-  else if (putCallRatio && putCallRatio < 1.2) pcScore = 5;
-  else pcScore = 0; // High P/C = Fear
+  useEffect(() => {
+    const fetchFearGreed = async () => {
+      try {
+        const res = await fetch('/api/market-pulse');
+        const json = await res.json();
+        
+        if (json.success && json.data?.fearGreedIndex) {
+          setData({
+            score: json.data.fearGreedIndex.score,
+            label: json.data.fearGreedIndex.label,
+            components: json.data.fearGreedIndex.components,
+          });
+        } else {
+          // Fallback: calculate from VIX if fearGreedIndex not available
+          const vix = json.data?.vix?.value || 20;
+          const score = calculateFromVix(vix);
+          setData({
+            score,
+            label: getLabel(score),
+          });
+        }
+      } catch (err) {
+        console.error('[FearGreed] Fetch error:', err);
+        // Default to neutral on error
+        setData({ score: 50, label: 'NEUTRAL' });
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  // Market Breadth (mock - TODO: fetch from API)
-  const breadthScore = 12; // 60% stocks above 50-day MA
+    fetchFearGreed();
+    
+    // Refresh every 60 seconds
+    const interval = setInterval(fetchFearGreed, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
-  // Options GEX (mock - TODO: fetch from options flow API)
-  const gexScore = 10; // Positive GEX
-
-  // Unusual Flow (mock - TODO: calculate from options flow)
-  const flowScore = 8; // Moderate unusual activity
-
-  return Math.round((vixScore + pcScore + breadthScore + gexScore + flowScore) / 5);
-}
-
-export function FearGreedGauge({ size = 'medium', hideDetails = false }: FearGreedGaugeProps) {
-  // Fetch VIX
-  const { data: pricesData } = useQuery<{ prices: Price[] }>({
-    queryKey: ['prices', ['VIX']],
-    queryFn: async () => {
-      const res = await fetch('/api/market/prices?tickers=VIX');
-      const data = await res.json();
-      return data.data;
-    },
-    refetchInterval: 30000,
-  });
-
-  const vix = pricesData?.prices?.find((p) => p.ticker === 'VIX')?.price || 26.12;
-  const putCallRatio = 0.85; // TODO: Fetch from API
-  const fearGreedIndex = calculateFearGreedIndex(vix, putCallRatio);
-
-  // Determine label and color
-  const getLabel = (index: number) => {
-    if (index >= 75) return { label: 'Extreme Greed', color: '#00e676' };
-    if (index >= 55) return { label: 'Greed', color: '#66bb6a' };
-    if (index >= 45) return { label: 'Neutral', color: '#ffa726' };
-    if (index >= 25) return { label: 'Fear', color: '#ff7043' };
-    return { label: 'Extreme Fear', color: '#ff5252' };
+  // Fallback calculation from VIX only
+  const calculateFromVix = (vix: number): number => {
+    // VIX 10 = Extreme Greed (90), VIX 40 = Extreme Fear (10)
+    const score = Math.max(0, Math.min(100, 100 - ((vix - 10) / 30) * 90));
+    return Math.round(score);
   };
 
-  const { label, color } = getLabel(fearGreedIndex);
-  const angle = (fearGreedIndex / 100) * 180 - 90; // -90 to 90 degrees
+  const getLabel = (score: number): string => {
+    if (score <= 20) return 'EXTREME_FEAR';
+    if (score <= 40) return 'FEAR';
+    if (score <= 60) return 'NEUTRAL';
+    if (score <= 80) return 'GREED';
+    return 'EXTREME_GREED';
+  };
+
+  const getColor = (score: number): string => {
+    if (score <= 20) return '#ff5252';
+    if (score <= 40) return '#ff7043';
+    if (score <= 60) return '#ffa726';
+    if (score <= 80) return '#66bb6a';
+    return '#00e676';
+  };
+
+  if (loading) {
+    return (
+      <div className={cn("flex items-center gap-2", className)}>
+        <div className="w-16 h-16 rounded-full bg-white/5 animate-pulse" />
+      </div>
+    );
+  }
+
+  const score = data?.score ?? 50;
+  const label = data?.label ?? 'NEUTRAL';
+  const color = getColor(score);
+  const displayLabel = label.replace(/_/g, ' ');
 
   // Size configurations
   const sizeConfig = {
@@ -113,7 +124,7 @@ export function FearGreedGauge({ size = 'medium', hideDetails = false }: FearGre
   // Small version for sidebar
   if (size === 'small') {
     return (
-      <div className="w-full">
+      <div className={cn("w-full", className)}>
         <div className="relative" style={{ width: config.svgSize, height: config.svgSize * 0.6, margin: '0 auto' }}>
           <svg viewBox="0 0 200 120" className="w-full h-full">
             <defs>
@@ -130,7 +141,7 @@ export function FearGreedGauge({ size = 'medium', hideDetails = false }: FearGre
               strokeWidth="12"
               strokeLinecap="round"
             />
-            <g transform={`translate(100, 100) rotate(${angle})`}>
+            <g transform={`translate(100, 100) rotate(${(score / 100) * 180 - 90})`}>
               <line
                 x1="0"
                 y1="0"
@@ -145,9 +156,9 @@ export function FearGreedGauge({ size = 'medium', hideDetails = false }: FearGre
           </svg>
           <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-center">
             <div className="font-bold" style={{ color, fontSize: config.fontSize }}>
-              {fearGreedIndex}
+              {score}
             </div>
-            <div className={cn('text-[#6b7a99] mt-0.5', config.textSize)}>{label}</div>
+            <div className={cn('text-[#6b7a99] mt-0.5', config.textSize)}>{displayLabel}</div>
           </div>
         </div>
       </div>
@@ -156,7 +167,7 @@ export function FearGreedGauge({ size = 'medium', hideDetails = false }: FearGre
 
   // Full version with details
   return (
-    <Card className="p-6 lg:p-8 border-[rgba(255,255,255,0.06)] bg-background-card rounded-xl">
+    <div className={cn("p-6 lg:p-8 border-[rgba(255,255,255,0.06)] bg-background-card rounded-xl", className)}>
       <h2 className="text-2xl font-bold text-text-primary mb-6">Market Sentiment</h2>
 
       {/* Gauge */}
@@ -177,7 +188,7 @@ export function FearGreedGauge({ size = 'medium', hideDetails = false }: FearGre
               strokeWidth="12"
               strokeLinecap="round"
             />
-            <g transform={`translate(100, 100) rotate(${angle})`}>
+            <g transform={`translate(100, 100) rotate(${(score / 100) * 180 - 90})`}>
               <line
                 x1="0"
                 y1="0"
@@ -192,75 +203,29 @@ export function FearGreedGauge({ size = 'medium', hideDetails = false }: FearGre
           </svg>
           <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-center">
             <div className="font-bold" style={{ color, fontSize: config.fontSize }}>
-              {fearGreedIndex}
+              {score}
             </div>
-            <div className={cn('text-[#6b7a99] mt-1', config.textSize)}>{label}</div>
+            <div className={cn('text-[#6b7a99] mt-1', config.textSize)}>{displayLabel}</div>
           </div>
         </div>
       </div>
 
-      {!hideDetails && (
-        <>
-          {/* Component Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-            {/* VIX Level */}
+      {!hideDetails && data?.components && (
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {data.components.vix !== undefined && (
             <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-background-surface p-3">
               <div className="text-xs text-[#6b7a99] mb-1">VIX Level</div>
-              <div className="text-lg font-bold text-white mb-1">{vix.toFixed(2)}</div>
-              <Badge
-                className={cn(
-                  'text-[10px] px-2 py-0.5',
-                  vix > 25 ? 'bg-bear/10 text-bear' : vix < 15 ? 'bg-bull/10 text-bull' : 'bg-warning/10 text-warning'
-                )}
-              >
-                {vix > 25 ? 'Elevated' : vix < 15 ? 'Low' : 'Normal'}
-              </Badge>
+              <div className="text-lg font-bold text-white">{data.components.vix.toFixed(2)}</div>
             </div>
-
-            {/* Put/Call Ratio */}
+          )}
+          {data.components.putCallRatio !== undefined && (
             <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-background-surface p-3">
               <div className="text-xs text-[#6b7a99] mb-1">Put/Call Ratio</div>
-              <div className="text-lg font-bold text-white">{putCallRatio.toFixed(2)}</div>
-              <div className="text-[10px] text-[#6b7a99] mt-1">
-                {putCallRatio > 1.0 ? 'Bearish' : putCallRatio < 0.7 ? 'Bullish' : 'Neutral'}
-              </div>
+              <div className="text-lg font-bold text-white">{data.components.putCallRatio.toFixed(2)}</div>
             </div>
-
-            {/* Market Breadth */}
-            <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-background-surface p-3">
-              <div className="text-xs text-[#6b7a99] mb-1">Market Breadth</div>
-              <div className="text-lg font-bold text-white">60%</div>
-              <div className="text-[10px] text-[#6b7a99] mt-1">Above 50-day MA</div>
-            </div>
-
-            {/* Options GEX */}
-            <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-background-surface p-3">
-              <div className="text-xs text-[#6b7a99] mb-1">Options GEX</div>
-              <div className="text-lg font-bold text-bull">Positive</div>
-              <div className="text-[10px] text-[#6b7a99] mt-1">$2.5B</div>
-            </div>
-
-            {/* Unusual Flow Score */}
-            <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-background-surface p-3">
-              <div className="text-xs text-[#6b7a99] mb-1">Unusual Flow</div>
-              <div className="text-lg font-bold text-warning">Moderate</div>
-              <div className="text-[10px] text-[#6b7a99] mt-1">Score: 6.2/10</div>
-            </div>
-          </div>
-
-          {/* CTA */}
-          <div className="text-center pt-4 border-t border-[rgba(255,255,255,0.06)]">
-            <Link
-              href="/pricing"
-              className="text-sm text-[#00e5ff] hover:text-[#00b8d4] transition-colors inline-flex items-center gap-1"
-            >
-              Want real-time GEX levels for 3,500+ tickers?
-              <ArrowRight className="h-3 w-3" />
-              <span className="font-semibold">Go Pro</span>
-            </Link>
-          </div>
-        </>
+          )}
+        </div>
       )}
-    </Card>
+    </div>
   );
 }
