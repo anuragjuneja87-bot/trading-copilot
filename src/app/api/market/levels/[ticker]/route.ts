@@ -145,20 +145,22 @@ export async function GET(
           
           const strikes = Object.keys(gammaByStrike).map(Number).sort((a, b) => a - b);
           
-          // Find Call Wall (highest call premium/OI)
-          let maxCallPremium = 0;
+          // Find Call Wall (highest call OI at strikes ABOVE current price - this is RESISTANCE)
+          let maxCallOI = 0;
           strikes.forEach(strike => {
-            if (gammaByStrike[strike].callPremium > maxCallPremium) {
-              maxCallPremium = gammaByStrike[strike].callPremium;
+            // Only consider strikes ABOVE current price (OTM calls)
+            if (strike > price && gammaByStrike[strike].callOI > maxCallOI) {
+              maxCallOI = gammaByStrike[strike].callOI;
               callWall = strike;
             }
           });
           
-          // Find Put Wall (highest put premium/OI)
-          let maxPutPremium = 0;
+          // Find Put Wall (highest put OI at strikes BELOW current price - this is SUPPORT)
+          let maxPutOI = 0;
           strikes.forEach(strike => {
-            if (gammaByStrike[strike].putPremium > maxPutPremium) {
-              maxPutPremium = gammaByStrike[strike].putPremium;
+            // Only consider strikes BELOW current price (OTM puts)
+            if (strike < price && gammaByStrike[strike].putOI > maxPutOI) {
+              maxPutOI = gammaByStrike[strike].putOI;
               putWall = strike;
             }
           });
@@ -233,12 +235,12 @@ export async function GET(
     }
     
     // Fallback estimates if options data unavailable
-    if (!callWall) callWall = Math.round(price * 1.02);
-    if (!putWall) putWall = Math.round(price * 0.98);
+    if (!callWall) callWall = Math.round(price * 1.05); // 5% above
+    if (!putWall) putWall = Math.round(price * 0.95);   // 5% below
     if (!gexFlip) gexFlip = Math.round(price);
     if (!maxPain) maxPain = Math.round(price);
-    if (!expectedMove) expectedMove = price * 0.015;
-    if (!maxGamma) maxGamma = Math.round(price * 1.01);
+    if (!expectedMove) expectedMove = price * 0.02;     // 2% expected move
+    if (!maxGamma) maxGamma = Math.round(price);
 
     // Build response
     const levels = {

@@ -129,7 +129,7 @@ export function DarkPoolPanel({
         <StatBox 
           label="Volume" 
           value={formatValue(stats?.totalValue || 0)}
-          color={COLORS.white}
+          color="#fff"
         />
         <StatBox 
           label="Bullish" 
@@ -210,30 +210,38 @@ function DarkPoolChart({ prints, vwap }: { prints: any[]; vwap: number | null })
   // Debug log
   console.log('[DarkPoolChart] Prints sample:', prints?.slice(0, 3));
   
-  // Group prints by price level
-  const priceLevels = useMemo(() => {
+  // Group prints by time bucket (30-minute windows)
+  const timeBuckets = useMemo(() => {
     if (!prints || prints.length === 0) return [];
     
-    const levels = new Map<string, { price: number; total: number; bullish: number; bearish: number; neutral: number }>();
+    const buckets = new Map<string, { time: string; timeMs: number; bullish: number; bearish: number; neutral: number }>();
     
     prints.forEach(p => {
-      if (!p.price || p.price === 0) return;
+      if (!p.timestamp) return;
       
-      // Round to nearest dollar for cleaner grouping
-      const priceKey = Math.round(p.price).toString();
+      const timestamp = typeof p.timestamp === 'string' ? new Date(p.timestamp) : new Date(p.timestamp);
+      const minutes = timestamp.getMinutes();
+      const bucketMinutes = Math.floor(minutes / 30) * 30;
+      const bucketTime = new Date(timestamp);
+      bucketTime.setMinutes(bucketMinutes, 0, 0);
+      
+      const bucketKey = bucketTime.toISOString();
+      const timeLabel = bucketTime.toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true 
+      });
+      
       const value = p.value || (p.price * (p.size || 0));
-      
       if (value === 0) return;
       
-      const existing = levels.get(priceKey) || { 
-        price: Math.round(p.price), 
-        total: 0, 
+      const existing = buckets.get(bucketKey) || { 
+        time: timeLabel,
+        timeMs: bucketTime.getTime(),
         bullish: 0, 
         bearish: 0, 
         neutral: 0 
       };
-      
-      existing.total += value;
       
       // Determine side - handle various formats
       const side = (p.side || p.sentiment || 'NEUTRAL').toString().toUpperCase();
@@ -246,36 +254,19 @@ function DarkPoolChart({ prints, vwap }: { prints: any[]; vwap: number | null })
         existing.neutral += value;
       }
       
-      levels.set(priceKey, existing);
+      buckets.set(bucketKey, existing);
     });
     
-    // Convert to array, sort by total, take top 8
-    const result = Array.from(levels.values())
-      .filter(l => l.total > 0)
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 8)
-      .sort((a, b) => a.price - b.price); // Re-sort by price for display
-    
-    console.log('[DarkPoolChart] Grouped data:', result);
+    const result = Array.from(buckets.values())
+      .sort((a, b) => a.timeMs - b.timeMs);
     
     return result;
   }, [prints]);
 
-  if (priceLevels.length === 0) {
-    // Even if no grouped data, show the raw prints summary
-    if (prints && prints.length > 0) {
-      const totalValue = prints.reduce((sum, p) => sum + (p.value || p.price * p.size || 0), 0);
-      return (
-        <div className="h-full flex flex-col items-center justify-center text-gray-400 text-xs">
-          <div>{prints.length} prints</div>
-          <div className="text-white font-mono">${(totalValue / 1000000).toFixed(1)}M total</div>
-          <div className="text-[10px] mt-1">(No price level grouping)</div>
-        </div>
-      );
-    }
+  if (timeBuckets.length === 0) {
     return (
       <div className="h-full flex items-center justify-center text-gray-500 text-xs">
-        No chart data
+        No time data available
       </div>
     );
   }
@@ -284,7 +275,7 @@ function DarkPoolChart({ prints, vwap }: { prints: any[]; vwap: number | null })
     grid: { top: 10, right: 10, bottom: 30, left: 50 },
     xAxis: {
       type: 'category',
-      data: priceLevels.map(l => `$${l.price}`),
+      data: timeBuckets.map(b => b.time),
       axisLine: { show: false },
       axisTick: { show: false },
       axisLabel: { 
@@ -310,36 +301,48 @@ function DarkPoolChart({ prints, vwap }: { prints: any[]; vwap: number | null })
         name: 'Bullish',
         type: 'bar',
         stack: 'total',
-        data: priceLevels.map(l => l.bullish),
-        itemStyle: { color: '#00e676' },
+        data: timeBuckets.map(b => b.bullish),
+        itemStyle: { color: COLORS.green || '#00e676' },
         barMaxWidth: 30,
       },
       {
         name: 'Neutral',
         type: 'bar',
         stack: 'total',
-        data: priceLevels.map(l => l.neutral),
-        itemStyle: { color: '#ffc107' },
+        data: timeBuckets.map(b => b.neutral),
+        itemStyle: { color: COLORS.yellow || '#ffc107' },
         barMaxWidth: 30,
       },
       {
         name: 'Bearish',
         type: 'bar',
         stack: 'total',
-        data: priceLevels.map(l => l.bearish),
-        itemStyle: { color: '#ff5252' },
+        data: timeBuckets.map(b => b.bearish),
+        itemStyle: { color: COLORS.red || '#ff5252' },
         barMaxWidth: 30,
       },
     ],
-    // VWAP reference line
-    ...(vwap ? {
-      markLine: {
-        silent: true,
-        data: [{ xAxis: `$${vwap.toFixed(2)}` }],
-        lineStyle: { color: COLORS.cyan, type: 'dashed' },
-        label: { show: false },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(0,0,0,0.8)',
+      borderColor: 'rgba(255,255,255,0.1)',
+      textStyle: { color: '#fff', fontSize: 10 },
+      formatter: (params: any) => {
+        const data = params[0];
+        const index = data.dataIndex;
+        const bucket = timeBuckets[index];
+        const total = bucket.bullish + bucket.neutral + bucket.bearish;
+        return `
+          <div style="font-weight:bold">${data.name}</div>
+          <div style="color:${COLORS.green || '#00e676'}">Bullish: $${(bucket.bullish/1000000).toFixed(2)}M</div>
+          <div style="color:${COLORS.yellow || '#ffc107'}">Neutral: $${(bucket.neutral/1000000).toFixed(2)}M</div>
+          <div style="color:${COLORS.red || '#ff5252'}">Bearish: $${(bucket.bearish/1000000).toFixed(2)}M</div>
+          <div style="margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.1)">
+            Total: $${(total/1000000).toFixed(2)}M
+          </div>
+        `;
       },
-    } : {}),
+    },
   };
 
   return <ReactECharts option={option} style={{ height: '100%' }} />;

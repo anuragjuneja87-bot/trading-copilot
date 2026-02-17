@@ -16,6 +16,8 @@ import { OptionsFlowPanel } from '@/components/ask/options-flow-panel';
 import { DarkPoolPanel } from '@/components/ask/dark-pool-panel';
 import { GammaLevelsPanel } from '@/components/ask/gamma-levels-panel';
 import { NewsSentimentPanel } from '@/components/ask/news-sentiment-panel';
+import { TradingViewPanel } from '@/components/ask/tradingview-panel';
+import { VolumePressurePanel } from '@/components/ask/volume-pressure-panel';
 import { WatchlistCard } from '@/components/watchlist/watchlist-card';
 import { FearGreedGauge } from '@/components/pulse/fear-greed-gauge';
 import { 
@@ -165,9 +167,27 @@ export default function AskPage() {
               
               {/* Market status indicator */}
               <div className="flex items-center gap-3">
-                {timeframeRange.isMarketClosed && (
-                  <span className="text-xs text-yellow-500 bg-yellow-500/10 px-2 py-1 rounded">
-                    ⚠️ Market Closed - Showing {timeframeRange.tradingDay}
+                {timeframeRange.marketStatus === 'pre-market' && (
+                  <span className="text-xs text-yellow-500 bg-yellow-500/10 px-2 py-1 rounded flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
+                    Pre-Market
+                  </span>
+                )}
+                {timeframeRange.marketStatus === 'after-hours' && (
+                  <span className="text-xs text-orange-500 bg-orange-500/10 px-2 py-1 rounded flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></span>
+                    After-Hours
+                  </span>
+                )}
+                {timeframeRange.marketStatus === 'closed' && (
+                  <span className="text-xs text-red-400 bg-red-500/10 px-2 py-1 rounded">
+                    🔴 Closed - Showing {timeframeRange.tradingDay}
+                  </span>
+                )}
+                {timeframeRange.marketStatus === 'open' && (
+                  <span className="text-xs text-green-500 bg-green-500/10 px-2 py-1 rounded flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                    Market Open
                   </span>
                 )}
                 <span className="text-xs text-gray-500">
@@ -264,9 +284,10 @@ export default function AskPage() {
             />
           )}
 
-          {/* Main Grid: 2x2 */}
-          <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-3 min-h-0">
-            {/* Options Flow */}
+          {/* Main Grid: 3x2 */}
+          <div className="flex-1 grid grid-cols-3 grid-rows-2 gap-3 min-h-0">
+            {/* Row 1 */}
+            <TradingViewPanel ticker={selectedTicker} />
             <OptionsFlowPanel
               stats={data.flow?.stats || null}
               trades={data.flow?.trades || []}
@@ -277,15 +298,14 @@ export default function AskPage() {
               currentPrice={data.price}
               vwap={data.levels?.vwap || null}
             />
-
-            {/* Gamma Levels */}
             <GammaLevelsPanel 
               ticker={selectedTicker}
               gexByStrike={data.flow?.stats?.gexByStrike || []}
               currentPrice={data.price}
             />
 
-            {/* Dark Pool */}
+            {/* Row 2 */}
+            <VolumePressurePanel ticker={selectedTicker} />
             <DarkPoolPanel
               prints={data.darkpool?.prints || []}
               stats={data.darkpool?.stats || null}
@@ -296,8 +316,6 @@ export default function AskPage() {
               timeframeRange={timeframeRange}
               meta={data.darkpool?.meta}
             />
-
-            {/* News */}
             <NewsSentimentPanel
               ticker={selectedTicker}
               items={data.news.items}

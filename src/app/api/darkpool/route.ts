@@ -315,23 +315,21 @@ export async function GET(request: NextRequest) {
     console.log('[DarkPool] Total trades received:', allTrades.length);
     
     // Filter for block trades (dark pool indicator)
-    // Use more lenient filter: $10K minimum (or use minSize param if provided)
+    // Filter by size and value
     const minSizeParam = searchParams.get('minSize');
-    const minNotional = minSizeParam ? parseInt(minSizeParam) : 10000; // Default $10K for better data capture
+    const minSize = minSizeParam ? parseInt(minSizeParam) : 100000; // Default 100K shares
+    const minValue = 1000000; // $1M minimum value
     
     const blockTrades = allTrades.filter((t: any) => {
       const size = t.size || 0;
       const price = parseFloat(t.price || currentPrice);
       const notional = size * price;
       
-      // Also check if it's a large size trade (100+ shares) even if notional is lower
-      const isLargeSize = size >= 100;
-      const isLargeNotional = notional >= minNotional;
-      
-      return isLargeNotional || isLargeSize;
+      // Must meet both size and value thresholds
+      return size >= minSize && notional >= minValue;
     });
     
-    console.log('[DarkPool] Block trades found:', blockTrades.length, `(minNotional: $${minNotional}, total trades: ${allTrades.length})`);
+    console.log('[DarkPool] Block trades found:', blockTrades.length, `(minSize: ${minSize}, minValue: $${minValue.toLocaleString()}, total trades: ${allTrades.length})`);
     
     // If no block trades found, log sample trades for debugging
     if (blockTrades.length === 0 && allTrades.length > 0) {

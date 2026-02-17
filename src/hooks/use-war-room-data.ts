@@ -24,6 +24,7 @@ interface WarRoomData {
     stats: any;
     loading: boolean;
     error: string | null;
+    meta?: any;
   };
   
   // News (from REST)
@@ -96,7 +97,7 @@ export function useWarRoomData(
 
       // Build API URLs with timeframe params
       const flowParams = new URLSearchParams({ tickers: ticker, limit: '200' });
-      const dpParams = new URLSearchParams({ tickers: ticker, limit: '100', minSize: '10000' });
+      const dpParams = new URLSearchParams({ tickers: ticker, limit: '100', minSize: '100000' }); // 100K shares minimum
       
       if (timeframeParams) {
         // Use ISO strings for flow API
@@ -244,7 +245,7 @@ export function useWarRoomData(
     flow: data.flow || { stats: null, trades: [], loading: true, error: null },
     darkpool: data.darkpool || { prints: [], stats: null, loading: true, error: null, meta: undefined },
     news: data.news || { items: [], loading: true },
-    levels: data.levels || { callWall: null, putWall: null, maxGamma: null, gexFlip: null, vwap: null },
+    levels: data.levels || { callWall: null, putWall: null, maxGamma: null, gexFlip: null, maxPain: null, vwap: null },
     verdict: data.verdict || { bias: 'NEUTRAL', confidence: 0, summary: '', signals: { flow: 'NEUTRAL', darkpool: 'NEUTRAL', newsAlignment: false } },
     refresh: fetchAllData,
     isLoading,
@@ -281,13 +282,23 @@ function computeVerdict(
       reasons.push('Slight bearish flow');
     }
     
-    // Call/Put Ratio - any skew counts
-    if (flow.callRatio > 60) {
-      bullishPoints += 1;
-      reasons.push('Call heavy');
-    } else if (flow.putRatio > 60) {
-      bearishPoints += 1;
-      reasons.push('Put heavy');
+    // Call/Put Ratio - stronger weighting for extreme ratios
+    if (flow.putRatio >= 70) {
+      // 70%+ puts = BEARISH
+      bearishPoints += 3;
+      reasons.push(`Heavy put bias (${flow.putRatio.toFixed(0)}% puts)`);
+    } else if (flow.putRatio >= 60) {
+      // 60-70% puts = lean BEARISH
+      bearishPoints += 2;
+      reasons.push(`Put heavy (${flow.putRatio.toFixed(0)}% puts)`);
+    } else if (flow.callRatio >= 70) {
+      // 70%+ calls = BULLISH
+      bullishPoints += 3;
+      reasons.push(`Heavy call bias (${flow.callRatio.toFixed(0)}% calls)`);
+    } else if (flow.callRatio >= 60) {
+      // 60-70% calls = lean BULLISH
+      bullishPoints += 2;
+      reasons.push(`Call heavy (${flow.callRatio.toFixed(0)}% calls)`);
     }
     
     // Sweeps
@@ -350,7 +361,7 @@ function computeVerdict(
   }
   
   // Minimum confidence if we have any data
-  if (flow?.tradeCount > 0 || (dpStats?.printCount > 0)) {
+  if ((flow?.tradeCount && flow.tradeCount > 0) || (dpStats?.printCount && dpStats.printCount > 0)) {
     confidence = Math.max(confidence, 25);
   }
   
@@ -365,10 +376,31 @@ function computeVerdict(
     bias = 'BEARISH';
   }
   
+  // Generate summary that reflects dominant signal
+  let summary = 'Analyzing...';
+  if (reasons.length > 0) {
+    // Prioritize put/call ratio messages when extreme
+    const putHeavyMsg = reasons.find(r => r.includes('put bias') || r.includes('Put heavy'));
+    const callHeavyMsg = reasons.find(r => r.includes('call bias') || r.includes('Call heavy'));
+    
+    if (putHeavyMsg && flow && flow.putRatio >= 70) {
+      summary = `Heavy put pressure (${flow.putRatio.toFixed(0)}% puts), bearish flow`;
+    } else if (callHeavyMsg && flow && flow.callRatio >= 70) {
+      summary = `Heavy call pressure (${flow.callRatio.toFixed(0)}% calls), bullish flow`;
+    } else if (putHeavyMsg) {
+      summary = `Put heavy flow (${flow?.putRatio.toFixed(0) || 0}% puts)`;
+    } else if (callHeavyMsg) {
+      summary = `Call heavy flow (${flow?.callRatio.toFixed(0) || 0}% calls)`;
+    } else {
+      // Use first 2 reasons
+      summary = reasons.slice(0, 2).join(' + ');
+    }
+  }
+  
   return {
     bias,
     confidence,
-    summary: reasons.length > 0 ? reasons.slice(0, 2).join(' + ') : 'Analyzing...',
+    summary,
     signals: {
       flow: (flow?.regime === 'RISK_ON' ? 'BULLISH' : 
              flow?.regime === 'RISK_OFF' ? 'BEARISH' : 'NEUTRAL') as any,
@@ -379,10 +411,25 @@ function computeVerdict(
 }
 
 // Compute key levels from flow data
+// Compute key levels - USE API DATA FIRST, fallback to flow computation
 function computeKeyLevels(
   flow: EnhancedFlowStats | null,
   levelsData: any
 ): WarRoomData['levels'] {
+  // PRIORITY 1: Use API levels data (from /api/market/levels/${ticker})
+  // This is calculated from full options chain OI, not just today's flow
+  if (levelsData && (levelsData.callWall || levelsData.putWall)) {
+    return {
+      callWall: levelsData.callWall || null,
+      putWall: levelsData.putWall || null,
+      maxGamma: levelsData.maxGamma || null,
+      gexFlip: levelsData.gexFlip || null,
+      maxPain: levelsData.maxPain || null,
+      vwap: levelsData.vwap || levelsData.currentPrice || null,
+    };
+  }
+
+  // PRIORITY 2: Fallback - compute from flow data if API levels unavailable
   let callWall: number | null = null;
   let putWall: number | null = null;
   let maxGamma: number | null = null;
@@ -401,19 +448,14 @@ function computeKeyLevels(
     const sortedByNetGex = [...flow.gexByStrike].sort((a, b) => Math.abs(b.netGex || 0) - Math.abs(a.netGex || 0));
     maxGamma = sortedByNetGex[0]?.strike || null;
     
-    // GEX flip = strike where netGex crosses zero (dealer hedging flips)
-    // Find where net GEX transitions from positive to negative
+    // GEX flip = strike where netGex crosses zero
     const sortedByStrike = [...flow.gexByStrike].sort((a, b) => a.strike - b.strike);
     for (let i = 0; i < sortedByStrike.length - 1; i++) {
       const currentNetGex = sortedByStrike[i].netGex || 0;
       const nextNetGex = sortedByStrike[i + 1].netGex || 0;
       
-      if (currentNetGex > 0 && nextNetGex < 0) {
+      if ((currentNetGex > 0 && nextNetGex < 0) || (currentNetGex < 0 && nextNetGex > 0)) {
         gexFlip = sortedByStrike[i].strike;
-        break;
-      }
-      if (currentNetGex < 0 && nextNetGex > 0) {
-        gexFlip = sortedByStrike[i + 1].strike;
         break;
       }
     }
@@ -424,7 +466,7 @@ function computeKeyLevels(
     putWall,
     maxGamma,
     gexFlip,
-    maxPain: levelsData?.maxPain || null, // TODO: Calculate from options chain
+    maxPain: levelsData?.maxPain || null,
     vwap: levelsData?.vwap || null,
   };
 }

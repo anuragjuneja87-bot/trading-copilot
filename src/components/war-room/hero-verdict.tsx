@@ -156,7 +156,7 @@ export function HeroVerdict({
       
       {/* Stale data warning */}
       {dataAgeSeconds > 120 && (
-        <div className="absolute top-2 left-2 px-2 py-1 rounded text-[10px] bg-red-500/20 text-red-400">
+        <div className="absolute top-2 left-2 px-2 py-1 rounded text-sm bg-red-500/20 text-red-400">
           ⚠️ STALE DATA - Refresh recommended
         </div>
       )}
@@ -175,22 +175,22 @@ export function HeroVerdict({
           <div>
             <div className="flex items-center gap-3">
               <span 
-                className="text-2xl font-bold"
+                className="text-4xl font-bold"
                 style={{ color: biasColor, fontFamily: "'Oxanium', monospace" }}
               >
                 {verdict.bias === 'CONFLICTING' ? '⚠️ CONFLICTING' : verdict.bias}
               </span>
               <span className="text-gray-500">•</span>
-              <span className={`text-sm`} style={{ color: conf.color }}>
+              <span className={`text-lg`} style={{ color: conf.color }}>
                 {conf.label}
               </span>
             </div>
-            <p className="text-sm text-gray-300 mt-0.5">{verdict.summary}</p>
+            <p className="text-base text-gray-300 mt-0.5">{verdict.summary}</p>
             
             {/* Consolidated data quality badge */}
             <div className="flex items-center gap-3 mt-3">
               <div className={`
-                flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs
+                flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm
                 ${quality.level === 'HIGH' ? 'bg-green-500/10 text-green-400 border border-green-500/30' : ''}
                 ${quality.level === 'MEDIUM' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/30' : ''}
                 ${quality.level === 'LOW' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/30' : ''}

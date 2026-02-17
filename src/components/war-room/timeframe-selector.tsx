@@ -143,23 +143,55 @@ function getLastTradingDay(): Date {
   return checkDate; // Fallback
 }
 
-// Helper: Check if market is closed and get last trading day
-export function getAdjustedTimeframeRange(tf: Timeframe): {
+export type MarketStatus = 'pre-market' | 'open' | 'after-hours' | 'closed';
+
+export interface TimeframeRangeResult {
   from: number;
   to: number;
   label: string;
-  isMarketClosed: boolean;
+  marketStatus: MarketStatus;
+  isMarketClosed: boolean; // keep for backwards compatibility
   tradingDay: string;
-} {
+}
+
+// Detect current market session status
+function getMarketStatus(): MarketStatus {
+  const now = new Date();
+  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const hour = et.getHours();
+  const minute = et.getMinutes();
+  const day = et.getDay(); // 0 = Sunday, 6 = Saturday
+  
+  // Weekend = closed
+  if (day === 0 || day === 6) return 'closed';
+  
+  // Check if it's a market holiday
+  if (isMarketHoliday(et)) return 'closed';
+  
+  // Check time of day (ET)
+  const timeInMinutes = hour * 60 + minute;
+  
+  if (timeInMinutes >= 240 && timeInMinutes < 570) {
+    // 4:00 AM - 9:30 AM = Pre-market
+    return 'pre-market';
+  } else if (timeInMinutes >= 570 && timeInMinutes < 960) {
+    // 9:30 AM - 4:00 PM = Market Open
+    return 'open';
+  } else if (timeInMinutes >= 960 && timeInMinutes < 1200) {
+    // 4:00 PM - 8:00 PM = After-hours
+    return 'after-hours';
+  } else {
+    // 8:00 PM - 4:00 AM = Closed
+    return 'closed';
+  }
+}
+
+// Helper: Check if market is closed and get last trading day
+export function getAdjustedTimeframeRange(tf: Timeframe): TimeframeRangeResult {
   const now = new Date();
   const lastTradingDay = getLastTradingDay();
-  
-  // Check if market is currently open
-  const isToday = lastTradingDay.toDateString() === now.toDateString();
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-  const isDuringMarketHours = hour >= 9 && (hour < 16 || (hour === 9 && minute >= 30));
-  const isMarketOpen = isToday && isDuringMarketHours;
+  const marketStatus = getMarketStatus();
+  const isMarketClosed = marketStatus === 'closed';
   
   const tradingDayStr = lastTradingDay.toLocaleDateString('en-US', { 
     weekday: 'short', 
@@ -174,6 +206,8 @@ export function getAdjustedTimeframeRange(tf: Timeframe): {
   const marketClose = new Date(lastTradingDay);
   marketClose.setHours(16, 0, 0, 0);
   
+  // Use current time if market is open, otherwise use market close
+  const isMarketOpen = marketStatus === 'open';
   const endTime = isMarketOpen ? now.getTime() : marketClose.getTime();
   
   let from: number;
@@ -211,7 +245,8 @@ export function getAdjustedTimeframeRange(tf: Timeframe): {
     from,
     to: endTime,
     label,
-    isMarketClosed: !isMarketOpen,
+    marketStatus,
+    isMarketClosed,
     tradingDay: tradingDayStr,
   };
 }
