@@ -18,54 +18,54 @@ export type DataMode = 'delayed' | 'realtime';
 export const DATA_CONFIG = {
   delayed: {
     wsUrl: 'wss://delayed.massive.com/stocks',
-    restPollInterval: 15000,      // 15 seconds for REST polling
-    wsPollInterval: 1000,         // WebSocket still streams, but data is 15-min delayed
+    restPollInterval: 15000,
+    wsPollInterval: 1000,
     label: '15-min Delayed',
-    badgeColor: '#f59e0b',        // Amber
+    badgeColor: '#f59e0b',
     description: 'Data is delayed by 15 minutes',
   },
   realtime: {
     wsUrl: 'wss://socket.massive.com/stocks',
-    restPollInterval: 5000,       // 5 seconds for REST polling
-    wsPollInterval: 0,            // Real-time, no artificial delay
+    restPollInterval: 5000,
+    wsPollInterval: 0,
     label: 'Real-time',
-    badgeColor: '#00e676',        // Green
+    badgeColor: '#00e676',
     description: 'Live market data',
   },
 } as const;
 
-// Get mode from environment variable - THE ONE-LINE SWITCH
 export const getDataMode = (): DataMode => {
-  // Read from process.env (works on both server and client in Next.js)
   const mode = process.env.NEXT_PUBLIC_DATA_MODE;
   if (mode === 'realtime') return 'realtime';
-  return 'delayed'; // Default to delayed for safety
+  return 'delayed';
 };
 
 export const getDataConfig = () => DATA_CONFIG[getDataMode()];
 
 // ============================================================================
-// WATCHLIST STORE
+// WATCHLIST STORE (with hydration recovery)
 // ============================================================================
 
 const DEFAULT_WATCHLIST = ['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA', 'AMD', 'META', 'MSFT'];
 const MAX_WATCHLIST_SIZE = 20;
 
+// Validate that a watchlist is reasonable
+function isValidWatchlist(watchlist: unknown): watchlist is string[] {
+  if (!Array.isArray(watchlist)) return false;
+  if (watchlist.length === 0) return false;
+  return watchlist.every(item => typeof item === 'string' && item.length > 0 && item.length < 10);
+}
+
 interface WatchlistState {
-  // State
   watchlist: string[];
-  
-  // Actions
   addSymbol: (symbol: string) => void;
   removeSymbol: (symbol: string) => void;
   setWatchlist: (symbols: string[]) => void;
   clearWatchlist: () => void;
   resetToDefault: () => void;
   moveSymbol: (fromIndex: number, toIndex: number) => void;
-  
-  // Computed
   hasSymbol: (symbol: string) => boolean;
-  watchlistString: () => string; // For query keys
+  watchlistString: () => string;
 }
 
 export const useWatchlistStore = create<WatchlistState>()(
@@ -125,6 +125,13 @@ export const useWatchlistStore = create<WatchlistState>()(
     {
       name: 'trading-copilot-watchlist',
       storage: createJSONStorage(() => localStorage),
+      // Validate on hydration — if localStorage has garbage, reset to defaults
+      onRehydrateStorage: () => (state) => {
+        if (state && !isValidWatchlist(state.watchlist)) {
+          console.warn('[Watchlist] Invalid persisted watchlist, resetting to defaults:', state.watchlist);
+          state.watchlist = DEFAULT_WATCHLIST;
+        }
+      },
     }
   )
 );
@@ -134,16 +141,11 @@ export const useWatchlistStore = create<WatchlistState>()(
 // ============================================================================
 
 interface UserPreferences {
-  // Display preferences
   compactMode: boolean;
   showTooltips: boolean;
   defaultTimeframe: '1D' | '1W' | '1M' | '3M';
-  
-  // Notification preferences
   soundEnabled: boolean;
   alertsEnabled: boolean;
-  
-  // Actions
   setPreference: <K extends keyof Omit<UserPreferences, 'setPreference'>>(
     key: K,
     value: UserPreferences[K]
@@ -178,7 +180,6 @@ interface UserState {
   watchlist: string[];
   dailyQuestionsUsed: number;
   
-  // Actions
   setAuthenticated: (value: boolean) => void;
   setTier: (tier: SubscriptionTier) => void;
   addToWatchlist: (ticker: string) => void;
@@ -192,7 +193,7 @@ export const useUserStore = create<UserState>()(
   persist(
     (set) => ({
       isAuthenticated: false,
-      tier: 'pro', // Personal use gets full access
+      tier: 'pro',
       watchlist: DEFAULT_WATCHLIST,
       dailyQuestionsUsed: 0,
       
@@ -205,7 +206,6 @@ export const useUserStore = create<UserState>()(
             ? state.watchlist 
             : [...state.watchlist, normalized] 
         }));
-        // Sync with new watchlist store
         useWatchlistStore.getState().addSymbol(normalized);
       },
       removeFromWatchlist: (ticker) => {
@@ -213,13 +213,11 @@ export const useUserStore = create<UserState>()(
         set((state) => ({ 
           watchlist: state.watchlist.filter((t) => t !== normalized) 
         }));
-        // Sync with new watchlist store
         useWatchlistStore.getState().removeSymbol(normalized);
       },
       setWatchlist: (tickers) => {
         const normalized = tickers.map((t) => t.toUpperCase().trim()).filter(Boolean);
         set({ watchlist: [...new Set(normalized)] });
-        // Sync with new watchlist store
         useWatchlistStore.getState().setWatchlist(normalized);
       },
       incrementQuestionsUsed: () =>
@@ -238,9 +236,19 @@ export const useUserStore = create<UserState>()(
 
 // Sync legacy store with persisted watchlist store on load
 if (typeof window !== 'undefined') {
-  // Initialize legacy store from new watchlist store
-  const persistedWatchlist = useWatchlistStore.getState().watchlist;
-  useUserStore.setState({ watchlist: persistedWatchlist });
+  // Wait for hydration to complete, then validate
+  setTimeout(() => {
+    const persistedWatchlist = useWatchlistStore.getState().watchlist;
+    
+    // If watchlist is empty or corrupted after hydration, reset
+    if (!isValidWatchlist(persistedWatchlist) || persistedWatchlist.length === 0) {
+      console.warn('[Stores] Watchlist empty/invalid after hydration, resetting to defaults');
+      useWatchlistStore.getState().resetToDefault();
+      useUserStore.setState({ watchlist: DEFAULT_WATCHLIST });
+    } else {
+      useUserStore.setState({ watchlist: persistedWatchlist });
+    }
+  }, 100);
   
   // Subscribe to watchlist changes and sync both ways
   useWatchlistStore.subscribe((state) => {
@@ -259,7 +267,6 @@ interface MarketState {
   lastUpdate: Date | null;
   isConnected: boolean;
   
-  // Actions
   updatePrice: (ticker: string, price: Price) => void;
   updatePrices: (prices: Price[]) => void;
   setRegime: (regime: RegimeData) => void;
@@ -300,7 +307,6 @@ interface ChatState {
   messages: ChatMessage[];
   isLoading: boolean;
   
-  // Actions
   addMessage: (message: ChatMessage) => void;
   updateMessage: (id: string, content: string) => void;
   setLoading: (loading: boolean) => void;
@@ -331,7 +337,6 @@ interface AlertsState {
   alerts: Alert[];
   unreadCount: number;
   
-  // Actions
   addAlert: (alert: Alert) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
@@ -344,7 +349,7 @@ export const useAlertsStore = create<AlertsState>((set) => ({
   
   addAlert: (alert) =>
     set((state) => ({
-      alerts: [alert, ...state.alerts].slice(0, 100), // Keep last 100
+      alerts: [alert, ...state.alerts].slice(0, 100),
       unreadCount: state.unreadCount + 1,
     })),
   markAsRead: (id) =>
@@ -371,7 +376,6 @@ interface UIState {
   mobileMenuOpen: boolean;
   activePanel: string | null;
   
-  // Actions
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   toggleMobileMenu: () => void;

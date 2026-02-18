@@ -4,8 +4,28 @@ import type { DarkPoolPrint, DarkPoolStats, PriceLevel } from '@/types/darkpool'
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const POLYGON_BASE_URL = 'https://api.polygon.io';
 
-// Dark pool exchange codes
-const DARK_POOL_EXCHANGES = [4, 19, 20];
+// Dark pool / off-exchange codes (TRF = Trade Reporting Facility)
+// These are trades NOT executed on lit exchanges — i.e. dark pools, internalizers
+const DARK_POOL_EXCHANGES = new Set([4, 19, 20]);
+
+// Adaptive thresholds based on timeframe window
+function getThresholds(timeRangeMs: number) {
+  const minutes = timeRangeMs / (60 * 1000);
+  
+  // For short timeframes (1-15 min), very low thresholds to catch institutional prints
+  // For longer timeframes, raise thresholds to filter noise
+  if (minutes <= 5) {
+    return { minSize: 500, minValue: 50000 };       // 500 shares / $50K
+  } else if (minutes <= 15) {
+    return { minSize: 1000, minValue: 100000 };      // 1K shares / $100K
+  } else if (minutes <= 60) {
+    return { minSize: 2000, minValue: 200000 };      // 2K shares / $200K
+  } else if (minutes <= 240) {
+    return { minSize: 3000, minValue: 300000 };      // 3K shares / $300K
+  } else {
+    return { minSize: 5000, minValue: 500000 };      // 5K shares / $500K (full day+)
+  }
+}
 
 function getExchangeName(exchangeCode: number): string {
   const exchanges: Record<number, string> = {
@@ -87,7 +107,7 @@ function calculateDarkPoolStats(prints: DarkPoolPrint[]): DarkPoolStats {
   }>();
 
   prints.forEach(p => {
-    const roundedPrice = Math.round(p.price * 4) / 4; // Round to $0.25
+    const roundedPrice = Math.round(p.price * 4) / 4;
     const existing = priceMap.get(roundedPrice) || {
       ticker: p.ticker,
       totalValue: 0,
@@ -136,7 +156,7 @@ function calculateDarkPoolStats(prints: DarkPoolPrint[]): DarkPoolStats {
     printCount: number;
   }>();
 
-  const bucketSize = 15 * 60 * 1000; // 15 minutes
+  const bucketSize = 15 * 60 * 1000;
   prints.forEach(p => {
     const bucket = Math.floor(p.timestampMs / bucketSize) * bucketSize;
     const existing = timeBuckets.get(bucket) || {
@@ -221,26 +241,22 @@ function getLastTradingDayRange(): { gte: number; lte: number; isMarketClosed: b
   const hour = now.getHours();
   const minute = now.getMinutes();
   
-  // If market is closed (before 9:30 AM or after 4 PM ET, or weekend)
   const isWeekend = day === 0 || day === 6;
   const isBeforeOpen = hour < 9 || (hour === 9 && minute < 30);
   const isAfterClose = hour >= 16;
   const isMarketClosed = isWeekend || isBeforeOpen || isAfterClose;
   
   if (isMarketClosed) {
-    // Go back to last trading day
     let lastTradingDay = new Date(now);
     
-    if (day === 0) lastTradingDay.setDate(lastTradingDay.getDate() - 2); // Sunday -> Friday
-    else if (day === 6) lastTradingDay.setDate(lastTradingDay.getDate() - 1); // Saturday -> Friday
-    else if (isBeforeOpen) lastTradingDay.setDate(lastTradingDay.getDate() - 1); // Before open -> yesterday
+    if (day === 0) lastTradingDay.setDate(lastTradingDay.getDate() - 2);
+    else if (day === 6) lastTradingDay.setDate(lastTradingDay.getDate() - 1);
+    else if (isBeforeOpen) lastTradingDay.setDate(lastTradingDay.getDate() - 1);
     
-    // Adjust for weekend if yesterday was weekend
     const adjustedDay = lastTradingDay.getDay();
     if (adjustedDay === 0) lastTradingDay.setDate(lastTradingDay.getDate() - 2);
     else if (adjustedDay === 6) lastTradingDay.setDate(lastTradingDay.getDate() - 1);
     
-    // Set to market hours (9:30 AM - 4:00 PM ET)
     const marketOpen = new Date(lastTradingDay);
     marketOpen.setHours(9, 30, 0, 0);
     
@@ -256,9 +272,9 @@ function getLastTradingDayRange(): { gte: number; lte: number; isMarketClosed: b
     };
   }
   
-  // Market is open, use current time
+  // Market is open, use last hour as default
   return {
-    gte: now.getTime() - 60 * 60 * 1000, // Last hour
+    gte: now.getTime() - 60 * 60 * 1000,
     lte: now.getTime(),
     isMarketClosed: false,
   };
@@ -276,7 +292,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Get time range (handles closed markets and timeframe params)
+    // Get time range
     const queryGte = searchParams.get('timestampGte');
     const queryLte = searchParams.get('timestampLte');
     
@@ -286,12 +302,10 @@ export async function GET(request: NextRequest) {
     let tradingDay: string;
     
     if (queryGte && queryLte) {
-      // Use provided timeframe params
       timestampGte = parseInt(queryGte);
       timestampLte = parseInt(queryLte);
       tradingDay = new Date(timestampGte).toDateString();
     } else {
-      // Auto-detect: get last trading day if market is closed
       const timeRange = getLastTradingDayRange();
       timestampGte = timeRange.gte;
       timestampLte = timeRange.lte;
@@ -308,8 +322,6 @@ export async function GET(request: NextRequest) {
     
     const currentPrice = prevData.results?.[0]?.c || 0;
     const vwap = prevData.results?.[0]?.vw || currentPrice;
-    const prevClose = prevData.results?.[0]?.c || currentPrice;
-    const dayVolume = prevData.results?.[0]?.v || 0;
     
     console.log('[DarkPool] Price:', currentPrice, 'VWAP:', vwap, 'Date:', dateStr);
     
@@ -343,88 +355,60 @@ export async function GET(request: NextRequest) {
     
     console.log('[DarkPool] Total trades received:', allTrades.length);
     
-    // Filter for block trades (dark pool indicator)
-    // Filter by size and value
-    const minSizeParam = searchParams.get('minSize');
-    const minSize = minSizeParam ? parseInt(minSizeParam) : 5000; // Default 5K shares
-    const minValue = 500000; // $500K minimum value for block trades
+    // Calculate adaptive thresholds based on time range
+    const timeRangeMs = timestampLte - timestampGte;
+    const autoThresholds = getThresholds(timeRangeMs);
     
-    const blockTrades = allTrades.filter((t: any) => {
+    // Allow override from query params, otherwise use adaptive defaults
+    const minSizeParam = searchParams.get('minSize');
+    const minSize = minSizeParam ? parseInt(minSizeParam) : autoThresholds.minSize;
+    const minValue = autoThresholds.minValue;
+    
+    // TWO-PASS FILTER:
+    // Pass 1: Filter by dark pool exchange codes (the critical missing filter!)
+    // Pass 2: Filter by size/value thresholds
+    const darkPoolTrades = allTrades.filter((t: any) => {
+      const exchange = t.exchange || 0;
+      // Only include trades from dark pool / off-exchange venues
+      return DARK_POOL_EXCHANGES.has(exchange);
+    });
+    
+    console.log('[DarkPool] Dark pool exchange trades:', darkPoolTrades.length, 'out of', allTrades.length, 'total');
+    
+    const blockTrades = darkPoolTrades.filter((t: any) => {
       const size = t.size || 0;
       const price = parseFloat(t.price || currentPrice);
       const notional = size * price;
-      
-      // Must meet both size and value thresholds
       return size >= minSize && notional >= minValue;
     });
     
-    console.log('[DarkPool] Block trades found:', blockTrades.length, `(minSize: ${minSize}, minValue: $${minValue.toLocaleString()}, total trades: ${allTrades.length})`);
+    console.log('[DarkPool] Block trades after size filter:', blockTrades.length, 
+      `(minSize: ${minSize}, minValue: $${minValue.toLocaleString()}, dark pool trades: ${darkPoolTrades.length})`);
     
-    // If no block trades found, log sample trades for debugging
-    if (blockTrades.length === 0 && allTrades.length > 0) {
-      const sampleTrade = allTrades[0];
-      const sampleNotional = (parseFloat(sampleTrade.price || 0) * parseInt(sampleTrade.size || 0));
-      console.log('[DarkPool] Sample trade:', {
-        price: sampleTrade.price,
-        size: sampleTrade.size,
-        notional: sampleNotional,
-        exchange: sampleTrade.exchange,
-        timestamp: sampleTrade.sip_timestamp,
+    // If no block trades but we have dark pool trades, log size distribution for debugging
+    if (blockTrades.length === 0 && darkPoolTrades.length > 0) {
+      const sizes = darkPoolTrades.slice(0, 20).map((t: any) => ({
+        size: t.size,
+        notional: Math.round(parseFloat(t.price || 0) * (t.size || 0)),
+        exchange: t.exchange,
+      }));
+      console.log('[DarkPool] Sample dark pool trades (top 20):', JSON.stringify(sizes));
+      
+      // Try with lower thresholds to show something useful
+      const fallbackTrades = darkPoolTrades.filter((t: any) => {
+        const size = t.size || 0;
+        const price = parseFloat(t.price || currentPrice);
+        return size >= 100 && (size * price) >= 10000; // Much lower: 100 shares / $10K
       });
+      
+      if (fallbackTrades.length > 0) {
+        console.log('[DarkPool] Fallback trades (100+ shares, $10K+):', fallbackTrades.length);
+        // Use fallback trades if we found some
+        return processAndReturn(fallbackTrades.slice(0, limit), ticker, currentPrice, vwap, dateStr, timestampGte, timestampLte, isMarketClosed, tradingDay);
+      }
     }
     
-    // Enrich with side detection based on VWAP
-    const enrichedPrints: DarkPoolPrint[] = blockTrades.slice(0, limit).map((trade: any, index: number) => {
-      const price = parseFloat(trade.price || 0);
-      const size = parseInt(trade.size || 0);
-      const value = price * size;
-      
-      // Determine side based on price vs VWAP
-      const { side, confidence } = determineSideWithVWAP(price, 0, 0, vwap);
-      
-      const timestampNs = trade.sip_timestamp || trade.participant_timestamp || 0;
-      const timestampMs = Math.floor(timestampNs / 1000000);
-      
-      return {
-        id: trade.sequence_number?.toString() || `${timestampNs}-${index}`,
-        ticker,
-        price: Math.round(price * 100) / 100,
-        size,
-        value: Math.round(value),
-        side,
-        sideConfidence: confidence,
-        timestamp: new Date(timestampMs).toISOString(),
-        timestampMs,
-        exchange: getExchangeName(trade.exchange || 0),
-        exchangeCode: trade.exchange || 0,
-        significance: calculateSignificance(value),
-        conditions: trade.conditions || [],
-        bidAtTrade: 0,
-        askAtTrade: 0,
-      };
-    });
-    
-    // Calculate stats
-    const stats = calculateDarkPoolStats(enrichedPrints);
-    
-    // Build price distribution for chart
-    const priceDistribution = buildPriceDistribution(enrichedPrints, currentPrice);
-    
-    return NextResponse.json({
-      success: true,
-      data: {
-        prints: enrichedPrints,
-        stats,
-        priceDistribution,
-        queryDate: dateStr,
-        meta: {
-          isMarketClosed,
-          tradingDay,
-          dataFrom: new Date(timestampGte).toISOString(),
-          dataTo: new Date(timestampLte).toISOString(),
-        },
-      },
-    });
+    return processAndReturn(blockTrades.slice(0, limit), ticker, currentPrice, vwap, dateStr, timestampGte, timestampLte, isMarketClosed, tradingDay);
     
   } catch (error: any) {
     console.error('[DarkPool] Error:', error);
@@ -432,10 +416,70 @@ export async function GET(request: NextRequest) {
   }
 }
 
+function processAndReturn(
+  trades: any[], 
+  ticker: string, 
+  currentPrice: number, 
+  vwap: number, 
+  dateStr: string,
+  timestampGte: number,
+  timestampLte: number,
+  isMarketClosed: boolean,
+  tradingDay: string
+) {
+  // Enrich with side detection
+  const enrichedPrints: DarkPoolPrint[] = trades.map((trade: any, index: number) => {
+    const price = parseFloat(trade.price || 0);
+    const size = parseInt(trade.size || 0);
+    const value = price * size;
+    
+    const { side, confidence } = determineSideWithVWAP(price, 0, 0, vwap);
+    
+    const timestampNs = trade.sip_timestamp || trade.participant_timestamp || 0;
+    const timestampMs = Math.floor(timestampNs / 1000000);
+    
+    return {
+      id: trade.sequence_number?.toString() || `${timestampNs}-${index}`,
+      ticker,
+      price: Math.round(price * 100) / 100,
+      size,
+      value: Math.round(value),
+      side,
+      sideConfidence: confidence,
+      timestamp: new Date(timestampMs).toISOString(),
+      timestampMs,
+      exchange: getExchangeName(trade.exchange || 0),
+      exchangeCode: trade.exchange || 0,
+      significance: calculateSignificance(value),
+      conditions: trade.conditions || [],
+      bidAtTrade: 0,
+      askAtTrade: 0,
+    };
+  });
+  
+  const stats = calculateDarkPoolStats(enrichedPrints);
+  const priceDistribution = buildPriceDistribution(enrichedPrints, currentPrice);
+  
+  return NextResponse.json({
+    success: true,
+    data: {
+      prints: enrichedPrints,
+      stats,
+      priceDistribution,
+      queryDate: dateStr,
+      meta: {
+        isMarketClosed,
+        tradingDay,
+        dataFrom: new Date(timestampGte).toISOString(),
+        dataTo: new Date(timestampLte).toISOString(),
+      },
+    },
+  });
+}
+
 function buildPriceDistribution(prints: DarkPoolPrint[], currentPrice: number) {
   if (prints.length === 0) return [];
   
-  // Group by price level (round to nearest $0.25)
   const buckets: Record<string, { bullish: number; bearish: number; neutral: number }> = {};
   
   prints.forEach(p => {
@@ -456,5 +500,5 @@ function buildPriceDistribution(prints: DarkPoolPrint[], currentPrice: number) {
       total: values.bullish + values.bearish + values.neutral,
     }))
     .sort((a, b) => b.price - a.price)
-    .slice(0, 20); // Top 20 price levels
+    .slice(0, 20);
 }

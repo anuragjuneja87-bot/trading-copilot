@@ -38,7 +38,7 @@ interface WarRoomData {
     callWall: number | null;
     putWall: number | null;
     maxGamma: number | null;
-    gexFlip: number | null; // NEW - critical level
+    gexFlip: number | null;
     maxPain: number | null;
     vwap: number | null;
   };
@@ -46,8 +46,8 @@ interface WarRoomData {
   // Computed Verdicts
   verdict: {
     bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-    confidence: number; // 0-100
-    summary: string; // "Smart money buying calls aggressively"
+    confidence: number;
+    summary: string;
     signals: {
       flow: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
       darkpool: 'ACCUMULATION' | 'DISTRIBUTION' | 'NEUTRAL';
@@ -78,9 +78,8 @@ export function useWarRoomData(
 
   // Subscribe to WebSocket for real-time price
   useEffect(() => {
-    if (ticker) {
-      subscribe([ticker]);
-    }
+    if (!ticker) return;
+    subscribe([ticker]);
   }, [ticker, subscribe]);
 
   // Fetch all REST data in parallel
@@ -91,19 +90,17 @@ export function useWarRoomData(
     setIsLoading(true);
 
     try {
-      // Parallel fetch with AbortController for timeout
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
 
       // Build API URLs with timeframe params
       const flowParams = new URLSearchParams({ tickers: ticker, limit: '200' });
-      const dpParams = new URLSearchParams({ tickers: ticker, limit: '100', minSize: '5000' }); // 5K shares minimum
+      // NO hardcoded minSize — let the dark pool API auto-calculate based on timeframe
+      const dpParams = new URLSearchParams({ tickers: ticker, limit: '100' });
       
       if (timeframeParams) {
-        // Use ISO strings for flow API
         flowParams.set('from', new Date(timeframeParams.timestampGte).toISOString());
         flowParams.set('to', new Date(timeframeParams.timestampLte).toISOString());
-        // Use milliseconds for dark pool API (will be converted to nanoseconds)
         dpParams.set('timestampGte', timeframeParams.timestampGte.toString());
         dpParams.set('timestampLte', timeframeParams.timestampLte.toString());
       }
@@ -137,11 +134,11 @@ export function useWarRoomData(
       
       // Extract news - handle multiple response formats
       const newsItems = 
-        newsJson.data?.articles ||  // Benzinga format
-        newsJson.data?.news ||      // Alternative format
-        newsJson.data ||            // Direct array
-        newsJson.articles ||        // Root level
-        newsJson.results ||         // Polygon format
+        newsJson.data?.articles ||
+        newsJson.data?.news ||
+        newsJson.data ||
+        newsJson.articles ||
+        newsJson.results ||
         [];
       
       // Extract levels
@@ -191,7 +188,6 @@ export function useWarRoomData(
       
       setLastUpdate(new Date());
       
-      // Debug logging
       console.log('[WarRoom] Data fetched:', {
         ticker,
         flowStats: flowStats ? {
@@ -226,8 +222,7 @@ export function useWarRoomData(
     
     fetchAllData();
     
-    // Set up polling intervals
-    const flowInterval = setInterval(fetchAllData, 30000); // 30s for flow
+    const flowInterval = setInterval(fetchAllData, 30000);
     
     return () => {
       clearInterval(flowInterval);
@@ -238,7 +233,6 @@ export function useWarRoomData(
   const quote = getQuote(ticker);
 
   return {
-    // Use WebSocket price if available, otherwise REST
     price: quote?.price || priceData.price,
     change: quote?.change || priceData.change,
     changePercent: quote?.changePercent || priceData.changePercent,
@@ -253,7 +247,7 @@ export function useWarRoomData(
   };
 }
 
-// Compute the overall verdict
+// Compute the overall verdict with better low-data handling
 function computeVerdict(
   flow: EnhancedFlowStats | null,
   dpStats: any,
@@ -262,67 +256,72 @@ function computeVerdict(
   let bullishPoints = 0;
   let bearishPoints = 0;
   let reasons: string[] = [];
+  let hasAnyMeaningfulData = false;
   
   // 1. Flow Analysis
   if (flow && flow.tradeCount > 0) {
     const netFlow = flow.netDeltaAdjustedFlow || 0;
     
-    // Lower thresholds for delta flow
-    if (netFlow > 50000) {
-      bullishPoints += 2;
-      reasons.push('Bullish delta flow');
-    } else if (netFlow > 5000) {
-      bullishPoints += 1;
-      reasons.push('Slight bullish flow');
-    } else if (netFlow < -50000) {
-      bearishPoints += 2;
-      reasons.push('Bearish delta flow');
-    } else if (netFlow < -5000) {
-      bearishPoints += 1;
-      reasons.push('Slight bearish flow');
-    }
+    // Check if flow volume is meaningful (not just noise)
+    const totalPremium = (flow.totalCallPremium || 0) + (flow.totalPutPremium || 0);
+    const isSignificantFlow = totalPremium > 10000 || flow.tradeCount >= 5;
     
-    // Call/Put Ratio - stronger weighting for extreme ratios
-    if (flow.putRatio >= 70) {
-      // 70%+ puts = BEARISH
-      bearishPoints += 3;
-      reasons.push(`Heavy put bias (${flow.putRatio.toFixed(0)}% puts)`);
-    } else if (flow.putRatio >= 60) {
-      // 60-70% puts = lean BEARISH
-      bearishPoints += 2;
-      reasons.push(`Put heavy (${flow.putRatio.toFixed(0)}% puts)`);
-    } else if (flow.callRatio >= 70) {
-      // 70%+ calls = BULLISH
-      bullishPoints += 3;
-      reasons.push(`Heavy call bias (${flow.callRatio.toFixed(0)}% calls)`);
-    } else if (flow.callRatio >= 60) {
-      // 60-70% calls = lean BULLISH
-      bullishPoints += 2;
-      reasons.push(`Call heavy (${flow.callRatio.toFixed(0)}% calls)`);
-    }
-    
-    // Sweeps
-    if (flow.sweepRatio > 0.01) { // Even 1% sweeps is notable
-      if (flow.callRatio > flow.putRatio) {
-        bullishPoints += 0.5;
-      } else {
-        bearishPoints += 0.5;
+    if (isSignificantFlow) {
+      hasAnyMeaningfulData = true;
+      
+      if (netFlow > 50000) {
+        bullishPoints += 2;
+        reasons.push('Bullish delta flow');
+      } else if (netFlow > 5000) {
+        bullishPoints += 1;
+        reasons.push('Slight bullish flow');
+      } else if (netFlow < -50000) {
+        bearishPoints += 2;
+        reasons.push('Bearish delta flow');
+      } else if (netFlow < -5000) {
+        bearishPoints += 1;
+        reasons.push('Slight bearish flow');
       }
-    }
-    
-    // Any unusual trades
-    if (flow.unusualCount > 0) {
-      bullishPoints += 0.5;
-      reasons.push(`${flow.unusualCount} unusual`);
+      
+      // Call/Put Ratio
+      if (flow.putRatio >= 70) {
+        bearishPoints += 3;
+        reasons.push(`Heavy put bias (${flow.putRatio.toFixed(0)}% puts)`);
+      } else if (flow.putRatio >= 60) {
+        bearishPoints += 2;
+        reasons.push(`Put heavy (${flow.putRatio.toFixed(0)}% puts)`);
+      } else if (flow.callRatio >= 70) {
+        bullishPoints += 3;
+        reasons.push(`Heavy call bias (${flow.callRatio.toFixed(0)}% calls)`);
+      } else if (flow.callRatio >= 60) {
+        bullishPoints += 2;
+        reasons.push(`Call heavy (${flow.callRatio.toFixed(0)}% calls)`);
+      }
+      
+      // Sweeps
+      if (flow.sweepRatio > 0.01) {
+        if (flow.callRatio > flow.putRatio) {
+          bullishPoints += 0.5;
+        } else {
+          bearishPoints += 0.5;
+        }
+      }
+      
+      if (flow.unusualCount > 0) {
+        bullishPoints += 0.5;
+        reasons.push(`${flow.unusualCount} unusual`);
+      }
+    } else {
+      reasons.push('Low flow volume');
     }
   }
   
   // 2. Dark Pool
   if (dpStats && dpStats.printCount > 0) {
+    hasAnyMeaningfulData = true;
     const bullPct = dpStats.bullishPct || 0;
     const bearPct = dpStats.bearishPct || 0;
     
-    // Even small skew counts
     if (bullPct > bearPct + 5) {
       bullishPoints += 1;
       reasons.push('DP accumulation');
@@ -331,41 +330,50 @@ function computeVerdict(
       reasons.push('DP distribution');
     }
     
-    // Volume is a signal itself
     if (dpStats.totalValue > 1000000) {
       reasons.push('Heavy DP volume');
     }
   }
   
-  // 3. News (less weight)
+  // 3. News
   if (news && news.length > 0) {
-    // Just having news is useful context
     reasons.push(`${news.length} news items`);
+  }
+  
+  // If we have no meaningful data at all, return neutral with low confidence
+  if (!hasAnyMeaningfulData) {
+    return {
+      bias: 'NEUTRAL',
+      confidence: 0,
+      summary: reasons.length > 0 
+        ? `Insufficient data: ${reasons.join(', ')}`
+        : 'Waiting for data...',
+      signals: {
+        flow: 'NEUTRAL',
+        darkpool: 'NEUTRAL',
+        newsAlignment: news?.length > 0,
+      },
+    };
   }
   
   // Calculate confidence
   const totalPoints = bullishPoints + bearishPoints;
   const netPoints = bullishPoints - bearishPoints;
   
-  // Base confidence on total signals found
   let confidence = 0;
   if (totalPoints > 0) {
-    // More signals = higher confidence
     const signalStrength = Math.abs(netPoints) / Math.max(totalPoints, 1);
-    confidence = Math.round(signalStrength * 60); // Max 60% from signal strength
+    confidence = Math.round(signalStrength * 60);
     
-    // Bonus for multiple confirming signals
     if (reasons.length >= 2) confidence += 10;
     if (reasons.length >= 3) confidence += 10;
     if (reasons.length >= 4) confidence += 10;
   }
   
-  // Minimum confidence if we have any data
   if ((flow?.tradeCount && flow.tradeCount > 0) || (dpStats?.printCount && dpStats.printCount > 0)) {
     confidence = Math.max(confidence, 25);
   }
   
-  // Cap at 90%
   confidence = Math.min(confidence, 90);
   
   // Determine bias
@@ -376,10 +384,9 @@ function computeVerdict(
     bias = 'BEARISH';
   }
   
-  // Generate summary that reflects dominant signal
+  // Generate summary
   let summary = 'Analyzing...';
   if (reasons.length > 0) {
-    // Prioritize put/call ratio messages when extreme
     const putHeavyMsg = reasons.find(r => r.includes('put bias') || r.includes('Put heavy'));
     const callHeavyMsg = reasons.find(r => r.includes('call bias') || r.includes('Call heavy'));
     
@@ -392,7 +399,6 @@ function computeVerdict(
     } else if (callHeavyMsg) {
       summary = `Call heavy flow (${flow?.callRatio.toFixed(0) || 0}% calls)`;
     } else {
-      // Use first 2 reasons
       summary = reasons.slice(0, 2).join(' + ');
     }
   }
@@ -410,14 +416,12 @@ function computeVerdict(
   };
 }
 
-// Compute key levels from flow data
 // Compute key levels - USE API DATA FIRST, fallback to flow computation
 function computeKeyLevels(
   flow: EnhancedFlowStats | null,
   levelsData: any
 ): WarRoomData['levels'] {
   // PRIORITY 1: Use API levels data (from /api/market/levels/${ticker})
-  // This is calculated from full options chain OI, not just today's flow
   if (levelsData && (levelsData.callWall || levelsData.putWall)) {
     return {
       callWall: levelsData.callWall || null,
@@ -436,19 +440,15 @@ function computeKeyLevels(
   let gexFlip: number | null = null;
 
   if (flow?.gexByStrike && flow.gexByStrike.length > 0) {
-    // Call wall = strike with highest call premium
     const sortedByCallPremium = [...flow.gexByStrike].sort((a, b) => (b.callPremium || 0) - (a.callPremium || 0));
     callWall = sortedByCallPremium[0]?.strike || null;
     
-    // Put wall = strike with highest put premium
     const sortedByPutPremium = [...flow.gexByStrike].sort((a, b) => (b.putPremium || 0) - (a.putPremium || 0));
     putWall = sortedByPutPremium[0]?.strike || null;
     
-    // Max gamma = strike with highest absolute netGex
     const sortedByNetGex = [...flow.gexByStrike].sort((a, b) => Math.abs(b.netGex || 0) - Math.abs(a.netGex || 0));
     maxGamma = sortedByNetGex[0]?.strike || null;
     
-    // GEX flip = strike where netGex crosses zero
     const sortedByStrike = [...flow.gexByStrike].sort((a, b) => a.strike - b.strike);
     for (let i = 0; i < sortedByStrike.length - 1; i++) {
       const currentNetGex = sortedByStrike[i].netGex || 0;

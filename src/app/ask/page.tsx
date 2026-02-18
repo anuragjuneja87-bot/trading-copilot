@@ -140,37 +140,20 @@ function AskPageContent() {
       <LiveTickerBar />
       
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar - Expanded for Readability */}
+        {/* Left Sidebar - Key Levels & Signals (no watchlist) */}
         <aside 
-          className="w-[280px] flex-shrink-0 flex flex-col border-r overflow-hidden"
+          className="w-[220px] flex-shrink-0 flex flex-col border-r overflow-hidden"
           style={{ borderColor: COLORS.cardBorder, background: 'rgba(0,0,0,0.2)' }}
         >
           {/* Fear & Greed */}
-          <div className="p-4 border-b" style={{ borderColor: COLORS.cardBorder }}>
+          <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
             <FearGreedGauge size="small" hideDetails />
           </div>
 
-          {/* Watchlist */}
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-              Watchlist
-            </div>
-            <div className="space-y-2">
-              {watchlist.slice(0, 10).map((ticker) => (
-                <WatchlistCard
-                  key={ticker}
-                  ticker={ticker}
-                  onClick={handleSelectTicker}
-                  isActive={ticker === selectedTicker}
-                />
-              ))}
-            </div>
-          </div>
-
           {/* Key Levels */}
-          <div className="p-4 border-t" style={{ borderColor: COLORS.cardBorder }}>
-            <div className="text-xs font-bold text-gray-400 uppercase mb-3">Key Levels</div>
-            <div className="space-y-1.5">
+          <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
+            <div className="text-xs font-bold text-gray-400 uppercase mb-2">Key Levels</div>
+            <div className="space-y-1">
               <LevelRow label="Call Wall" value={data.levels?.callWall || null} color={COLORS.green} currentPrice={data.price} />
               <LevelRow label="Put Wall" value={data.levels?.putWall || null} color={COLORS.red} currentPrice={data.price} />
               <LevelRow label="GEX Flip" value={data.levels?.gexFlip || null} color="#a855f7" currentPrice={data.price} />
@@ -187,7 +170,7 @@ function AskPageContent() {
           </div>
           
           {/* Confluence Indicator */}
-          <div className="p-4 border-t" style={{ borderColor: COLORS.cardBorder }}>
+          <div className="flex-1 overflow-y-auto p-3">
             <ConfluenceIndicator
               flowStats={data.flow?.stats}
               darkPoolStats={data.darkpool?.stats}
@@ -200,15 +183,83 @@ function AskPageContent() {
 
         {/* Main Content */}
         <main className="flex-1 flex flex-col overflow-hidden">
-          {/* TIMEFRAME BAR - Fixed at top */}
-          <div className="border-b px-6 py-3 flex-shrink-0" style={{ borderColor: COLORS.cardBorder, background: 'rgba(0,0,0,0.3)' }}>
-            <div className="flex items-center justify-between">
+          {/* TOP BAR: Watchlist Tabs + Timeframe + Clock */}
+          <div className="border-b flex-shrink-0" style={{ borderColor: COLORS.cardBorder, background: 'rgba(0,0,0,0.3)' }}>
+            {/* Row 1: Horizontal Watchlist Ticker Tabs */}
+            <div className="px-4 pt-2 pb-1 flex items-center gap-1">
+              <button
+                onClick={() => router.push('/ask')}
+                className="flex items-center gap-1 text-gray-500 hover:text-white transition-colors text-xs mr-2 px-2 py-1.5 rounded hover:bg-white/5"
+              >
+                <ArrowLeft className="w-3 h-3" />
+              </button>
+              
+              {/* Ticker Tabs - max 5 shown */}
+              {watchlist.slice(0, 5).map((ticker) => {
+                const isActive = ticker === selectedTicker;
+                return (
+                  <button
+                    key={ticker}
+                    onClick={() => handleSelectTicker(ticker)}
+                    className="relative px-3 py-1.5 rounded-t-lg text-xs font-bold transition-all"
+                    style={{
+                      background: isActive ? 'rgba(0,229,255,0.12)' : 'transparent',
+                      borderBottom: isActive ? '2px solid #00e5ff' : '2px solid transparent',
+                      color: isActive ? '#fff' : '#888',
+                    }}
+                  >
+                    <span>{ticker}</span>
+                  </button>
+                );
+              })}
+              
+              {watchlist.length > 5 && (
+                <span className="text-xs text-gray-600 ml-1">+{watchlist.length - 5}</span>
+              )}
+              
+              {/* Spacer */}
+              <div className="flex-1" />
+              
+              {/* Data freshness */}
+              <DataSourceBadge lastUpdate={data.lastUpdate} />
+              
+              <div 
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
+                style={{ 
+                  background: dataAgeSeconds < 30 ? 'rgba(0,230,118,0.1)' : 
+                              dataAgeSeconds < 120 ? 'rgba(255,193,7,0.1)' : 'rgba(255,82,82,0.1)',
+                  color: dataAgeSeconds < 30 ? '#00e676' : 
+                         dataAgeSeconds < 120 ? '#ffc107' : '#ff5252',
+                }}
+              >
+                <div 
+                  className="w-1.5 h-1.5 rounded-full animate-pulse"
+                  style={{ 
+                    background: dataAgeSeconds < 30 ? '#00e676' : 
+                               dataAgeSeconds < 120 ? '#ffc107' : '#ff5252' 
+                  }}
+                />
+                {dataAgeSeconds < 60 ? `${dataAgeSeconds}s` : `${Math.floor(dataAgeSeconds / 60)}m`} ago
+              </div>
+              
+              <button
+                onClick={data.refresh}
+                disabled={data.isLoading}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/10"
+                style={{ background: 'rgba(255,255,255,0.05)' }}
+              >
+                <RefreshCw className={`w-3 h-3 ${data.isLoading ? 'animate-spin' : ''}`} />
+                <span className="text-gray-400">Refresh (R)</span>
+              </button>
+            </div>
+            
+            {/* Row 2: Timeframe + Market Clock */}
+            <div className="px-4 pb-2 flex items-center justify-between">
               <TimeframeSelector 
                 value={timeframe} 
                 onChange={setTimeframe}
               />
               
-              {/* Live Market Clock */}
               <div className="flex items-center gap-4">
                 <MarketClock />
                 <span className="text-xs text-gray-500">
@@ -218,67 +269,9 @@ function AskPageContent() {
             </div>
           </div>
 
-          {/* Scrollable Content Area - Everything scrolls from here */}
+          {/* Scrollable Content Area */}
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             <div className="p-3 space-y-3">
-              {/* Header Row */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => router.push('/ask')}
-                    className="flex items-center gap-1 text-gray-400 hover:text-white transition-colors text-xs"
-                  >
-                    <ArrowLeft className="w-3 h-3" />
-                    Back
-                  </button>
-                  <h1 className="text-xl font-bold text-white" style={{ fontFamily: "'Oxanium', monospace" }}>
-                    {selectedTicker}
-                  </h1>
-                </div>
-                
-                <div className="flex items-center gap-3">
-                  {/* Keyboard Shortcut Hints */}
-                  <div className="flex items-center gap-2 text-[9px] text-gray-600">
-                    <span>R: Refresh</span>
-                    <span>|</span>
-                    <span>1-5: Switch Symbol</span>
-                  </div>
-                  
-                  {/* Data Freshness Indicator */}
-                  <DataSourceBadge lastUpdate={data.lastUpdate} />
-                  
-                  <div 
-                    className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
-                    style={{ 
-                      background: dataAgeSeconds < 30 ? 'rgba(0,230,118,0.1)' : 
-                                  dataAgeSeconds < 120 ? 'rgba(255,193,7,0.1)' : 'rgba(255,82,82,0.1)',
-                      color: dataAgeSeconds < 30 ? '#00e676' : 
-                             dataAgeSeconds < 120 ? '#ffc107' : '#ff5252',
-                    }}
-                  >
-                    <div 
-                      className="w-1.5 h-1.5 rounded-full animate-pulse"
-                      style={{ 
-                        background: dataAgeSeconds < 30 ? '#00e676' : 
-                                   dataAgeSeconds < 120 ? '#ffc107' : '#ff5252' 
-                      }}
-                    />
-                    {dataAgeSeconds < 60 ? `${dataAgeSeconds}s` : `${Math.floor(dataAgeSeconds / 60)}m`} ago
-                  </div>
-                  
-                  {/* Refresh */}
-                  <button
-                    onClick={data.refresh}
-                    disabled={data.isLoading}
-                    className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/10"
-                    style={{ background: 'rgba(255,255,255,0.05)' }}
-                  >
-                    <RefreshCw className={`w-3 h-3 ${data.isLoading ? 'animate-spin' : ''}`} />
-                    Refresh (R)
-                  </button>
-                </div>
-              </div>
-
               {/* HERO: Intelligent Verdict Banner */}
               <HeroVerdict
                 ticker={selectedTicker}
@@ -383,14 +376,14 @@ function LevelRow({
   const distancePct = value && currentPrice ? ((value - currentPrice) / currentPrice) * 100 : null;
   
   return (
-    <div className="flex justify-between items-center py-1.5">
+    <div className="flex justify-between items-center py-1">
       <span className="text-xs text-gray-400 font-semibold">{label}</span>
       <div className="text-right">
         <span className="text-sm font-mono font-bold" style={{ color }}>
           {value ? `$${value.toFixed(2)}` : '—'}
         </span>
         {distancePct !== null && (
-          <div className="text-xs font-semibold mt-0.5" style={{ color: distancePct >= 0 ? COLORS.green : COLORS.red }}>
+          <div className="text-[10px] font-semibold" style={{ color: distancePct >= 0 ? COLORS.green : COLORS.red }}>
             ({distancePct >= 0 ? '+' : ''}{distancePct.toFixed(1)}%)
           </div>
         )}
@@ -405,15 +398,15 @@ function GexContext({ price, gexFlip }: { price: number; gexFlip: number | null 
   
   return (
     <div 
-      className="mt-3 p-2.5 rounded text-xs"
+      className="mt-2 p-2 rounded text-xs"
       style={{ 
         background: isAbove ? 'rgba(0,230,118,0.1)' : 'rgba(255,82,82,0.1)',
       }}
     >
-      <div className="font-bold text-sm" style={{ color: isAbove ? '#00e676' : '#ff5252' }}>
+      <div className="font-bold text-xs" style={{ color: isAbove ? '#00e676' : '#ff5252' }}>
         {isAbove ? '↑ ABOVE FLIP' : '↓ BELOW FLIP'}
       </div>
-      <div className="text-gray-400 mt-1 text-xs">
+      <div className="text-gray-400 mt-0.5 text-[10px]">
         {isAbove 
           ? 'Mean reversion zone'
           : 'Trend amplification'
