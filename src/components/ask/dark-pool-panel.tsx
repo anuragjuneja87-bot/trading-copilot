@@ -12,6 +12,16 @@ if (!COLORS) {
 
 import { DataSourceBadge } from '@/components/war-room/data-source-badge';
 
+// Helper function to check if prints have valid chartable data
+function hasValidDarkPoolChartData(prints: any[]): boolean {
+  if (!prints || prints.length === 0) return false;
+  return prints.some(p => {
+    const price = p.price || 0;
+    const timestamp = p.timestamp || p.timestampMs;
+    return price > 0 && timestamp && isFinite(price);
+  });
+}
+
 interface DarkPoolPanelProps {
   prints: any[];
   stats: any;
@@ -167,18 +177,18 @@ export function DarkPoolPanel({
       <div className="grid grid-cols-3 gap-3 mb-3 text-center">
         <StatBox 
           label="Total Value" 
-          value={formatValue(totalBlockValue)}
-          color="#fff"
+          value={prints.length === 0 ? '—' : formatValue(totalBlockValue)}
+          color={prints.length === 0 ? '#555' : '#fff'}
         />
         <StatBox 
           label="Bullish" 
-          value={`${stats?.bullishPct || 0}%`}
-          color={(stats?.bullishPct || 0) > 50 ? COLORS.green : COLORS.red}
+          value={prints.length === 0 ? '—' : `${stats?.bullishPct || 0}%`}
+          color={prints.length === 0 ? '#555' : (stats?.bullishPct || 0) > 50 ? COLORS.green : COLORS.red}
         />
         <StatBox 
           label="Prints" 
-          value={prints.length.toString()}
-          color="#888"
+          value={prints.length === 0 ? '—' : prints.length.toString()}
+          color={prints.length === 0 ? '#555' : '#888'}
         />
       </div>
 
@@ -200,7 +210,7 @@ export function DarkPoolPanel({
             {error}
           </div>
         ) : prints.length === 0 ? (
-          // Explicit check: if no prints at all, show empty state (no chart)
+          // Empty state - no prints at all
           <div className="h-full flex flex-col items-center justify-center text-gray-500 text-xs text-center">
             <div className="text-2xl mb-2">📊</div>
             <div className="text-sm font-semibold">No dark pool prints</div>
@@ -211,46 +221,35 @@ export function DarkPoolPanel({
               }
             </div>
           </div>
-        ) : (() => {
-          // Check if prints have valid data for charting
-          const hasValidChartData = prints.some(p => {
-            const price = p.price || 0;
-            const timestamp = p.timestamp || p.timestampMs;
-            return price > 0 && timestamp && isFinite(price);
-          });
-          
-          // If no valid chart data, show empty state (no chart canvas)
-          if (!hasValidChartData) {
-            return (
-              <div className="h-full flex flex-col items-center justify-center text-gray-500 text-xs text-center">
-                <div className="text-2xl mb-2">📊</div>
-                <div className="text-sm font-semibold">No dark pool prints</div>
-                <div className="text-[10px] text-gray-600 mt-1">
-                  {isClosed 
-                    ? `Market was closed. Showing ${displayTradingDay} data.`
-                    : `No block trades in selected timeframe.`
-                  }
-                </div>
-              </div>
-            );
-          }
-          
-          // Only render chart if we have valid data - with fallback to empty state
-          const chartComponent = <DarkPoolChart prints={prints} vwap={vwap} currentPrice={currentPrice} />;
-          // If chart component is null/undefined, show empty state
-          return chartComponent || (
-            <div className="h-full flex flex-col items-center justify-center text-gray-500 text-xs text-center">
-              <div className="text-2xl mb-2">📊</div>
-              <div className="text-sm font-semibold">No dark pool prints</div>
-              <div className="text-[10px] text-gray-600 mt-1">
-                {isClosed 
-                  ? `Market was closed. Showing ${displayTradingDay} data.`
-                  : `No block trades in selected timeframe.`
+        ) : !hasValidDarkPoolChartData(prints) ? (
+          // Prints exist but no valid chart data
+          <div className="h-full flex flex-col items-center justify-center text-gray-500 text-xs text-center">
+            <div className="text-2xl mb-2">📊</div>
+            <div className="text-sm font-semibold">No dark pool prints</div>
+            <div className="text-[10px] text-gray-600 mt-1">
+              {isClosed 
+                ? `Market was closed. Showing ${displayTradingDay} data.`
+                : `No block trades in selected timeframe.`
               }
+            </div>
+          </div>
+        ) : isClosed ? (
+          // Market closed but we have valid stale data - show dimmed chart with overlay
+          <div className="relative h-full">
+            <div className="h-full opacity-30">
+              <DarkPoolChart prints={prints} vwap={vwap} currentPrice={currentPrice} />
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded">
+              <div className="text-center px-4">
+                <div className="text-base font-semibold text-yellow-400 mb-1">⚠️ Market Closed</div>
+                <div className="text-xs text-gray-400">Showing {displayTradingDay} data</div>
               </div>
             </div>
-          );
-        })()}
+          </div>
+        ) : (
+          // Live data - render chart normally
+          <DarkPoolChart prints={prints} vwap={vwap} currentPrice={currentPrice} />
+        )}
       </div>
 
       {/* Top Prints List */}
