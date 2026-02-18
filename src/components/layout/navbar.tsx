@@ -52,7 +52,7 @@ export function Navbar() {
           </div>
 
           {/* CENTER: Navigation Links */}
-          <div className="hidden md:flex items-center gap-1" style={{ background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '10px' }}>
+          <div className="hidden md:flex items-center gap-1" style={{ background: 'rgba(255,255,255,0.04)', padding: '4px', borderRadius: '10px' }}>
             {navigation.map((item) => {
               const isActive = pathname === item.href;
               return (
@@ -60,12 +60,19 @@ export function Navbar() {
                   key={item.name}
                   href={item.href}
                   className={cn(
-                    'px-[18px] py-[7px] rounded-[7px] text-sm font-medium transition-colors',
+                    'px-5 py-2.5 rounded-lg text-base font-semibold transition-all duration-200',
                     isActive
-                      ? 'text-white'
-                      : 'text-[#71717a] hover:text-white hover:bg-[rgba(255,255,255,0.08)]'
+                      ? 'text-white shadow-lg'
+                      : 'text-gray-300 hover:text-white hover:bg-[rgba(255,255,255,0.1)]'
                   )}
-                  style={isActive ? { background: 'rgba(255,255,255,0.08)' } : {}}
+                  style={isActive ? { 
+                    background: 'rgba(0, 229, 255, 0.15)', 
+                    border: '1px solid rgba(0, 229, 255, 0.3)',
+                    color: '#00e5ff',
+                    fontWeight: 600
+                  } : {
+                    fontWeight: 500
+                  }}
                 >
                   {item.name}
                 </Link>
@@ -105,16 +112,24 @@ export function Navbar() {
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto px-4 py-6 space-y-1">
-                {navigation.map((item) => (
-                  <Link
-                    key={item.name}
-                    href={item.href}
-                    className="flex items-center gap-3 rounded-lg px-4 py-3 text-base font-medium text-[#71717a] hover:bg-[rgba(255,255,255,0.08)] hover:text-white"
-                    onClick={() => setMobileMenuOpen(false)}
-                  >
-                    {item.name}
-                  </Link>
-                ))}
+                {navigation.map((item) => {
+                  const isActive = pathname === item.href;
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-4 py-3 text-base font-semibold transition-all",
+                        isActive
+                          ? "text-white bg-[rgba(0,229,255,0.15)] border border-[rgba(0,229,255,0.3)]"
+                          : "text-gray-300 hover:bg-[rgba(255,255,255,0.1)] hover:text-white"
+                      )}
+                      onClick={() => setMobileMenuOpen(false)}
+                    >
+                      {item.name}
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           </div>

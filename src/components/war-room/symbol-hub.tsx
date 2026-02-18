@@ -23,7 +23,7 @@ export function SymbolHub({ symbol, onBack, onAskAI }: SymbolHubProps) {
   });
 
   // Auto-detect empty data state (market closed) and suggest demo mode
-  const allEmpty = !isLoading && !flow?.flow?.length && !darkpool?.prints?.length && !levels?.currentPrice;
+  const allEmpty = !isLoading && !flow?.flow?.length && !darkpool?.prints?.length && !(levels as any)?.currentPrice;
 
   useEffect(() => {
     // If after 5 seconds everything is still empty, auto-enable demo mode
@@ -35,7 +35,7 @@ export function SymbolHub({ symbol, onBack, onAskAI }: SymbolHubProps) {
 
   // Extract price for the selected symbol
   const symbolPrice = prices?.find((p: any) => p.ticker === symbol);
-  const currentPrice = levels?.currentPrice || symbolPrice?.price || 0;
+  const currentPrice = (levels as any)?.currentPrice || symbolPrice?.price || 0;
   const changePercent = symbolPrice?.changePercent || 0;
 
   return (
@@ -121,7 +121,7 @@ export function SymbolHub({ symbol, onBack, onAskAI }: SymbolHubProps) {
               </span>
               <span className="text-[10px] text-[#4a6070]"
                 style={{ fontFamily: "'Oxanium', monospace" }}>
-                VIX {regime.vixLevel?.toFixed(1) || regime.vix?.toFixed(1) || '—'}
+                VIX {regime.vixLevel?.toFixed(1) || (regime as any)?.vix?.toFixed(1) || '—'}
               </span>
             </div>
           )}
@@ -235,10 +235,10 @@ export function SymbolHub({ symbol, onBack, onAskAI }: SymbolHubProps) {
               {flow?.stats?.gexByStrike?.length > 0 && levels ? (
                 <SpokeGamma
                   gexByStrike={flow.stats.gexByStrike}
-                  currentPrice={levels.currentPrice || currentPrice}
-                  callWall={levels.callWall}
-                  putWall={levels.putWall}
-                  maxGamma={levels.maxGamma}
+                  currentPrice={(levels as any)?.currentPrice || currentPrice}
+                  callWall={(levels as any)?.callWall}
+                  putWall={(levels as any)?.putWall}
+                  maxGamma={(levels as any)?.maxGamma}
                 />
               ) : levels ? (
                 <div className="flex flex-col items-center justify-center h-64 gap-3">
@@ -246,13 +246,13 @@ export function SymbolHub({ symbol, onBack, onAskAI }: SymbolHubProps) {
                   <div className="text-[11px] text-[#4a6070]">GEX strike data unavailable — showing estimated levels</div>
                   <div className="flex flex-wrap gap-2 justify-center">
                     <span className="px-3 py-1.5 rounded text-[10px] font-bold" style={{ background: COLORS.glowGreen, color: COLORS.green }}>
-                      CALL WALL ${levels.callWall}
+                      CALL WALL ${(levels as any)?.callWall || '—'}
                     </span>
                     <span className="px-3 py-1.5 rounded text-[10px] font-bold" style={{ background: COLORS.glowCyan, color: COLORS.cyan }}>
-                      MAX γ ${levels.maxGamma}
+                      MAX γ ${(levels as any)?.maxGamma || '—'}
                     </span>
                     <span className="px-3 py-1.5 rounded text-[10px] font-bold" style={{ background: COLORS.glowRed, color: COLORS.red }}>
-                      PUT WALL ${levels.putWall}
+                      PUT WALL ${(levels as any)?.putWall || '—'}
                     </span>
                   </div>
                 </div>
@@ -299,8 +299,8 @@ export function SymbolHub({ symbol, onBack, onAskAI }: SymbolHubProps) {
             <div className="rounded-xl p-4"
               style={{ background: COLORS.cardBg, border: `1px solid ${COLORS.cardBorder}` }}>
               <SpokeNews
-                articles={Array.isArray(news) ? news : (news?.articles || news || [])}
-                sentiment={null}
+                articles={Array.isArray(news) ? news : ((news as any)?.articles || news || [])}
+                sentiment={undefined}
               />
             </div>
           </div>
@@ -312,7 +312,7 @@ export function SymbolHub({ symbol, onBack, onAskAI }: SymbolHubProps) {
               symbol={symbol}
               flowRegime={flow?.stats?.regime}
               darkPoolRegime={darkpool?.stats?.regime}
-              levels={levels}
+              levels={levels ? (levels as any) : undefined}
               stats={flow?.stats}
               onAskAI={onAskAI}
             />

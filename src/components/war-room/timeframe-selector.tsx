@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils';
 
-export type Timeframe = '15m' | '1h' | '4h' | '1d' | '1w';
+export type Timeframe = '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
 
 export const DEFAULT_TIMEFRAME: Timeframe = '15m';
 
@@ -13,7 +13,9 @@ interface TimeframeSelectorProps {
 }
 
 const TIMEFRAMES: { value: Timeframe; label: string }[] = [
+  { value: '5m', label: '5M' },
   { value: '15m', label: '15M' },
+  { value: '30m', label: '30M' },
   { value: '1h', label: '1H' },
   { value: '4h', label: '4H' },
   { value: '1d', label: '1D' },
@@ -50,7 +52,9 @@ export function TimeframeSelector({ value, onChange, className }: TimeframeSelec
 // Helper: Convert timeframe to milliseconds for API queries
 export function getTimeframeMs(tf: Timeframe): number {
   switch (tf) {
+    case '5m': return 5 * 60 * 1000;
     case '15m': return 15 * 60 * 1000;
+    case '30m': return 30 * 60 * 1000;
     case '1h': return 60 * 60 * 1000;
     case '4h': return 4 * 60 * 60 * 1000;
     case '1d': return 24 * 60 * 60 * 1000;
@@ -92,7 +96,9 @@ export function getTimeframeRange(tf: Timeframe): {
   
   // For hours/minutes, simple subtraction
   const labels: Record<string, string> = {
+    '5m': 'Last 5 min',
     '15m': 'Last 15 min',
+    '30m': 'Last 30 min',
     '1h': 'Last hour',
     '4h': 'Last 4 hours',
   };
@@ -214,9 +220,17 @@ export function getAdjustedTimeframeRange(tf: Timeframe): TimeframeRangeResult {
   let label: string;
   
   switch (tf) {
+    case '5m':
+      from = endTime - 5 * 60 * 1000;
+      label = isMarketOpen ? 'Last 5 min' : `Last 5 min (${tradingDayStr})`;
+      break;
     case '15m':
       from = endTime - 15 * 60 * 1000;
       label = isMarketOpen ? 'Last 15 min' : `Last 15 min (${tradingDayStr})`;
+      break;
+    case '30m':
+      from = endTime - 30 * 60 * 1000;
+      label = isMarketOpen ? 'Last 30 min' : `Last 30 min (${tradingDayStr})`;
       break;
     case '1h':
       from = endTime - 60 * 60 * 1000;

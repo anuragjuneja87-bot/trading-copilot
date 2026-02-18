@@ -35,7 +35,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Get unique strikes
-    const strikes = [...new Set(options.map((o: any) => o.details?.strike_price).filter(Boolean))].sort((a, b) => a - b);
+    const strikeValues: number[] = options
+      .map((o: any) => o.details?.strike_price)
+      .filter((s: any): s is number => typeof s === 'number' && s > 0);
+    const strikes = [...new Set(strikeValues)].sort((a, b) => a - b);
     
     // Calculate max pain
     let maxPainStrike = 0;

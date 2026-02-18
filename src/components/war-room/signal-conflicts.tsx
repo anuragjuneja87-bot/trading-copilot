@@ -6,14 +6,23 @@ import { AlertTriangle, CheckCircle, XCircle, HelpCircle } from 'lucide-react';
 interface SignalConflictsProps {
   conflicts: string[];
   supports: string[];
-  reliability: 'HIGH' | 'MEDIUM' | 'LOW' | 'INSUFFICIENT';
 }
 
-export function SignalConflicts({ conflicts, supports, reliability }: SignalConflictsProps) {
-  const criticalConflicts = conflicts.filter(c => c.includes('⚠️'));
-  const minorConflicts = conflicts.filter(c => !c.includes('⚠️'));
+export function SignalConflicts({ conflicts, supports }: SignalConflictsProps) {
+  // Filter out conflicts that are already covered by the consolidated data quality badge
+  // These are displayed in the hero verdict's "📊 LOW" badge
+  const filteredConflicts = conflicts.filter(c => {
+    const lower = c.toLowerCase();
+    return !lower.includes('flow volume too low') &&
+           !lower.includes('insufficient signal') &&
+           !lower.includes('low sweep activity') &&
+           !lower.includes('no institutional urgency');
+  });
   
-  if (conflicts.length === 0 && supports.length === 0) {
+  const criticalConflicts = filteredConflicts.filter(c => c.includes('⚠️'));
+  const minorConflicts = filteredConflicts.filter(c => !c.includes('⚠️'));
+  
+  if (filteredConflicts.length === 0 && supports.length === 0) {
     return null;
   }
 
@@ -66,27 +75,6 @@ export function SignalConflicts({ conflicts, supports, reliability }: SignalConf
           ))}
         </div>
       )}
-      
-      {/* Reliability Badge */}
-      <div 
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
-        style={{ 
-          background: reliability === 'HIGH' ? 'rgba(0,230,118,0.1)' :
-                     reliability === 'MEDIUM' ? 'rgba(255,193,7,0.1)' :
-                     reliability === 'LOW' ? 'rgba(255,152,0,0.1)' :
-                     'rgba(255,82,82,0.1)',
-          color: reliability === 'HIGH' ? '#00e676' :
-                 reliability === 'MEDIUM' ? '#ffc107' :
-                 reliability === 'LOW' ? '#ff9800' :
-                 '#ff5252',
-        }}
-      >
-        {reliability === 'HIGH' && <CheckCircle className="w-3 h-3" />}
-        {reliability === 'MEDIUM' && <HelpCircle className="w-3 h-3" />}
-        {reliability === 'LOW' && <AlertTriangle className="w-3 h-3" />}
-        {reliability === 'INSUFFICIENT' && <XCircle className="w-3 h-3" />}
-        {reliability} RELIABILITY
-      </div>
     </div>
   );
 }

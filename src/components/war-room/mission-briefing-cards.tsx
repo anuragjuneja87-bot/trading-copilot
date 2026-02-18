@@ -268,7 +268,7 @@ export function MissionBriefingCards({ watchlist = [], onCardClick }: MissionBri
         {cards.map((card, idx) => (
           <div
             key={idx}
-            onClick={() => onCardClick?.(card.query, card.dimension, card.apiEndpoint, card.overrideTickers)}
+            onClick={() => onCardClick?.(card.query, card.dimension, card.apiEndpoint, (card as Card).overrideTickers)}
             onMouseEnter={() => setHoveredCard(idx)}
             onMouseLeave={() => setHoveredCard(null)}
             className={cn(

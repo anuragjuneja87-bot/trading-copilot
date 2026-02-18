@@ -4,6 +4,7 @@ interface SignalData {
   avgDailyFlow: number; // Need to track this
   sweepRatio: number;
   callPutRatio: number;
+  putRatio?: number; // For easier access
   
   // Dark Pool
   dpBullishPct: number;
@@ -14,6 +15,7 @@ interface SignalData {
   priceChange: number;
   vix: number;
   fearGreedIndex: number;
+  volumePressure?: number; // -100 to +100
   
   // Data Quality
   flowTradeCount: number;
@@ -83,62 +85,89 @@ export function calculateConfidence(data: SignalData): ConfidenceResult {
   }
 
   // ============================================
-  // 2. FLOW SIGNALS
+  // 2. BIAS CALCULATION (Weighted Scoring)
   // ============================================
   
-  // Net Delta Flow
-  if (data.netDeltaFlow > 500000) {
+  const putRatio = data.putRatio ?? (100 - data.callPutRatio);
+  
+  // 1. Call/Put Ratio (weight: 30%)
+  if (data.callPutRatio >= 70) {
     bullishScore += 30;
-    supports.push('Strong bullish delta flow (+$' + (data.netDeltaFlow/1000000).toFixed(1) + 'M)');
-  } else if (data.netDeltaFlow > 100000) {
+    supports.push('Heavy call bias (' + data.callPutRatio.toFixed(0) + '% calls)');
+  } else if (data.callPutRatio >= 60) {
     bullishScore += 15;
-    supports.push('Moderate bullish delta flow (+$' + (data.netDeltaFlow/1000).toFixed(0) + 'K)');
-  } else if (data.netDeltaFlow < -500000) {
+    supports.push('Moderate call bias (' + data.callPutRatio.toFixed(0) + '% calls)');
+  } else if (putRatio >= 70) {
     bearishScore += 30;
-    supports.push('Strong bearish delta flow (-$' + (Math.abs(data.netDeltaFlow)/1000000).toFixed(1) + 'M)');
-  } else if (data.netDeltaFlow < -100000) {
+    supports.push('Heavy put bias (' + putRatio.toFixed(0) + '% puts)');
+  } else if (putRatio >= 60) {
     bearishScore += 15;
+    supports.push('Moderate put bias (' + putRatio.toFixed(0) + '% puts)');
+  }
+  
+  // 2. Net Delta Flow (weight: 25%)
+  if (data.netDeltaFlow > 100000) {
+    bullishScore += 25;
+    supports.push('Strong bullish delta flow (+$' + (data.netDeltaFlow/1000).toFixed(0) + 'K)');
+  } else if (data.netDeltaFlow > 10000) {
+    bullishScore += 12;
+    supports.push('Moderate bullish delta flow (+$' + (data.netDeltaFlow/1000).toFixed(0) + 'K)');
+  } else if (data.netDeltaFlow < -100000) {
+    bearishScore += 25;
+    supports.push('Strong bearish delta flow (-$' + (Math.abs(data.netDeltaFlow)/1000).toFixed(0) + 'K)');
+  } else if (data.netDeltaFlow < -10000) {
+    bearishScore += 12;
     supports.push('Moderate bearish delta flow (-$' + (Math.abs(data.netDeltaFlow)/1000).toFixed(0) + 'K)');
   }
   
-  // Sweep Ratio (THE most important signal)
+  // 3. Price Action (weight: 20%)
+  if (data.priceChange > 2) {
+    bullishScore += 20;
+    supports.push('Strong price momentum (+' + data.priceChange.toFixed(1) + '%)');
+  } else if (data.priceChange > 0.5) {
+    bullishScore += 10;
+    supports.push('Moderate price momentum (+' + data.priceChange.toFixed(1) + '%)');
+  } else if (data.priceChange < -2) {
+    bearishScore += 20;
+    supports.push('Strong price decline (' + data.priceChange.toFixed(1) + '%)');
+  } else if (data.priceChange < -0.5) {
+    bearishScore += 10;
+    supports.push('Moderate price decline (' + data.priceChange.toFixed(1) + '%)');
+  }
+  
+  // 4. Dark Pool (weight: 15%)
+  if (data.dpVolume > 0) {
+    if (data.dpBullishPct > 60) {
+      bullishScore += 15;
+      supports.push('Dark pool accumulation (' + data.dpBullishPct.toFixed(0) + '% bullish)');
+    } else if (data.dpBullishPct < 40) {
+      bearishScore += 15;
+      supports.push('Dark pool distribution (' + (100 - data.dpBullishPct).toFixed(0) + '% bearish)');
+    }
+  }
+  
+  // 5. Volume Pressure (weight: 10%)
+  if (data.volumePressure !== undefined) {
+    if (data.volumePressure > 30) {
+      bullishScore += 10;
+      supports.push('Buying pressure (' + data.volumePressure + '%)');
+    } else if (data.volumePressure < -30) {
+      bearishScore += 10;
+      supports.push('Selling pressure (' + data.volumePressure + '%)');
+    }
+  }
+  
+  // Sweep Ratio (bonus signal - not in weighted system but still important)
   if (data.sweepRatio > 0.30) {
-    const sweepBonus = 25;
     if (data.callPutRatio > 60) {
-      bullishScore += sweepBonus;
+      bullishScore += 5; // Bonus
       supports.push('Aggressive call sweeps (' + (data.sweepRatio * 100).toFixed(0) + '% sweep rate)');
     } else if (data.callPutRatio < 40) {
-      bearishScore += sweepBonus;
+      bearishScore += 5; // Bonus
       supports.push('Aggressive put sweeps (' + (data.sweepRatio * 100).toFixed(0) + '% sweep rate)');
     }
   } else if (data.sweepRatio < 0.05) {
     conflicts.push('Low sweep activity (' + (data.sweepRatio * 100).toFixed(0) + '%) - no institutional urgency');
-  }
-  
-  // Call/Put Ratio
-  if (data.callPutRatio > 70) {
-    bullishScore += 10;
-    supports.push('Heavy call bias (' + data.callPutRatio + '% calls)');
-  } else if (data.callPutRatio < 30) {
-    bearishScore += 10;
-    supports.push('Heavy put bias (' + (100 - data.callPutRatio) + '% puts)');
-  }
-
-  // ============================================
-  // 3. DARK POOL SIGNALS
-  // ============================================
-  
-  if (data.dpVolume > 0) {
-    if (data.dpBullishPct > 60) {
-      bullishScore += 20;
-      supports.push('Dark pool accumulation (' + data.dpBullishPct.toFixed(0) + '% bullish)');
-    } else if (data.dpBullishPct < 40) {
-      bearishScore += 20;
-      supports.push('Dark pool distribution (' + (100 - data.dpBullishPct).toFixed(0) + '% bearish)');
-    } else {
-      // Neutral dark pool
-      conflicts.push('Dark pool neutral (' + data.dpBullishPct.toFixed(0) + '% bullish) - no clear direction');
-    }
   }
 
   // ============================================
@@ -170,12 +199,27 @@ export function calculateConfidence(data: SignalData): ConfidenceResult {
   const totalScore = bullishScore + bearishScore;
   const netScore = bullishScore - bearishScore;
   
-  // Base confidence from signal strength
-  let confidence = Math.min(Math.abs(netScore), 60); // Max 60% from signals alone
+  // Determine bias (using weighted scoring system)
+  let bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'CONFLICTING';
+  if (conflicts.filter(c => c.includes('⚠️')).length >= 2) {
+    bias = 'CONFLICTING';
+  } else if (netScore >= 20) {
+    bias = 'BULLISH';
+  } else if (netScore <= -20) {
+    bias = 'BEARISH';
+  } else {
+    bias = 'NEUTRAL';
+  }
+  
+  // Calculate base confidence from net score
+  const baseConfidence = Math.min(95, Math.abs(netScore) + 20);
+  
+  // Base confidence from weighted scoring system
+  let confidence = baseConfidence;
   
   // Bonus for signal alignment (multiple confirms)
-  if (supports.length >= 3) confidence += 15;
-  else if (supports.length >= 2) confidence += 10;
+  if (supports.length >= 3) confidence += 10;
+  else if (supports.length >= 2) confidence += 5;
   
   // Penalty for conflicts
   confidence -= conflicts.filter(c => c.includes('⚠️')).length * 15;
@@ -197,18 +241,6 @@ export function calculateConfidence(data: SignalData): ConfidenceResult {
     // 0% only if truly no data
   }
   
-  // Determine bias
-  let bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'CONFLICTING';
-  if (conflicts.filter(c => c.includes('⚠️')).length >= 2) {
-    bias = 'CONFLICTING';
-  } else if (netScore >= 15) {
-    bias = 'BULLISH';
-  } else if (netScore <= -15) {
-    bias = 'BEARISH';
-  } else {
-    bias = 'NEUTRAL';
-  }
-  
   // Determine reliability
   let reliability: 'HIGH' | 'MEDIUM' | 'LOW' | 'INSUFFICIENT';
   if (dataQualityScore >= 80 && data.flowTradeCount >= 50) {
@@ -227,14 +259,12 @@ export function calculateConfidence(data: SignalData): ConfidenceResult {
     recommendation = 'Wait for more data before taking action.';
   } else if (bias === 'CONFLICTING') {
     recommendation = 'Conflicting signals - wait for resolution or reduce position size.';
-  } else if (confidence >= 70 && reliability === 'HIGH') {
-    recommendation = bias === 'BULLISH' 
-      ? 'Strong bullish setup. Consider long entries on pullbacks to support.'
-      : 'Strong bearish setup. Consider short entries on rallies to resistance.';
-  } else if (confidence >= 50) {
-    recommendation = 'Moderate signal strength. Use tight stops and smaller position size.';
+  } else if (bias === 'BULLISH') {
+    recommendation = 'Strong bullish signals. Look for long entries on pullbacks.';
+  } else if (bias === 'BEARISH') {
+    recommendation = 'Bearish pressure dominant. Consider shorts or staying flat.';
   } else {
-    recommendation = 'Weak signals. Avoid new positions, wait for clearer setup.';
+    recommendation = 'Mixed signals. Wait for clearer setup or trade the range.';
   }
   
   return {

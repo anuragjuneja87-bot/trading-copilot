@@ -8,7 +8,7 @@ const config = getDataConfig();
 /**
  * Hook for fetching options flow data filtered by watchlist
  */
-export function useOptionsFlow(options?: { 
+export function useWatchlistOptionsFlow(options?: { 
   enabled?: boolean;
   minPremium?: number;
   unusual?: boolean;
@@ -70,7 +70,7 @@ export function useDarkPool(options?: {
 /**
  * Hook for fetching news data filtered by watchlist
  */
-export function useNews(options?: {
+export function useWatchlistNews(options?: {
   enabled?: boolean;
   limit?: number;
 }) {
@@ -138,7 +138,7 @@ export function useMarketPulse() {
 /**
  * Hook for AI insights on a specific feature
  */
-export function useAIInsight(options: {
+export function useAIInsightQuery(options: {
   endpoint: string;
   payload: Record<string, any>;
   enabled?: boolean;

@@ -89,7 +89,7 @@ export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentime
 
   return (
     <div 
-      className="rounded-xl p-4 flex flex-col overflow-hidden"
+      className="rounded-xl p-4 flex flex-col h-full max-h-full overflow-hidden"
       style={{ background: COLORS.cardBg, border: `1px solid ${COLORS.cardBorder}` }}
     >
       <div className="flex items-center justify-between mb-3 flex-shrink-0">
@@ -127,11 +127,11 @@ export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentime
       </div>
 
       {loading ? (
-        <div className="flex-1 flex items-center justify-center text-gray-500 text-xs">
+        <div className="h-[200px] flex items-center justify-center text-gray-500 text-xs">
           Loading...
         </div>
       ) : news.length > 0 ? (
-        <div className="flex-1 space-y-2 overflow-y-auto">
+        <div className="h-[200px] space-y-2 overflow-y-auto">
           {news.map((item, i) => {
             const title = item.title || item.headline || '';
             const source = item.source || item.publisher?.name || 'Market News';
@@ -170,7 +170,7 @@ export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentime
           })}
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center text-gray-500 text-xs">
+        <div className="h-[200px] flex items-center justify-center text-gray-500 text-xs">
           No recent news for {ticker}
         </div>
       )}

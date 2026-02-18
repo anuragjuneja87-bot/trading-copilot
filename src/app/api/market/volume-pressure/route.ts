@@ -6,23 +6,34 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const ticker = searchParams.get('ticker')?.toUpperCase();
+    const fromParam = searchParams.get('from');
+    const toParam = searchParams.get('to');
     
     if (!ticker) {
       return NextResponse.json({ success: false, error: 'Ticker required' }, { status: 400 });
     }
 
-    // Get today's date range
-    const now = new Date();
-    const marketOpen = new Date(now);
-    marketOpen.setHours(9, 30, 0, 0);
+    // Use provided timeframe range, or default to today's market hours
+    let fromTs: number;
+    let toTs: number;
     
-    // Use previous trading day if before market open
-    if (now < marketOpen) {
-      marketOpen.setDate(marketOpen.getDate() - 1);
+    if (fromParam && toParam) {
+      fromTs = parseInt(fromParam, 10);
+      toTs = parseInt(toParam, 10);
+    } else {
+      // Default: Get today's date range
+      const now = new Date();
+      const marketOpen = new Date(now);
+      marketOpen.setHours(9, 30, 0, 0);
+      
+      // Use previous trading day if before market open
+      if (now < marketOpen) {
+        marketOpen.setDate(marketOpen.getDate() - 1);
+      }
+      
+      fromTs = Math.floor(marketOpen.getTime());
+      toTs = Math.floor(now.getTime());
     }
-    
-    const fromTs = Math.floor(marketOpen.getTime());
-    const toTs = Math.floor(now.getTime());
     
     // Fetch aggregated trades from Polygon (1-minute bars)
     const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/minute/${fromTs}/${toTs}?adjusted=true&sort=asc&limit=500&apiKey=${POLYGON_API_KEY}`;

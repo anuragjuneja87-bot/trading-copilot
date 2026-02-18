@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { DarkPoolPrint, DarkPoolStats } from '@/types/darkpool';
+import type { DarkPoolPrint, DarkPoolStats, PriceLevel } from '@/types/darkpool';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const POLYGON_BASE_URL = 'https://api.polygon.io';
@@ -76,22 +76,51 @@ function calculateDarkPoolStats(prints: DarkPoolPrint[]): DarkPoolStats {
   const largestPrint = prints.reduce((max, p) => p.value > max.value ? p : max, prints[0]);
 
   // Price level distribution
-  const priceLevels: Array<{ price: number; bullish: number; bearish: number; neutral: number }> = [];
-  const priceMap = new Map<number, { bullish: number; bearish: number; neutral: number }>();
+  const priceLevels: PriceLevel[] = [];
+  const priceMap = new Map<number, {
+    ticker: string;
+    totalValue: number;
+    totalShares: number;
+    printCount: number;
+    bullishValue: number;
+    bearishValue: number;
+  }>();
 
   prints.forEach(p => {
     const roundedPrice = Math.round(p.price * 4) / 4; // Round to $0.25
-    const existing = priceMap.get(roundedPrice) || { bullish: 0, bearish: 0, neutral: 0 };
+    const existing = priceMap.get(roundedPrice) || {
+      ticker: p.ticker,
+      totalValue: 0,
+      totalShares: 0,
+      printCount: 0,
+      bullishValue: 0,
+      bearishValue: 0,
+    };
     
-    if (p.side === 'BULLISH') existing.bullish += p.value;
-    else if (p.side === 'BEARISH') existing.bearish += p.value;
-    else existing.neutral += p.value;
+    existing.totalValue += p.value;
+    existing.totalShares += p.size;
+    existing.printCount += 1;
+    
+    if (p.side === 'BULLISH') {
+      existing.bullishValue += p.value;
+    } else if (p.side === 'BEARISH') {
+      existing.bearishValue += p.value;
+    }
     
     priceMap.set(roundedPrice, existing);
   });
 
   priceMap.forEach((values, price) => {
-    priceLevels.push({ price, ...values });
+    priceLevels.push({
+      ticker: values.ticker,
+      price,
+      totalValue: values.totalValue,
+      totalShares: values.totalShares,
+      printCount: values.printCount,
+      bullishValue: values.bullishValue,
+      bearishValue: values.bearishValue,
+      avgSize: values.printCount > 0 ? values.totalShares / values.printCount : 0,
+    });
   });
 
   priceLevels.sort((a, b) => b.price - a.price);

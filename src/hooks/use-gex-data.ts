@@ -21,11 +21,11 @@ export function useGexData({ ticker, enabled = true }: UseGexDataOptions) {
   
   // Extract levels data - check both possible response formats
   const levelsData = levels.data || null;
-  const currentPrice = levelsData?.currentPrice || levelsData?.data?.currentPrice || 0;
-  const callWall = levelsData?.callWall || levelsData?.data?.callWall || 0;
-  const putWall = levelsData?.putWall || levelsData?.data?.putWall || 0;
-  const maxGamma = levelsData?.maxGamma || levelsData?.data?.maxGamma || 0;
-  const source = levelsData?.source || levelsData?.data?.source || 'unknown';
+  const currentPrice = (levelsData as any)?.currentPrice || (levelsData as any)?.data?.currentPrice || 0;
+  const callWall = (levelsData as any)?.callWall || (levelsData as any)?.data?.callWall || 0;
+  const putWall = (levelsData as any)?.putWall || (levelsData as any)?.data?.putWall || 0;
+  const maxGamma = (levelsData as any)?.maxGamma || (levelsData as any)?.data?.maxGamma || 0;
+  const source = (levelsData as any)?.source || (levelsData as any)?.data?.source || 'unknown';
 
   return {
     gexByStrike,
