@@ -97,7 +97,7 @@ export function useWarRoomData(
 
       // Build API URLs with timeframe params
       const flowParams = new URLSearchParams({ tickers: ticker, limit: '200' });
-      const dpParams = new URLSearchParams({ tickers: ticker, limit: '100', minSize: '100000' }); // 100K shares minimum
+      const dpParams = new URLSearchParams({ tickers: ticker, limit: '100', minSize: '5000' }); // 5K shares minimum
       
       if (timeframeParams) {
         // Use ISO strings for flow API

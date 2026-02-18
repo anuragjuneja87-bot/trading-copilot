@@ -379,7 +379,7 @@ export function GammaLevelsPanel({ ticker, gexByStrike, currentPrice }: GammaLev
 
       {/* Pin Zone Alert */}
       {isPinZone && callWall && putWall && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-purple-500/20 to-cyan-500/20 border border-purple-500/50 mb-3">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-purple-500/20 to-cyan-500/20 border border-purple-500/50 mb-3 flex-shrink-0">
           <span className="text-lg">📍</span>
           <div>
             <span className="text-sm font-bold text-purple-400">PIN ZONE DETECTED</span>
@@ -391,7 +391,7 @@ export function GammaLevelsPanel({ ticker, gexByStrike, currentPrice }: GammaLev
       )}
 
       {/* Key Levels Summary */}
-      <div className="grid grid-cols-4 gap-1 mb-2 text-center">
+      <div className="grid grid-cols-4 gap-1 mb-2 text-center flex-shrink-0">
         <LevelBadge label="Call Wall" value={callWall} color={COLORS.red} isPin={isPinZone} />
         <LevelBadge label="Max Γ" value={maxGamma} color={COLORS.cyan} />
         <LevelBadge label="GEX Flip" value={gexFlip} color="#a855f7" />
@@ -399,14 +399,14 @@ export function GammaLevelsPanel({ ticker, gexByStrike, currentPrice }: GammaLev
       </div>
 
       {/* Charts - Split Layout */}
-      <div className="flex-1 flex flex-col min-h-0">
-        {/* Top 55%: Bar Chart */}
-        <div className="h-[200px] overflow-hidden">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* Top 65%: Bar Chart */}
+        <div className="flex-[0.65] min-h-0 overflow-hidden">
           <ReactECharts option={barChartOption} style={{ height: '100%', width: '100%' }} />
         </div>
         
         {/* Bottom 35%: GEX Shift Chart */}
-        <div className="h-[150px] overflow-hidden border-t" style={{ borderColor: COLORS.cardBorder }}>
+        <div className="flex-[0.35] min-h-0 overflow-hidden border-t" style={{ borderColor: COLORS.cardBorder }}>
           <ReactECharts option={shiftChartOption} style={{ height: '100%', width: '100%' }} />
         </div>
       </div>

@@ -346,8 +346,8 @@ export async function GET(request: NextRequest) {
     // Filter for block trades (dark pool indicator)
     // Filter by size and value
     const minSizeParam = searchParams.get('minSize');
-    const minSize = minSizeParam ? parseInt(minSizeParam) : 100000; // Default 100K shares
-    const minValue = 1000000; // $1M minimum value
+    const minSize = minSizeParam ? parseInt(minSizeParam) : 5000; // Default 5K shares
+    const minValue = 500000; // $500K minimum value for block trades
     
     const blockTrades = allTrades.filter((t: any) => {
       const size = t.size || 0;

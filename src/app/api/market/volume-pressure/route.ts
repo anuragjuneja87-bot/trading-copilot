@@ -47,16 +47,27 @@ export async function GET(request: NextRequest) {
     const data = await res.json();
     const bars = data.results || [];
     
-    // Bucket into 15-minute windows
+    // Determine bucket size from param or auto-calculate from time range
+    const bucketParam = searchParams.get('bucketMinutes');
+    const rangeMs = toTs - fromTs;
+    const rangeMinutes = rangeMs / (60 * 1000);
+    const bucketSize = bucketParam 
+      ? parseInt(bucketParam, 10)
+      : rangeMinutes <= 10 ? 1
+      : rangeMinutes <= 120 ? 5
+      : rangeMinutes <= 480 ? 15
+      : 60;
+    
+    // Bucket into windows based on calculated bucket size
     const buckets: Record<string, { buyVolume: number; sellVolume: number; timeMs: number }> = {};
     
     bars.forEach((bar: any) => {
       const timestamp = bar.t;
       const date = new Date(timestamp);
       
-      // Round to 15-minute bucket
+      // Round to bucket size
       const minutes = date.getMinutes();
-      const bucketMinutes = Math.floor(minutes / 15) * 15;
+      const bucketMinutes = Math.floor(minutes / bucketSize) * bucketSize;
       date.setMinutes(bucketMinutes, 0, 0);
       
       const bucketKey = date.toISOString();
@@ -118,6 +129,7 @@ export async function GET(request: NextRequest) {
       data: {
         ticker,
         buckets: result,
+        bucketMinutes: bucketSize,
         summary: {
           totalBuy: result.reduce((sum, r) => sum + r.buyVolume, 0),
           totalSell: result.reduce((sum, r) => sum + r.sellVolume, 0),

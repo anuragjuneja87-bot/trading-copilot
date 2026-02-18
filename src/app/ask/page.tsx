@@ -312,7 +312,7 @@ function AskPageContent() {
               
               {/* Row 2: Flow + Gamma side by side - FIXED height */}
               <div className="grid grid-cols-2 gap-3 h-[450px]">
-                <div className="h-full">
+                <div className="h-full overflow-hidden">
                   <OptionsFlowPanel
                     stats={data.flow?.stats || null}
                     trades={data.flow?.trades || []}
@@ -324,7 +324,7 @@ function AskPageContent() {
                     vwap={data.levels?.vwap || null}
                   />
                 </div>
-                <div className="h-full">
+                <div className="h-full overflow-hidden">
                   <GammaLevelsPanel 
                     ticker={selectedTicker}
                     gexByStrike={data.flow?.stats?.gexByStrike || []}
@@ -335,10 +335,10 @@ function AskPageContent() {
               
               {/* Row 3: Volume + Dark Pool side by side - FIXED height */}
               <div className="grid grid-cols-2 gap-3 h-[400px]">
-                <div className="h-full">
+                <div className="h-full overflow-hidden">
                   <VolumePressurePanel ticker={selectedTicker} timeframeRange={timeframeRange} />
                 </div>
-                <div className="h-full">
+                <div className="h-full overflow-hidden">
                   <DarkPoolPanel
                     prints={data.darkpool?.prints || []}
                     stats={data.darkpool?.stats || null}

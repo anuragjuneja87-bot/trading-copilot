@@ -29,6 +29,7 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
   const [data, setData] = useState<TickBucket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [bucketLabel, setBucketLabel] = useState('15min buckets');
   
   // Market status detection
   const marketStatus = getMarketStatus();
@@ -57,6 +58,10 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
         
         if (json.success && json.data) {
           setData(json.data.buckets || []);
+          // Update bucket label from API response
+          if (json.data.bucketMinutes) {
+            setBucketLabel(`${json.data.bucketMinutes}min buckets`);
+          }
         } else {
           setError(json.error || 'Failed to load');
         }
@@ -72,31 +77,38 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
     return () => clearInterval(interval);
   }, [ticker, timeframeRange]);
 
-  // Calculate net pressure (Buyers - Sellers) per bucket
+  // Calculate CVD (Cumulative Volume Delta) and prepare chart data
   const chartData = useMemo(() => {
     if (!data.length) return null;
     
-    const netPressureData: number[] = [];
-    const pressureData: number[] = [];
+    // Calculate CVD (running sum of buyVolume - sellVolume)
+    let cumulativeDelta = 0;
+    const cvdData: number[] = [];
     const timeLabels: string[] = [];
+    const buyData: number[] = [];
+    const sellData: number[] = [];
+    const pressureData: number[] = [];
     
     data.forEach((d) => {
-      // Net pressure = buyers - sellers (as percentage)
-      netPressureData.push(d.pressure);
-      pressureData.push(d.pressure);
+      cumulativeDelta += (d.buyVolume - d.sellVolume);
+      cvdData.push(cumulativeDelta);
       timeLabels.push(d.time);
+      buyData.push(d.buyVolume);
+      sellData.push(-d.sellVolume); // Negative for downward bars
+      pressureData.push(d.pressure);
     });
     
-    // Calculate current pressure and trend
+    // Calculate current pressure and trend (for gauge)
     const currentPressure = pressureData.length > 0 ? pressureData[pressureData.length - 1] : 0;
     const trend = pressureData.length >= 3 
       ? pressureData[pressureData.length - 1] - pressureData[pressureData.length - 3]
       : 0;
     
     return {
-      netPressureData,
-      pressureData,
       timeLabels,
+      buyData,
+      sellData,
+      cvdData,
       currentPressure,
       trend,
     };
@@ -116,148 +128,99 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
   const trendColor = pressureTrend > 5 ? COLORS.green : 
                      pressureTrend < -5 ? COLORS.red : '#888';
 
-  // Chart options with dual grid
+  // Format volume for axis labels
+  const formatVol = (v: number) => {
+    const abs = Math.abs(v);
+    if (abs >= 1000000) return `${(v / 1000000).toFixed(1)}M`;
+    if (abs >= 1000) return `${(v / 1000).toFixed(0)}K`;
+    return v.toString();
+  };
+
+  // Chart options: Buy/Sell Volume Bars + CVD Line
   const chartOption = useMemo(() => {
     if (!chartData) return null;
-    
-    // No crossovers needed for net pressure chart
     
     return {
       tooltip: {
         trigger: 'axis',
         backgroundColor: 'rgba(0,0,0,0.85)',
         borderColor: 'rgba(255,255,255,0.1)',
-        textStyle: { color: '#fff', fontSize: 13 },
+        textStyle: { color: '#fff', fontSize: 12 },
         formatter: (params: any) => {
-          let result = `<div style="font-weight:bold;margin-bottom:4px">${params[0].axisValue}</div>`;
+          const time = params[0]?.axisValue || '';
+          let result = `<div style="font-weight:bold;margin-bottom:4px">${time}</div>`;
           params.forEach((p: any) => {
-            if (p.seriesName === 'Pressure') return; // Skip oscillator in main chart tooltip
-            const value = p.value;
-            const sign = value >= 0 ? '+' : '';
-            result += `<div style="color:${value >= 0 ? '#00e676' : '#ff5252'}">${p.seriesName}: ${sign}${value.toFixed(1)}%</div>`;
+            if (p.seriesName === 'Buy Volume') {
+              result += `<div style="color:#00e676">Buy: ${formatVol(p.value)}</div>`;
+            } else if (p.seriesName === 'Sell Volume') {
+              result += `<div style="color:#ff5252">Sell: ${formatVol(Math.abs(p.value))}</div>`;
+            } else if (p.seriesName === 'CVD') {
+              result += `<div style="color:#00e5ff">CVD: ${formatVol(p.value)}</div>`;
+            }
           });
           return result;
         },
       },
       legend: {
-        data: ['Net Pressure'],
-        textStyle: { color: '#888', fontSize: 13 },
-        top: 5,
+        data: ['Buy Volume', 'Sell Volume', 'CVD'],
+        textStyle: { color: '#888', fontSize: 11 },
+        top: 0,
         right: 10,
+        itemWidth: 12,
+        itemHeight: 8,
       },
-      grid: [
-        { top: 30, right: 15, bottom: '40%', left: 50 },  // Main chart
-        { top: '65%', right: 15, bottom: 25, left: 50 },  // Oscillator
-      ],
-      xAxis: [
-        { 
-          type: 'category', 
-          data: chartData.timeLabels,
-          gridIndex: 0,
-          axisLine: { show: false },
-          axisTick: { show: false },
-          axisLabel: { show: false },
-        },
-        { 
-          type: 'category', 
-          data: chartData.timeLabels,
-          gridIndex: 1,
-          axisLine: { show: false },
-          axisTick: { show: false },
-          axisLabel: { 
-            fontSize: 12, 
-            color: '#888',
-            rotate: chartData.timeLabels.length > 6 ? 45 : 0,
-          },
-        },
-      ],
+      grid: { top: 30, right: 60, bottom: 30, left: 60 },
+      xAxis: {
+        type: 'category',
+        data: chartData.timeLabels,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { fontSize: 11, color: '#888' },
+      },
       yAxis: [
-        { 
+        {
+          // Left axis: Volume
           type: 'value',
-          gridIndex: 0,
-          min: -100,
-          max: 100,
           axisLine: { show: false },
           axisTick: { show: false },
-          splitLine: { 
-            lineStyle: { color: 'rgba(255,255,255,0.1)', type: 'dashed' },
-            show: true,
-          },
-          axisLabel: { 
-            fontSize: 13, 
-            color: '#888',
-            formatter: (v: number) => `${v}%`
-          },
+          splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)', type: 'dashed' } },
+          axisLabel: { fontSize: 11, color: '#888', formatter: (v: number) => formatVol(v) },
         },
-        { 
+        {
+          // Right axis: CVD
           type: 'value',
-          gridIndex: 1,
-          min: -100,
-          max: 100,
           axisLine: { show: false },
           axisTick: { show: false },
-          splitLine: { 
-            lineStyle: { color: 'rgba(255,255,255,0.1)', type: 'dashed' },
-            show: true,
-          },
-          axisLabel: { 
-            fontSize: 13, 
-            color: '#888',
-            formatter: (v: number) => `${v}%`
-          },
+          splitLine: { show: false },
+          axisLabel: { fontSize: 11, color: '#00e5ff', formatter: (v: number) => formatVol(v) },
         },
       ],
       series: [
-        // Net Pressure Line - oscillating around zero
         {
-          name: 'Net Pressure',
+          name: 'Buy Volume',
+          type: 'bar',
+          stack: 'volume',
+          data: chartData.buyData,
+          itemStyle: { color: 'rgba(0,230,118,0.8)' },
+          barMaxWidth: 20,
+        },
+        {
+          name: 'Sell Volume',
+          type: 'bar',
+          stack: 'volume',
+          data: chartData.sellData,
+          itemStyle: { color: 'rgba(255,82,82,0.8)' },
+          barMaxWidth: 20,
+        },
+        {
+          name: 'CVD',
           type: 'line',
-          xAxisIndex: 0,
-          yAxisIndex: 0,
-          data: chartData.netPressureData,
+          yAxisIndex: 1,
+          data: chartData.cvdData,
           smooth: true,
           symbol: 'none',
-          lineStyle: { 
-            color: (params: any) => {
-              const value = params.data;
-              return value >= 0 ? '#00e676' : '#ff5252';
-            },
-            width: 3 
-          },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: chartData.netPressureData.map((p, idx) => ({
-                offset: idx / (chartData.netPressureData.length - 1),
-                color: p >= 0 ? 'rgba(0,230,118,0.2)' : 'rgba(255,82,82,0.2)'
-              }))
-            }
-          },
-          markLine: {
-            silent: true,
-            data: [{ yAxis: 0 }],
-            lineStyle: { color: 'rgba(255,255,255,0.3)', type: 'dashed', width: 1 },
-            label: { show: false },
-          },
-          z: 1,
-        },
-        // Pressure Oscillator
-        {
-          name: 'Pressure',
-          type: 'bar',
-          xAxisIndex: 1,
-          yAxisIndex: 1,
-          data: chartData.pressureData.map(p => ({
-            value: p,
-            itemStyle: { color: p >= 0 ? '#00e676' : '#ff5252' }
-          })),
-          barMaxWidth: 15,
-          markLine: {
-            data: [{ yAxis: 0 }],
-            lineStyle: { color: 'rgba(255,255,255,0.2)', width: 1 },
-            label: { show: false },
-          },
+          lineStyle: { color: '#00e5ff', width: 2 },
+          z: 10,
         },
       ],
     };
@@ -285,7 +248,7 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
               {timeframeRange.label}
             </span>
           )}
-          <span className="text-xs text-gray-500">15min buckets</span>
+          <span className="text-xs text-gray-500">{bucketLabel}</span>
         </div>
       </div>
 
@@ -323,28 +286,25 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
       </div>
 
       {/* Chart */}
-      <div className="flex-1 min-h-[140px] overflow-hidden relative">
+      <div className="flex-1 min-h-0 overflow-hidden">
         {loading ? (
           <div className="h-full flex items-center justify-center text-gray-500 text-sm">
-            Loading tick data...
+            Loading volume data...
           </div>
         ) : error ? (
           <div className="h-full flex items-center justify-center text-red-400 text-sm">
             {error}
           </div>
         ) : isClosed && !hasData ? (
-          <div className="h-full flex flex-col items-center justify-center text-gray-500 text-sm text-center">
+          <div className="h-full flex flex-col items-center justify-center text-gray-500">
             <div className="text-3xl mb-2">📊</div>
-            <div className="text-base font-semibold">Market was closed</div>
-            <div className="text-xs text-gray-600 mt-1">
-              No volume data available for current session.
-            </div>
+            <div className="text-base font-semibold">Market Closed</div>
+            <div className="text-xs text-gray-600 mt-1">No volume data for current session</div>
           </div>
         ) : isClosed && hasData ? (
           <div className="relative h-full">
-            {/* Dimmed chart with overlay */}
             <div className="h-full opacity-30">
-              <ReactECharts option={chartOption} style={{ height: '100%', width: '100%' }} />
+              {chartOption && <ReactECharts option={chartOption} style={{ height: '100%', width: '100%' }} />}
             </div>
             <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded">
               <div className="text-center px-4">
@@ -353,7 +313,7 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
               </div>
             </div>
           </div>
-        ) : chartData && chartOption ? (
+        ) : chartOption ? (
           <ReactECharts option={chartOption} style={{ height: '100%', width: '100%' }} />
         ) : (
           <div className="h-full flex items-center justify-center text-gray-500 text-sm">

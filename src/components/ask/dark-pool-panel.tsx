@@ -132,7 +132,7 @@ export function DarkPoolPanel({
       style={{ background: COLORS.cardBg, border: `1px solid ${COLORS.cardBorder}` }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 flex-shrink-0">
         <div className="flex items-center gap-2">
           <h3 className="text-base font-bold text-gray-300 uppercase tracking-wider">
             Dark Pool
@@ -174,7 +174,7 @@ export function DarkPoolPanel({
       </div>
 
       {/* Key Stats */}
-      <div className="grid grid-cols-3 gap-3 mb-3 text-center">
+      <div className="grid grid-cols-3 gap-3 mb-3 text-center flex-shrink-0">
         <StatBox 
           label="Total Value" 
           value={prints.length === 0 ? '—' : formatValue(totalBlockValue)}
@@ -194,13 +194,13 @@ export function DarkPoolPanel({
 
       {/* Largest Print Info */}
       {largestPrint && (
-        <div className="mb-3 px-3 py-2 rounded text-xs text-gray-300 bg-white/5">
+        <div className="mb-3 px-3 py-2 rounded text-xs text-gray-300 bg-white/5 flex-shrink-0">
           {formatLargestPrint()}
         </div>
       )}
 
       {/* Chart */}
-      <div className="flex-1 min-h-[150px] overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
         {loading ? (
           <div className="h-full flex items-center justify-center text-gray-500 text-xs">
             Loading...
