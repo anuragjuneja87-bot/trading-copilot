@@ -64,13 +64,14 @@ export default function LandingPage() {
           <div className="flex items-center gap-4">
             <Link 
               href="/ask" 
-              className="hidden sm:flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all hover:scale-105"
+              className="flex items-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-bold transition-all hover:scale-105"
               style={{ 
                 background: 'linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%)',
                 color: '#060810',
               }}
             >
-              Enter Yodha Room
+              <span className="hidden sm:inline">Enter Yodha Room</span>
+              <span className="sm:hidden">Yodha Room</span>
               <ArrowRight className="w-4 h-4" />
             </Link>
           </div>
@@ -168,7 +169,7 @@ export default function LandingPage() {
               <span className="ml-3 text-xs text-gray-500 font-mono">tradeyodha.com/ask?symbol=NVDA</span>
             </div>
             <div className="p-8 text-center">
-              <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
                 {/* Mock panels */}
                 <MockPanel title="OPTIONS FLOW" badge="BULLISH" badgeColor="#00e676">
                   <div className="flex items-end gap-1 h-16 mt-3">
