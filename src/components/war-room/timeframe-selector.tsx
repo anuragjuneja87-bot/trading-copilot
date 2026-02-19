@@ -13,7 +13,6 @@ interface TimeframeSelectorProps {
 }
 
 const TIMEFRAMES: { value: Timeframe; label: string }[] = [
-  { value: '5m', label: '5M' },
   { value: '15m', label: '15M' },
   { value: '30m', label: '30M' },
   { value: '1h', label: '1H' },

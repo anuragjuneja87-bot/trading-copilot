@@ -1,8 +1,8 @@
 import { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Free AI Trading Chat',
-  description: 'Ask our AI trading copilot anything about the markets. Get actionable insights, not just data.',
+  title: 'Yodha Room',
+  description: 'Your AI-powered trading command center. Real-time options flow, dark pool, gamma levels, and AI-synthesized verdicts.',
 };
 
 export default function AskLayout({

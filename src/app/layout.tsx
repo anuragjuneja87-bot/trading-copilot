@@ -15,22 +15,14 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
-// Oxanium font via Google Fonts
-const oxanium = {
-  className: 'font-oxanium',
-  style: {
-    fontFamily: "'Oxanium', 'JetBrains Mono', monospace",
-  },
-};
-
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://tradeyodha.com'),
   title: {
-    default: 'TradingCopilot - AI Trading Intelligence',
-    template: '%s | TradingCopilot',
+    default: 'TradeYodha — AI Trading Intelligence',
+    template: '%s | TradeYodha',
   },
   description:
-    'The AI trading copilot that tells you WHAT TO DO, not just what happened. Real-time options flow, crisis detection, and actionable verdicts.',
+    'Your AI trading warrior. Real-time options flow, dark pool detection, gamma levels, and AI-synthesized verdicts in one command center.',
   keywords: [
     'options trading',
     'AI trading',
@@ -38,33 +30,35 @@ export const metadata: Metadata = {
     'dark pool',
     'trading signals',
     'market intelligence',
-    'trading copilot',
+    'tradeyodha',
+    'gamma exposure',
+    'relative strength',
   ],
-  authors: [{ name: 'TradingCopilot' }],
-  creator: 'TradingCopilot',
+  authors: [{ name: 'TradeYodha' }],
+  creator: 'TradeYodha',
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://tradingcopilot.io',
-    siteName: 'TradingCopilot',
-    title: 'TradingCopilot - AI Trading Intelligence',
+    url: 'https://tradeyodha.com',
+    siteName: 'TradeYodha',
+    title: 'TradeYodha — Your AI Trading Warrior',
     description:
-      'Stop staring at options flow. Start getting answers. The AI trading copilot that tells you WHAT TO DO.',
+      'See what Wall Street sees. Real-time options flow, dark pool prints, gamma levels, and AI-synthesized verdicts.',
     images: [
       {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'TradingCopilot Dashboard',
+        alt: 'TradeYodha — AI Trading Intelligence',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'TradingCopilot - AI Trading Intelligence',
-    description: 'The AI trading copilot that tells you WHAT TO DO, not just what happened.',
+    title: 'TradeYodha — AI Trading Intelligence',
+    description: 'Your AI trading warrior. Real-time options flow, dark pool, gamma levels, and AI verdicts.',
     images: ['/og-image.png'],
-    creator: '@tradingcopilot',
+    creator: '@tradeyodha',
   },
   robots: {
     index: true,
@@ -86,7 +80,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#06090f',
+  themeColor: '#060810',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -99,6 +93,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`dark ${dmSans.variable} ${jetbrainsMono.variable}`}>
+      <head>
+        <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;600;700;800&display=swap" rel="stylesheet" />
+      </head>
       <body className="min-h-screen bg-background antialiased">
         <ThemeProvider>
           <Providers>{children}</Providers>

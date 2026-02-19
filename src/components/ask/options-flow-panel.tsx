@@ -422,7 +422,31 @@ function FlowChart({
       top: 5,
       right: 10,
     },
-    grid: { top: 35, right: 15, bottom: 25, left: 50 },
+    grid: { top: 35, right: 15, bottom: 45, left: 50 },
+    dataZoom: [
+      {
+        type: 'inside',
+        xAxisIndex: 0,
+        zoomOnMouseWheel: true,
+        moveOnMouseMove: true,
+        moveOnMouseWheel: false,
+      },
+      {
+        type: 'slider',
+        xAxisIndex: 0,
+        height: 18,
+        bottom: 2,
+        borderColor: 'transparent',
+        backgroundColor: 'rgba(255,255,255,0.03)',
+        fillerColor: 'rgba(0,229,255,0.1)',
+        handleStyle: { color: '#00e5ff', borderColor: '#00e5ff' },
+        textStyle: { color: '#666', fontSize: 9 },
+        dataBackground: {
+          lineStyle: { color: 'rgba(0,229,255,0.3)' },
+          areaStyle: { color: 'rgba(0,229,255,0.05)' },
+        },
+      },
+    ],
     xAxis: {
       type: 'category',
       data: chartData.timeLabels,

@@ -5,18 +5,11 @@ import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { LiveTickerBar } from './live-ticker-bar';
-import {
-  Menu,
-  X,
-  Zap,
-} from 'lucide-react';
+import { YodhaLogo, YodhaWordmark } from '@/components/brand/yodha-logo';
+import { Menu, X } from 'lucide-react';
 
 const navigation = [
-  { name: 'War Room', href: '/ask' },
-  { name: 'Options Flow', href: '/flow' },
-  { name: 'Dark Pool', href: '/darkpool' },
-  { name: 'Gamma Levels', href: '/levels' },
-  { name: 'Pulse', href: '/pulse' },
+  { name: 'Yodha Room', href: '/ask' },
 ];
 
 export function Navbar() {
@@ -30,7 +23,7 @@ export function Navbar() {
         <LiveTickerBar />
       </div>
 
-      {/* Main Navigation Bar - Below ticker bar */}
+      {/* Main Navigation Bar */}
       <header
         className="sticky top-8 z-50 w-full border-b border-[rgba(255,255,255,0.06)]"
         style={{
@@ -42,12 +35,9 @@ export function Navbar() {
         <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 lg:px-8" style={{ minHeight: '56px', width: '100%' }}>
           {/* LEFT: Logo */}
           <div className="flex lg:flex-1">
-            <Link href="/ask" className="flex items-center gap-2">
-              <Zap className="h-5 w-5" style={{ color: '#00e5ff' }} />
-              <span className="text-base font-semibold" style={{ fontSize: '16px', fontWeight: 600 }}>
-                <span className="text-white">Trading</span>
-                <span style={{ color: '#00e5ff' }}>Copilot</span>
-              </span>
+            <Link href="/" className="flex items-center gap-2.5">
+              <YodhaLogo size={28} />
+              <YodhaWordmark className="text-base" />
             </Link>
           </div>
 
@@ -99,10 +89,13 @@ export function Navbar() {
 
         {/* Mobile menu */}
         {mobileMenuOpen && (
-          <div className="md:hidden fixed inset-0 z-40" style={{ background: 'rgba(10, 15, 26, 0.95)', backdropFilter: 'blur-lg' }}>
+          <div className="md:hidden fixed inset-0 z-40" style={{ background: 'rgba(10, 15, 26, 0.95)', backdropFilter: 'blur(16px)' }}>
             <div className="flex flex-col h-full">
               <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-                <span className="text-lg font-bold text-white">Menu</span>
+                <div className="flex items-center gap-2">
+                  <YodhaLogo size={24} />
+                  <YodhaWordmark className="text-sm" />
+                </div>
                 <button
                   onClick={() => setMobileMenuOpen(false)}
                   className="p-2 rounded-lg hover:bg-[rgba(255,255,255,0.08)] text-[#71717a]"

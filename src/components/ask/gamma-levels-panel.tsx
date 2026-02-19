@@ -155,7 +155,26 @@ export function GammaLevelsPanel({ ticker, gexByStrike, currentPrice }: GammaLev
 
   // Main bar chart option (top 65%)
   const barChartOption = {
-    grid: { top: 10, right: 10, bottom: '38%', left: 50 },
+    grid: { top: 10, right: 25, bottom: '38%', left: 50 },
+    dataZoom: [
+      {
+        type: 'inside',
+        yAxisIndex: 0,
+        zoomOnMouseWheel: true,
+        moveOnMouseMove: true,
+      },
+      {
+        type: 'slider',
+        yAxisIndex: 0,
+        width: 14,
+        right: 2,
+        borderColor: 'transparent',
+        backgroundColor: 'rgba(255,255,255,0.03)',
+        fillerColor: 'rgba(0,229,255,0.1)',
+        handleStyle: { color: '#00e5ff', borderColor: '#00e5ff' },
+        textStyle: { show: false },
+      },
+    ],
     xAxis: {
       type: 'value',
       min: xAxisRange.min,
@@ -262,7 +281,27 @@ export function GammaLevelsPanel({ ticker, gexByStrike, currentPrice }: GammaLev
 
   // GEX shift line chart option (bottom 35%)
   const shiftChartOption = {
-    grid: { top: 5, right: 10, bottom: 25, left: 50 },
+    grid: { top: 5, right: 10, bottom: 40, left: 50 },
+    dataZoom: [
+      {
+        type: 'inside',
+        xAxisIndex: 0,
+        zoomOnMouseWheel: true,
+        moveOnMouseMove: true,
+        moveOnMouseWheel: false,
+      },
+      {
+        type: 'slider',
+        xAxisIndex: 0,
+        height: 14,
+        bottom: 2,
+        borderColor: 'transparent',
+        backgroundColor: 'rgba(255,255,255,0.03)',
+        fillerColor: 'rgba(0,229,255,0.1)',
+        handleStyle: { color: '#00e5ff', borderColor: '#00e5ff' },
+        textStyle: { color: '#666', fontSize: 8 },
+      },
+    ],
     xAxis: {
       type: 'category',
       data: gexShiftData.map(d => d.time),
