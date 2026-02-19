@@ -6,7 +6,7 @@ import { useWatchlistStore } from '@/stores';
 import { useWarRoomData } from '@/hooks/use-war-room-data';
 import { calculateConfidence } from '@/lib/confidence-calculator';
 import { COLORS } from '@/lib/echarts-theme';
-import { ArrowLeft, RefreshCw, Search, Monitor, Smartphone } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Search } from 'lucide-react';
 import { YodhaLogo, YodhaWordmark } from '@/components/brand/yodha-logo';
 
 // Components
@@ -117,8 +117,8 @@ function AskPageContent() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: COLORS.bg }}>
-      {/* Mobile Gate - shows only on small screens */}
-      <MobileGate ticker={selectedTicker} />
+      {/* Force desktop viewport on mobile */}
+      <DesktopViewport />
       
       <LiveTickerBar />
       
@@ -359,65 +359,25 @@ function AskPageContent() {
   );
 }
 
-function MobileGate({ ticker }: { ticker: string }) {
-  const [dismissed, setDismissed] = useState(false);
+function DesktopViewport() {
+  useEffect(() => {
+    // Force desktop-width viewport on mobile so the full layout renders zoomed out
+    const viewport = document.querySelector('meta[name="viewport"]');
+    const original = viewport?.getAttribute('content') || '';
+    
+    if (viewport && window.innerWidth < 1024) {
+      viewport.setAttribute('content', 'width=1400, initial-scale=0.25, user-scalable=yes');
+    }
+    
+    return () => {
+      // Restore original viewport when leaving the page
+      if (viewport) {
+        viewport.setAttribute('content', original);
+      }
+    };
+  }, []);
   
-  if (dismissed) return null;
-  
-  return (
-    <div 
-      className="fixed inset-0 z-[100] flex items-center justify-center p-6 md:hidden"
-      style={{ background: '#060810' }}
-    >
-      <div className="text-center max-w-sm">
-        <YodhaLogo size={56} className="mx-auto mb-6" />
-        <h2 
-          className="text-2xl font-black text-white mb-3"
-          style={{ fontFamily: "'Oxanium', monospace" }}
-        >
-          Desktop Recommended
-        </h2>
-        <p className="text-gray-400 text-sm leading-relaxed mb-8">
-          The Yodha Room is built for traders on desktop — 6 real-time panels, 
-          interactive charts, and AI analysis need screen real estate to shine.
-        </p>
-        
-        <div className="flex items-center justify-center gap-3 mb-6">
-          <Monitor className="w-10 h-10 text-cyan-400 p-2 rounded-xl" style={{ background: 'rgba(0,229,255,0.1)' }} />
-          <div className="flex items-center gap-1 text-gray-600">
-            <div className="w-8 h-px bg-gray-700" />
-            <span className="text-xs">vs</span>
-            <div className="w-8 h-px bg-gray-700" />
-          </div>
-          <Smartphone className="w-10 h-10 text-gray-600 p-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }} />
-        </div>
-        
-        <div className="space-y-3">
-          <a 
-            href="/"
-            className="block w-full px-6 py-3 rounded-xl text-sm font-bold transition-all hover:scale-105"
-            style={{ 
-              background: 'linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%)',
-              color: '#060810',
-            }}
-          >
-            Back to Home
-          </a>
-          <button 
-            onClick={() => setDismissed(true)}
-            className="block w-full px-6 py-3 rounded-xl text-sm font-medium text-gray-500 hover:text-gray-300 transition-colors"
-            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
-          >
-            Continue anyway →
-          </button>
-        </div>
-        
-        <p className="text-[10px] text-gray-600 mt-6">
-          Mobile-optimized experience coming soon
-        </p>
-      </div>
-    </div>
-  );
+  return null;
 }
 
 function SymbolSearch({ onSelect }: { onSelect: (ticker: string) => void }) {
