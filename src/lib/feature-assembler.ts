@@ -69,6 +69,7 @@ export interface WarRoomSnapshot {
     rsVsSpy?: number;
     tickerChange?: number;
     spyChange?: number;
+    session?: string;
   } | null;
 
   // From premarket data

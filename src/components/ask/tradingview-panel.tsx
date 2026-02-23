@@ -23,34 +23,26 @@ function getInterval(timeframe: string): string {
 }
 
 // Map tickers to correct TradingView exchange prefix
+// TradingView auto-resolves most US tickers, so we only need to
+// prefix for known-ambiguous cases or specific exchanges.
+// For everything else, we pass the raw ticker.
 function getTVSymbol(ticker: string): string {
   if (ticker.includes(':')) return ticker;
-  
-  // ETFs on AMEX/NYSE ARCA
-  const amexTickers = new Set([
-    'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'TLT', 'XLF', 'XLE', 'XLK',
-    'XLV', 'XLI', 'XLP', 'XLY', 'XLU', 'XLB', 'XLRE', 'XLC',
-    'VTI', 'VOO', 'VXX', 'UVXY', 'SQQQ', 'TQQQ', 'ARKK', 'HYG', 'EEM',
-    'KWEB', 'FXI', 'IBIT', 'GBTC', 'MSTR',
-  ]);
-  
-  // NYSE-listed stocks
-  const nyseTickers = new Set([
-    'BRK.A', 'BRK.B', 'JPM', 'V', 'JNJ', 'WMT', 'PG', 'MA', 'UNH',
-    'HD', 'BAC', 'KO', 'PFE', 'DIS', 'MRK', 'VZ', 'CVX', 'XOM',
-    'ABBV', 'ABT', 'ACN', 'CRM', 'NKE', 'LLY', 'MCD', 'PM',
-    'GM', 'F', 'T', 'GS', 'MS', 'C', 'WFC', 'USB',
-    'BA', 'CAT', 'MMM', 'GE', 'HON', 'LMT', 'RTX', 'UPS',
-    'SQ', 'SNAP', 'UBER', 'LYFT', 'PLTR', 'HOOD',
-  ]);
-  
+
   const upper = ticker.toUpperCase();
-  
-  if (amexTickers.has(upper)) return `AMEX:${upper}`;
-  if (nyseTickers.has(upper)) return `NYSE:${upper}`;
-  
-  // Default to NASDAQ for tech/most common tickers
-  return `NASDAQ:${upper}`;
+
+  // Index ETFs that TradingView resolves better with AMEX prefix
+  const amexETFs = new Set([
+    'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'TLT',
+    'VTI', 'VOO', 'VXX', 'UVXY', 'SQQQ', 'TQQQ', 'ARKK',
+    'IBIT', 'GBTC',
+  ]);
+
+  if (amexETFs.has(upper)) return `AMEX:${upper}`;
+
+  // Let TradingView auto-resolve everything else — it handles
+  // NASDAQ, NYSE, and other US exchanges correctly
+  return upper;
 }
 
 function TradingViewPanelComponent({ ticker, timeframe = '15m' }: TradingViewPanelProps) {
@@ -80,7 +72,7 @@ function TradingViewPanelComponent({ ticker, timeframe = '15m' }: TradingViewPan
       hide_legend: false,
       save_image: false,
       hide_volume: false,
-      allow_symbol_change: false,
+      allow_symbol_change: true,
       withdateranges: true,
       hide_side_toolbar: true,
       details: false,

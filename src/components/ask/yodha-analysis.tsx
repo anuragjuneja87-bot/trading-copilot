@@ -43,6 +43,7 @@ interface YodhaAnalysisProps {
     tickerChange: number;
     spyChange: number;
     qqqChange: number;
+    session?: string;
   } | null;
   levels: {
     callWall: number | null;
@@ -586,20 +587,41 @@ function buildRSSignal(ticker: string, rs: YodhaAnalysisProps['relativeStrength'
   if (regime === 'STRONG_OUTPERFORM' || regime === 'OUTPERFORM') bias = 'BULLISH';
   else if (regime === 'STRONG_UNDERPERFORM' || regime === 'UNDERPERFORM') bias = 'BEARISH';
 
+  const isPreMarket = session === 'pre-market';
+  const sessionLabel = isPreMarket ? 'Pre-market' : 'Intraday';
+
   let summary = '';
   if (bias === 'BULLISH') {
-    summary = `${ticker} outperforming the market — `;
-    if (tickerChange > 0 && spyChange < 0) summary += `holding green (+${tickerChange.toFixed(2)}%) while SPY drops (${spyChange.toFixed(2)}%). Strong relative strength.`;
-    else summary += `up ${tickerChange.toFixed(2)}% vs SPY ${spyChange >= 0 ? '+' : ''}${spyChange.toFixed(2)}%. Leading by ${rsVsSpy.toFixed(2)}%.`;
+    summary = `${sessionLabel}: ${ticker} outperforming — `;
+    if (tickerChange > 0 && spyChange < 0) {
+      summary += `holding green (+${tickerChange.toFixed(2)}%) while SPY drops (${spyChange.toFixed(2)}%). Strong relative strength.`;
+    } else if (tickerChange < 0 && spyChange < 0) {
+      summary += `falling less (${tickerChange.toFixed(2)}%) vs SPY (${spyChange.toFixed(2)}%). Relative outperformance in a down market.`;
+    } else {
+      summary += `up ${tickerChange.toFixed(2)}% vs SPY ${spyChange >= 0 ? '+' : ''}${spyChange.toFixed(2)}%. Leading by ${rsVsSpy.toFixed(2)}%.`;
+    }
   } else if (bias === 'BEARISH') {
-    summary = `${ticker} underperforming the market — `;
-    if (tickerChange < 0 && spyChange > 0) summary += `red (${tickerChange.toFixed(2)}%) while SPY rallies (+${spyChange.toFixed(2)}%). Notable weakness.`;
-    else summary += `lagging at ${tickerChange.toFixed(2)}% vs SPY ${spyChange >= 0 ? '+' : ''}${spyChange.toFixed(2)}%. Trailing by ${rsVsSpy.toFixed(2)}%.`;
+    summary = `${sessionLabel}: ${ticker} underperforming — `;
+    if (tickerChange < 0 && spyChange > 0) {
+      summary += `red (${tickerChange.toFixed(2)}%) while SPY rallies (+${spyChange.toFixed(2)}%). Notable weakness.`;
+    } else if (tickerChange < 0 && spyChange < 0) {
+      summary += `falling harder (${tickerChange.toFixed(2)}%) vs SPY (${spyChange.toFixed(2)}%). Relative weakness amplifying the selloff.`;
+    } else {
+      summary += `lagging at ${tickerChange.toFixed(2)}% vs SPY ${spyChange >= 0 ? '+' : ''}${spyChange.toFixed(2)}%. Trailing by ${rsVsSpy.toFixed(2)}%.`;
+    }
   } else {
-    summary = `${ticker} trading in line with the broader market. RS vs SPY: ${rsVsSpy >= 0 ? '+' : ''}${rsVsSpy.toFixed(2)}%, vs QQQ: ${rsVsQqq >= 0 ? '+' : ''}${rsVsQqq.toFixed(2)}%.`;
+    summary = `${sessionLabel}: ${ticker} trading in line. RS vs SPY: ${rsVsSpy >= 0 ? '+' : ''}${rsVsSpy.toFixed(2)}%, vs QQQ: ${rsVsQqq >= 0 ? '+' : ''}${rsVsQqq.toFixed(2)}%.`;
   }
 
-  return { icon: Activity, label: 'Relative Strength', bias, summary, details: [], confidence: 'MEDIUM' };
+  // During pre-market, if both ticker and market are down, highlight the relative weakness
+  if (isPreMarket && tickerChange < -1 && spyChange < -1 && bias === 'NEUTRAL') {
+    const bothDown = `Both ${ticker} (${tickerChange.toFixed(2)}%) and SPY (${spyChange.toFixed(2)}%) gapping down pre-market. `;
+    if (Math.abs(rsVsSpy) < 0.5) {
+      summary = `${sessionLabel}: Broad selloff. ${bothDown}Moving in lockstep — watch for divergence at open.`;
+    }
+  }
+
+  return { icon: Activity, label: 'Relative Strength', bias, summary, details: [], confidence: isPreMarket ? 'LOW' : 'MEDIUM' };
 }
 
 /* ──────────────────────────────────────────────────────────

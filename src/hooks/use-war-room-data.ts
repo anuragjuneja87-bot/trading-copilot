@@ -49,6 +49,7 @@ interface RSSummary {
   corrSpy: number;
   corrQqq: number;
   regime: string;
+  session?: string;
 }
 
 interface WarRoomData {
@@ -206,6 +207,7 @@ export function useWarRoomData(
 
   // ============================================
   // RELATIVE STRENGTH: Fetch RS vs SPY/QQQ
+  // (now works for all sessions including pre-market)
   // ============================================
   useEffect(() => {
     if (!ticker) return;
@@ -216,6 +218,26 @@ export function useWarRoomData(
         const json = await res.json();
         if (json.success && json.data?.summary) {
           setRelativeStrength(json.data.summary);
+          
+          // During pre-market, also update preMarketData with RS-derived info
+          // so the ML feature assembler gets the gap data
+          if (json.data.summary.session === 'pre-market' && json.data.snapshot) {
+            const snap = json.data.snapshot;
+            const tickerSnap = snap[ticker];
+            const spySnap = snap['SPY'];
+            if (tickerSnap && !preMarketData) {
+              setPreMarketData(prev => prev || {
+                gap: tickerSnap.changePct || 0,
+                gapDirection: (tickerSnap.changePct || 0) > 0.15 ? 'UP' : (tickerSnap.changePct || 0) < -0.15 ? 'DOWN' : 'FLAT',
+                spyGap: spySnap?.changePct || 0,
+                relativeStrength: (tickerSnap.changePct || 0) - (spySnap?.changePct || 0),
+                preMarketVolume: 0,
+                avgPreMarketVolume: 0,
+                volumeRatio: 0,
+                catalyst: null,
+              });
+            }
+          }
         }
       } catch (err) {
         console.error('[WarRoom] RS fetch error:', err);
@@ -223,7 +245,8 @@ export function useWarRoomData(
     };
     
     fetchRS();
-    const pollInterval = marketSession === 'open' ? 60000 : 300000;
+    // Poll faster during pre-market (every 30s) to catch moves
+    const pollInterval = marketSession === 'open' ? 60000 : marketSession === 'pre-market' ? 30000 : 300000;
     const interval = setInterval(fetchRS, pollInterval);
     return () => clearInterval(interval);
   }, [ticker, marketSession]);
@@ -359,9 +382,11 @@ function computeVerdict(
   }
   
   if (session === 'pre-market') {
+    // During pre-market, we can still provide some signal from news
+    // RS data is handled separately and will feed into the unified thesis
     return {
       bias: 'NEUTRAL', confidence: 0,
-      summary: 'Pre-market session. Options flow and dark pool not yet available.',
+      summary: 'Pre-market session. Relative strength active — options flow and dark pool data start at open.',
       signals: { flow: 'NEUTRAL', darkpool: 'NEUTRAL', newsAlignment: news?.length > 0 },
     };
   }

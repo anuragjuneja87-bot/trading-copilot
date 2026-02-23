@@ -25,6 +25,7 @@ interface RSSummary {
   corrSpy: number;
   corrQqq: number;
   regime: string;
+  session?: string;
 }
 
 interface RSDataPoint {
@@ -109,6 +110,7 @@ export function RelativeStrengthPanel({ ticker, timeframeRange }: RelativeStreng
       corrSpy: summary.corrSpy, // keep full-day correlation
       corrQqq: summary.corrQqq,
       regime,
+      session: summary.session, // pass through session context
     };
   }, [filteredData, data, summary, timeframeRange]);
 
@@ -254,6 +256,14 @@ export function RelativeStrengthPanel({ ticker, timeframeRange }: RelativeStreng
           <Activity className="w-4 h-4" style={{ color: COLORS.cyan }} />
           <span className="text-sm font-bold text-white">RELATIVE STRENGTH</span>
           <span className="text-xs text-gray-500">vs SPY & QQQ</span>
+          {filteredSummary?.session && filteredSummary.session !== 'open' && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase" style={{
+              background: filteredSummary.session === 'pre-market' ? 'rgba(255,193,7,0.15)' : 'rgba(255,255,255,0.05)',
+              color: filteredSummary.session === 'pre-market' ? '#ffc107' : '#888',
+            }}>
+              {filteredSummary.session === 'pre-market' ? '⏰ Pre-Market' : filteredSummary.session === 'after-hours' ? 'After Hours' : 'Closed'}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold" style={{ background: regimeConfig.bg, color: regimeConfig.color }}>
           <RegimeIcon className="w-3 h-3" />

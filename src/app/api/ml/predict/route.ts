@@ -85,17 +85,65 @@ export async function POST(req: NextRequest): Promise<NextResponse<PredictRespon
     // ── Step 2: Call Databricks endpoint ──
     const endpointUrl = `${ML_HOST}/serving-endpoints/${ML_ENDPOINT}/invocations`;
 
-    const dbResponse = await fetch(endpointUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${ML_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        dataframe_records: [features],
-      }),
-      signal: AbortSignal.timeout(15000), // 15s timeout
-    });
+    // Convert null values to NaN for LightGBM compatibility
+    // LightGBM handles NaN natively, but JSON null can cause issues
+    const cleanedFeatures: Record<string, any> = {};
+    for (const [key, value] of Object.entries(features)) {
+      cleanedFeatures[key] = value === null || value === undefined ? 'NaN' : value;
+    }
+
+    console.log('[ML Predict] Calling endpoint:', ML_ENDPOINT);
+    console.log('[ML Predict] Feature completeness:', completeness);
+    console.log('[ML Predict] Available features:', availableCount);
+
+    // Try standard Databricks model serving format first
+    let dbResponse: Response;
+    let payloadFormat: string;
+
+    try {
+      // Standard Databricks model serving format
+      payloadFormat = 'dataframe_records';
+      dbResponse = await fetch(endpointUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${ML_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          dataframe_records: [cleanedFeatures],
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+
+      // If the standard format returns 400, try the "input" format
+      // (used by some custom Databricks Apps / Flask endpoints)
+      if (dbResponse.status === 400 || dbResponse.status === 422) {
+        const errText = await dbResponse.text();
+        console.warn('[ML Predict] Standard format failed, trying "input" format. Error:', errText);
+        
+        payloadFormat = 'input';
+        dbResponse = await fetch(endpointUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${ML_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            input: cleanedFeatures,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+      }
+    } catch (fetchErr: any) {
+      // If the main endpoint fails, try the Databricks Apps endpoint format
+      if (fetchErr.name === 'TimeoutError' || fetchErr.name === 'AbortError') {
+        console.error('[ML Predict] Timeout on endpoint:', ML_ENDPOINT);
+        throw fetchErr;
+      }
+      throw fetchErr;
+    }
+
+    console.log('[ML Predict] Response status:', dbResponse.status, 'format:', payloadFormat);
 
     if (!dbResponse.ok) {
       const errText = await dbResponse.text();
