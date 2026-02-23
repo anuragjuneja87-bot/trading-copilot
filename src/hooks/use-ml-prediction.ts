@@ -71,13 +71,47 @@ export function useMLPrediction(
   const fetchInProgress = useRef(false);
   const currentTicker = useRef(ticker);
 
-  // Reset history when ticker changes
+  // ── localStorage helpers ──
+  const storageKey = `yodha-confidence-${ticker}-${new Date().toISOString().slice(0, 10)}`;
+
+  function loadHistory(key: string): ConfidencePoint[] {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed;
+    } catch { return []; }
+  }
+
+  function saveHistory(key: string, history: ConfidencePoint[]) {
+    try {
+      localStorage.setItem(key, JSON.stringify(history));
+    } catch { /* storage full — ignore */ }
+  }
+
+  function cleanOldEntries() {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k?.startsWith('yodha-confidence-') && !k.endsWith(today)) {
+          localStorage.removeItem(k);
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Load from localStorage on mount / ticker change
   useEffect(() => {
     if (ticker !== currentTicker.current) {
       currentTicker.current = ticker;
-      setConfidenceHistory([]);
       setPrediction(null);
     }
+    const key = `yodha-confidence-${ticker}-${new Date().toISOString().slice(0, 10)}`;
+    const saved = loadHistory(key);
+    setConfidenceHistory(saved);
+    cleanOldEntries();
   }, [ticker]);
 
   const fetchPrediction = useCallback(async () => {
@@ -112,7 +146,9 @@ export function useMLPrediction(
             direction: data.prediction.direction || 'NEUTRAL',
           };
           const next = [...prev, point];
-          return next.length > 500 ? next.slice(-500) : next;
+          const capped = next.length > 500 ? next.slice(-500) : next;
+          saveHistory(storageKey, capped);
+          return capped;
         });
       } else {
         setError(data.error || 'Prediction failed');
