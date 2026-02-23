@@ -47,3 +47,11 @@ next-env.d.ts
 # Misc
 *.pem
 .turbo
+# Security — never commit these
+.env.backup
+.env.*.backup
+api_test*.json
+test-*.js
+test_*.py
+diagnose.sh
+*.log
