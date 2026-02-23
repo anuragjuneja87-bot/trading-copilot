@@ -391,7 +391,11 @@ export function AskYodhaChat({ ticker, price, levels, marketSession }: AskYodhaC
         }),
       });
       const data = await res.json();
-      setAnswer(data.answer || data.data?.answer || data.fullResponse || 'No response received.');
+      if (!res.ok || !data.success) {
+        setAnswer(`Error: ${data.error || `HTTP ${res.status}`}`);
+      } else {
+        setAnswer(data.data?.message || data.answer || data.data?.answer || data.fullResponse || 'No response received.');
+      }
     } catch (err: any) {
       setAnswer(`Error: ${err.message}`);
     } finally {
