@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
     console.error('Flow insight error:', error);
     return NextResponse.json({
       success: false,
-      error: "An error occurred" || 'Failed to generate insight',
+      error: 'An error occurred',
     }, { status: 500 });
   }
 }

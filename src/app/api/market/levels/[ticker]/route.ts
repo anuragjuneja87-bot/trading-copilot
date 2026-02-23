@@ -343,7 +343,7 @@ export async function GET(
   } catch (error: any) {
     console.error('[Levels API] Error:', error);
     return NextResponse.json(
-      { success: false, error: "An error occurred" || 'Internal server error' }, 
+      { success: false, error: 'An error occurred' }, 
       { status: 500 }
     );
   }

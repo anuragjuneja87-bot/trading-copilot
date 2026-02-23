@@ -9,6 +9,8 @@ import {
   ChevronDown, ChevronRight, Send, Loader2, Shield,
   BarChart3, Zap, MessageSquare, RefreshCw
 } from 'lucide-react';
+import { ConfidenceSparkline } from './confidence-sparkline';
+import type { ConfidencePoint } from '@/hooks/use-ml-prediction';
 
 /* ──────────────────────────────────────────────────────────
    TYPES
@@ -59,6 +61,7 @@ interface YodhaAnalysisProps {
   mlError?: string | null;
   mlMeta?: { completeness: string; availableFeatures: number; latencyMs: number } | null;
   mlRefresh?: () => void;
+  confidenceHistory?: ConfidencePoint[];
 }
 
 interface SupportingSignal {
@@ -89,6 +92,7 @@ export function YodhaAnalysis({
   mlError,
   mlMeta,
   mlRefresh,
+  confidenceHistory,
 }: YodhaAnalysisProps) {
 
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
@@ -213,6 +217,16 @@ export function YodhaAnalysis({
           <span className="text-[10px] text-gray-600">80% threshold</span>
           <span className="text-[10px] text-gray-600">High</span>
         </div>
+        {/* Confidence history sparkline */}
+        {confidenceHistory && confidenceHistory.length >= 2 && (
+          <div className="mt-3 mb-1 w-full">
+            <ConfidenceSparkline
+              history={confidenceHistory}
+              height={48}
+              threshold={80}
+            />
+          </div>
+        )}
         {/* One-liner */}
         <p className="text-xs text-gray-400 mt-2">
           {thesis.oneLiner}

@@ -157,7 +157,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('[Market Prices API] Error:', error);
     return NextResponse.json(
-      { success: false, error: "An error occurred" || 'Failed to fetch prices' },
+      { success: false, error: 'An error occurred' },
       { status: 500 }
     );
   }

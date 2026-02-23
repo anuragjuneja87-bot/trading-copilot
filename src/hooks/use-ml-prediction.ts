@@ -2,9 +2,10 @@
  * useMLPrediction — Hook that fetches ML predictions from the B→C pipeline.
  *
  * Usage:
- *   const { prediction, isLoading, error, refresh } = useMLPrediction(ticker, warRoomData);
+ *   const { prediction, isLoading, error, refresh, confidenceHistory } = useMLPrediction(ticker, warRoomData);
  *
  * Auto-refreshes every 60s during market hours.
+ * Accumulates confidence history for intraday sparkline.
  */
 
 'use client';
@@ -12,6 +13,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MLPrediction } from '@/app/api/ml/predict/route';
 import type { WarRoomSnapshot, MarketRegimeData } from '@/lib/feature-assembler';
+
+export interface ConfidencePoint {
+  time: number;        // Unix ms
+  confidence: number;  // 0-100
+  direction: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+}
 
 interface UseMLPredictionResult {
   prediction: MLPrediction | null;
@@ -24,6 +31,7 @@ interface UseMLPredictionResult {
   } | null;
   refresh: () => void;
   lastUpdate: Date | null;
+  confidenceHistory: ConfidencePoint[];
 }
 
 // Build a WarRoomSnapshot from the useWarRoomData hook output
@@ -59,7 +67,18 @@ export function useMLPrediction(
   const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<UseMLPredictionResult['meta']>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [confidenceHistory, setConfidenceHistory] = useState<ConfidencePoint[]>([]);
   const fetchInProgress = useRef(false);
+  const currentTicker = useRef(ticker);
+
+  // Reset history when ticker changes
+  useEffect(() => {
+    if (ticker !== currentTicker.current) {
+      currentTicker.current = ticker;
+      setConfidenceHistory([]);
+      setPrediction(null);
+    }
+  }, [ticker]);
 
   const fetchPrediction = useCallback(async () => {
     if (!ticker || !warRoomData?.price || warRoomData.price === 0) return;
@@ -84,6 +103,17 @@ export function useMLPrediction(
         setPrediction(data.prediction);
         setMeta(data.meta || null);
         setLastUpdate(new Date());
+        
+        // Accumulate confidence history (cap at 500 points ~8hrs of 60s polling)
+        setConfidenceHistory(prev => {
+          const point: ConfidencePoint = {
+            time: Date.now(),
+            confidence: data.prediction.move_probability * 100,
+            direction: data.prediction.direction || 'NEUTRAL',
+          };
+          const next = [...prev, point];
+          return next.length > 500 ? next.slice(-500) : next;
+        });
       } else {
         setError(data.error || 'Prediction failed');
       }
@@ -120,5 +150,6 @@ export function useMLPrediction(
     meta,
     refresh: fetchPrediction,
     lastUpdate,
+    confidenceHistory,
   };
 }

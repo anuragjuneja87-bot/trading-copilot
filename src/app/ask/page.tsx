@@ -273,6 +273,7 @@ function AskPageContent() {
                 mlError={mlResult.error}
                 mlMeta={mlResult.meta}
                 mlRefresh={mlResult.refresh}
+                confidenceHistory={mlResult.confidenceHistory}
               />
 
               {/* CHART */}

@@ -328,7 +328,7 @@ Keep it under 150 words.`;
     return { ticker, ...parsed, fullResponse: fullText };
   } catch (error: any) {
     console.error(`Error generating thesis for ${ticker}:`, error);
-    return { ticker, fullResponse: '', error: "An error occurred" || 'Failed to generate thesis' };
+    return { ticker, fullResponse: '', error: 'Failed to generate thesis' };
   }
 }
 
@@ -376,6 +376,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('Thesis API error:', error);
-    return NextResponse.json({ success: false, error: "An error occurred" || 'Failed to generate thesis report' }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'Failed to generate thesis report' }, { status: 500 });
   }
 }

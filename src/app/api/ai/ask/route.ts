@@ -162,10 +162,9 @@ export async function POST(request: NextRequest) {
     }
     
     return NextResponse.json(
-      { 
-        success: false, 
-        error: "An error occurred" || 'Internal server error',
-        // Stack traces never sent to client
+      {
+        success: false,
+        error: 'An error occurred',
       },
       { status: 500 }
     );

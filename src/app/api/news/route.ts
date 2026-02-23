@@ -622,7 +622,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('News API error:', error);
     return NextResponse.json(
-      { success: false, error: "An error occurred" || 'Failed to fetch news' },
+      { success: false, error: 'An error occurred' },
       { status: 500 }
     );
   }

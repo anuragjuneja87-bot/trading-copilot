@@ -141,7 +141,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       { 
         success: false, 
-        error: "An error occurred" || 'Failed to fetch regime data',
+        error: 'An error occurred',
         // Stack traces never sent to client
       },
       { status: 500 }
