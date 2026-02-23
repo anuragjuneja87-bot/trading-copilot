@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateText } from '@/lib/security';
 
 // Databricks configuration
 const DATABRICKS_HOST = process.env.DATABRICKS_HOST;
@@ -11,28 +12,23 @@ export async function POST(request: NextRequest) {
     if (!DATABRICKS_HOST || DATABRICKS_HOST.includes('your-workspace')) {
       console.error('DATABRICKS_HOST is not configured or contains placeholder value');
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Databricks configuration is missing. Please set DATABRICKS_HOST in your .env file.' 
-        },
-        { status: 500 }
+        { success: false, error: 'AI service is not configured' },
+        { status: 503 }
       );
     }
 
     if (!DATABRICKS_TOKEN || DATABRICKS_TOKEN.includes('your-personal-access-token')) {
       console.error('DATABRICKS_TOKEN is not configured or contains placeholder value');
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Databricks token is missing. Please set DATABRICKS_TOKEN in your .env file.' 
-        },
-        { status: 500 }
+        { success: false, error: 'AI service is not configured' },
+        { status: 503 }
       );
     }
 
-    const { question, history } = await request.json();
+    const { question: rawQuestion, history } = await request.json();
+    const question = validateText(rawQuestion, 5000);
 
-    if (!question || typeof question !== 'string') {
+    if (!question) {
       return NextResponse.json(
         { success: false, error: 'Question is required' },
         { status: 400 }
@@ -168,8 +164,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { 
         success: false, 
-        error: error.message || 'Internal server error',
-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        error: "An error occurred" || 'Internal server error',
+        // Stack traces never sent to client
       },
       { status: 500 }
     );

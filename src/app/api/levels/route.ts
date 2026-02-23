@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateTicker, validateTickers, validateInt } from '@/lib/security';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 
@@ -9,7 +10,7 @@ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const ticker = searchParams.get('ticker')?.toUpperCase();
+    const ticker = validateTicker(searchParams.get('ticker'));
 
     if (!ticker) {
       return NextResponse.json(
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
 
     if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
       return NextResponse.json(
-        { success: false, error: 'POLYGON_API_KEY not configured' },
+        { success: false, error: 'Market data service not configured' },
         { status: 500 }
       );
     }
@@ -231,7 +232,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Failed to fetch key levels',
+        error: "An error occurred" || 'Failed to fetch key levels',
       },
       { status: 500 }
     );

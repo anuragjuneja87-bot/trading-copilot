@@ -328,7 +328,7 @@ Keep it under 150 words.`;
     return { ticker, ...parsed, fullResponse: fullText };
   } catch (error: any) {
     console.error(`Error generating thesis for ${ticker}:`, error);
-    return { ticker, fullResponse: '', error: error.message || 'Failed to generate thesis' };
+    return { ticker, fullResponse: '', error: "An error occurred" || 'Failed to generate thesis' };
   }
 }
 
@@ -350,11 +350,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (!DATABRICKS_HOST || DATABRICKS_HOST.includes('your-workspace')) {
-      return NextResponse.json({ success: false, error: 'Databricks configuration is missing' }, { status: 500 });
+      return NextResponse.json({ success: false, error: 'AI service is not configured' }, { status: 503 });
     }
 
     if (!DATABRICKS_TOKEN || DATABRICKS_TOKEN.includes('your-personal-access-token')) {
-      return NextResponse.json({ success: false, error: 'Databricks token is missing' }, { status: 500 });
+      return NextResponse.json({ success: false, error: 'AI service is not configured' }, { status: 503 });
     }
 
     const theses: ThesisData[] = [];
@@ -376,6 +376,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('Thesis API error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to generate thesis report' }, { status: 500 });
+    return NextResponse.json({ success: false, error: "An error occurred" || 'Failed to generate thesis report' }, { status: 500 });
   }
 }

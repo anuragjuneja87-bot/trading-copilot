@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateTicker, validateTickers, validateInt } from '@/lib/security';
 import {
   TickerSnapshot,
   VixData,

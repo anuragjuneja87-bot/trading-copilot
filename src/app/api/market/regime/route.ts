@@ -141,8 +141,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       { 
         success: false, 
-        error: error.message || 'Failed to fetch regime data',
-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        error: "An error occurred" || 'Failed to fetch regime data',
+        // Stack traces never sent to client
       },
       { status: 500 }
     );

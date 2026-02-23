@@ -634,7 +634,7 @@ export async function POST(request: NextRequest) {
 
     if (!DATABRICKS_HOST || !DATABRICKS_TOKEN) {
       return NextResponse.json(
-        { success: false, error: 'Databricks configuration missing. Check DATABRICKS_HOST and DATABRICKS_TOKEN in .env' },
+        { success: false, error: 'AI service is not configured' },
         { status: 500 }
       );
     }
@@ -1191,7 +1191,7 @@ export async function POST(request: NextRequest) {
       );
     }
     return NextResponse.json(
-      { success: false, error: error.message || 'Failed to format analysis' },
+      { success: false, error: "An error occurred" || 'Failed to format analysis' },
       { status: 500 }
     );
   }

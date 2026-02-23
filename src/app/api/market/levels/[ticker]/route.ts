@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateTicker, validateTickers, validateInt } from '@/lib/security';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const POLYGON_BASE_URL = 'https://api.polygon.io';
@@ -12,7 +13,7 @@ export async function GET(
 ) {
   try {
     const { ticker: tickerParam } = await params;
-    const ticker = tickerParam?.toUpperCase();
+    const ticker = validateTicker(tickerParam);
     
     if (!ticker) {
       return NextResponse.json(
@@ -23,7 +24,7 @@ export async function GET(
 
     if (!POLYGON_API_KEY) {
       return NextResponse.json(
-        { success: false, error: 'API key not configured' }, 
+        { success: false, error: 'Market data service not configured' }, 
         { status: 500 }
       );
     }
@@ -342,7 +343,7 @@ export async function GET(
   } catch (error: any) {
     console.error('[Levels API] Error:', error);
     return NextResponse.json(
-      { success: false, error: error.message || 'Internal server error' }, 
+      { success: false, error: "An error occurred" || 'Internal server error' }, 
       { status: 500 }
     );
   }

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateTicker, validateTickers, validateInt } from '@/lib/security';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const ticker = searchParams.get('ticker')?.toUpperCase();
+  const ticker = validateTicker(searchParams.get('ticker'));
   
   if (!ticker) {
     return NextResponse.json({ success: false, error: 'Ticker required' }, { status: 400 });
@@ -90,6 +91,6 @@ export async function GET(request: NextRequest) {
     
   } catch (error: any) {
     console.error('[Max Pain API] Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: "An error occurred" }, { status: 500 });
   }
 }

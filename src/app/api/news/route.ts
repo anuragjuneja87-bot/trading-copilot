@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateTicker, validateTickers, validateInt } from '@/lib/security';
 import { NewsArticle, TickerSentiment, MarketMood } from '@/types/news';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY; // Massive.com uses Polygon API key
@@ -349,7 +350,7 @@ export async function GET(request: NextRequest) {
     if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
       console.warn('POLYGON_API_KEY is not configured properly');
       return NextResponse.json(
-        { success: false, error: 'News API is not configured' },
+        { success: false, error: 'News service not configured' },
         { status: 500 }
       );
     }
@@ -358,11 +359,11 @@ export async function GET(request: NextRequest) {
     let tickers: string[] = [...MARKET_TICKERS];
     
     if (tickersParam && tickersParam.trim()) {
-      const watchlistTickers = tickersParam.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+      const watchlistTickers = validateTickers(tickersParam, 20);
       tickers = [...new Set([...MARKET_TICKERS, ...watchlistTickers])];
     } else if (ticker) {
-      // Legacy support for single ticker param
-      tickers = [...new Set([...MARKET_TICKERS, ticker.toUpperCase()])];
+      const validTicker = validateTicker(ticker);
+      if (validTicker) tickers = [...new Set([...MARKET_TICKERS, validTicker])];
     }
     // If no tickers param provided, use just MARKET_TICKERS (SPY, QQQ, VIX)
 
@@ -621,7 +622,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('News API error:', error);
     return NextResponse.json(
-      { success: false, error: error.message || 'Failed to fetch news' },
+      { success: false, error: "An error occurred" || 'Failed to fetch news' },
       { status: 500 }
     );
   }

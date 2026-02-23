@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { DarkPoolPrint, DarkPoolStats, PriceLevel } from '@/types/darkpool';
+import { validateTicker, validateInt, safeError } from '@/lib/security';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const POLYGON_BASE_URL = 'https://api.polygon.io';
@@ -295,10 +296,10 @@ function getLastTradingDayRange(): { gte: number; lte: number; isMarketClosed: b
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const ticker = searchParams.get('tickers')?.toUpperCase() || searchParams.get('ticker')?.toUpperCase();
-  const limit = parseInt(searchParams.get('limit') || '100');
+  const ticker = validateTicker(searchParams.get('tickers') || searchParams.get('ticker'));
+  const limit = validateInt(searchParams.get('limit'), 100, 1, 500);
   
-  console.log('[DarkPool] Request received:', { ticker, limit, params: Object.fromEntries(searchParams.entries()) });
+  // Request params logged — redacted in production
   
   if (!ticker) {
     return NextResponse.json({ success: false, error: 'Ticker required' }, { status: 400 });
@@ -424,8 +425,8 @@ export async function GET(request: NextRequest) {
     return processAndReturn(blockTrades.slice(0, limit), ticker, currentPrice, vwap, dateStr, timestampGte, timestampLte, isMarketClosed, tradingDay);
     
   } catch (error: any) {
-    console.error('[DarkPool] Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const err = safeError(error, 'DarkPool', 'Failed to fetch dark pool data');
+    return NextResponse.json({ success: false, error: err.message }, { status: err.status });
   }
 }
 

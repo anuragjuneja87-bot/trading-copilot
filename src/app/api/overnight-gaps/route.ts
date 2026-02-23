@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateTicker, validateTickers, validateInt } from '@/lib/security';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 
@@ -27,14 +28,14 @@ export async function GET(request: NextRequest) {
 
     if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
       return NextResponse.json(
-        { success: false, error: 'POLYGON_API_KEY not configured' },
+        { success: false, error: 'Market data service not configured' },
         { status: 500 }
       );
     }
 
     // Parse watchlist tickers
     const watchlistTickers = tickersParam
-      ? tickersParam.split(',').map(t => t.trim().toUpperCase())
+      ? validateTickers(tickersParam, 10)
       : ['SPY', 'QQQ', 'NVDA'];
 
     // Fetch watchlist tickers
@@ -139,7 +140,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Failed to fetch overnight gaps',
+        error: "An error occurred" || 'Failed to fetch overnight gaps',
       },
       { status: 500 }
     );

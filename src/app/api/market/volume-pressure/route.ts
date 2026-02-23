@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateTicker, validateTickers, validateInt } from '@/lib/security';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 
@@ -39,7 +40,7 @@ function getMarketTimeRange(): { fromTs: number; toTs: number; isLive: boolean }
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const ticker = searchParams.get('ticker')?.toUpperCase();
+    const ticker = validateTicker(searchParams.get('ticker'));
     const fromParam = searchParams.get('from');
     const toParam = searchParams.get('to');
 
@@ -176,6 +177,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('[Volume Pressure API] Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: "An error occurred" }, { status: 500 });
   }
 }

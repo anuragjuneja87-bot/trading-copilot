@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     console.error('News insight error:', error);
     return NextResponse.json({
       success: false,
-      error: error.message || 'Failed to generate insight',
+      error: "An error occurred" || 'Failed to generate insight',
     }, { status: 500 });
   }
 }

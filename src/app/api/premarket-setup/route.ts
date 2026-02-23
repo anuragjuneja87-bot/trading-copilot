@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateTicker, validateTickers, validateInt } from '@/lib/security';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 
@@ -41,14 +42,18 @@ export async function GET(request: NextRequest) {
 
     if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
       return NextResponse.json(
-        { success: false, error: 'POLYGON_API_KEY not configured' },
+        { success: false, error: 'Market data service not configured' },
         { status: 500 }
       );
     }
 
     const tickers = tickersParam
-      ? tickersParam.split(',').map(t => t.trim().toUpperCase())
+      ? validateTickers(tickersParam, 10)
       : ['SPY', 'QQQ', 'NVDA'];
+    
+    if (tickersParam && tickers.length === 0) {
+      return NextResponse.json({ success: false, error: 'Invalid ticker symbols' }, { status: 400 });
+    }
 
     // Fetch prices from Polygon snapshot
     const pricesUrl = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${tickers.join(',')}&apiKey=${POLYGON_API_KEY}`;
@@ -217,7 +222,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Failed to fetch premarket setup',
+        error: "An error occurred" || 'Failed to fetch premarket setup',
       },
       { status: 500 }
     );

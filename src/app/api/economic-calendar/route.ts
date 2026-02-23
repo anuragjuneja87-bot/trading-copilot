@@ -201,7 +201,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Failed to fetch economic calendar',
+        error: "An error occurred" || 'Failed to fetch economic calendar',
       },
       { status: 500 }
     );

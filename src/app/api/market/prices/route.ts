@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateTicker, validateTickers, validateInt } from '@/lib/security';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const POLYGON_BASE_URL = 'https://api.polygon.io';
@@ -17,15 +18,19 @@ export async function GET(request: NextRequest) {
 
     if (!POLYGON_API_KEY) {
       return NextResponse.json(
-        { success: false, error: 'API key not configured' },
+        { success: false, error: 'Market data service not configured' },
         { status: 500 }
       );
     }
 
-    const tickers = tickersParam
-      .split(',')
-      .map(t => t.trim().toUpperCase())
-      .filter(Boolean);
+    const tickers = validateTickers(tickersParam, 20);
+    
+    if (tickers.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'No valid ticker symbols provided' },
+        { status: 400 }
+      );
+    }
     
     if (tickers.length === 0) {
       return NextResponse.json({ success: true, data: [] });
@@ -152,7 +157,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('[Market Prices API] Error:', error);
     return NextResponse.json(
-      { success: false, error: error.message || 'Failed to fetch prices' },
+      { success: false, error: "An error occurred" || 'Failed to fetch prices' },
       { status: 500 }
     );
   }

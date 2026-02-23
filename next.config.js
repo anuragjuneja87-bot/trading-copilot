@@ -2,6 +2,10 @@
 const nextConfig = {
   // Enable React strict mode for better development
   reactStrictMode: true,
+
+  // ── SECURITY: Disable source maps in production ──
+  // Prevents exposing your source code to anyone who opens DevTools
+  productionBrowserSourceMaps: false,
   
   // Image optimization
   images: {

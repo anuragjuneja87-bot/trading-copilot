@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { EnhancedOptionTrade, EnhancedFlowStats, GexStrike, FlowTimeSeries } from '@/types/flow';
+import { validateTickers, validateInt, safeError } from '@/lib/security';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const DEFAULT_TICKERS = ['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA'];
@@ -228,14 +229,18 @@ export async function GET(request: NextRequest) {
 
   if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
     return NextResponse.json(
-      { success: false, error: 'POLYGON_API_KEY not configured' },
+      { success: false, error: 'Market data service not configured' },
       { status: 500 }
     );
   }
 
   const tickers = tickersParam 
-    ? tickersParam.split(',').map(t => t.trim().toUpperCase())
+    ? validateTickers(tickersParam, 10)
     : DEFAULT_TICKERS;
+  
+  if (tickersParam && tickers.length === 0) {
+    return NextResponse.json({ success: false, error: 'Invalid ticker symbols' }, { status: 400 });
+  }
 
   let allTrades: EnhancedOptionTrade[] = [];
   const errors: string[] = [];
@@ -816,15 +821,10 @@ export async function GET(request: NextRequest) {
     }
     
     // Only return error if we have no data at all
+    const err = safeError(error, 'FlowOptions', 'Failed to fetch options flow');
     return NextResponse.json(
-      { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Internal server error',
-        details: error?.code === 'UND_ERR_CONNECT_TIMEOUT' 
-          ? 'Polygon API connection timeout - API may be unavailable. Try demo mode.' 
-          : undefined
-      },
-      { status: 500 }
+      { success: false, error: err.message },
+      { status: err.status }
     );
   }
 }
