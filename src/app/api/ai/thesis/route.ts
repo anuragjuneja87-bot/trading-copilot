@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Databricks configuration
-const DATABRICKS_HOST = process.env.DATABRICKS_HOST;
-const DATABRICKS_TOKEN = process.env.DATABRICKS_TOKEN;
-const DATABRICKS_ENDPOINT = process.env.DATABRICKS_ENDPOINT || 'mas-7ab7b2ce-endpoint';
-const DATABRICKS_TIMEOUT = parseInt(process.env.DATABRICKS_TIMEOUT || '300000', 10);
+// Anthropic API (direct)
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const AI_TIMEOUT = parseInt(process.env.AI_TIMEOUT || '30000', 10);
 
 interface ThesisData {
   ticker: string;
@@ -294,30 +292,31 @@ IMPORTANT: You must provide Entry, Target, and Stop prices. Be specific. Use act
 Keep it under 150 words.`;
 
   try {
-    const endpointUrl = `${DATABRICKS_HOST}/serving-endpoints/${DATABRICKS_ENDPOINT}/invocations`;
-
-    const response = await fetch(endpointUrl, {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${DATABRICKS_TOKEN}`,
         'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY || '',
+        'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        input: [
-          { role: 'system', content: YODHA_SYSTEM_PROMPT },
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        system: YODHA_SYSTEM_PROMPT,
+        messages: [
           { role: 'user', content: prompt },
         ],
       }),
-      signal: AbortSignal.timeout(DATABRICKS_TIMEOUT),
+      signal: AbortSignal.timeout(AI_TIMEOUT),
     });
 
     if (!response.ok) {
-      throw new Error(`Databricks API error: ${response.status} ${response.statusText}`);
+      throw new Error(`Anthropic API error: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
-    const fullTextRaw = extractTextFromDatabricksResponse(data);
-    const fullText = fullTextRaw && fullTextRaw.trim().toLowerCase() !== 'null'
+    const fullTextRaw = data.content?.[0]?.text || '';
+    const fullText = fullTextRaw.trim().toLowerCase() !== 'null'
       ? fullTextRaw.trim()
       : '';
 
@@ -328,7 +327,7 @@ Keep it under 150 words.`;
     return { ticker, ...parsed, fullResponse: fullText };
   } catch (error: any) {
     console.error(`Error generating thesis for ${ticker}:`, error);
-    return { ticker, fullResponse: '', error: 'Failed to generate thesis' };
+    return { ticker, fullResponse: '', error: "An error occurred" || 'Failed to generate thesis' };
   }
 }
 
@@ -349,11 +348,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Maximum 20 tickers allowed' }, { status: 400 });
     }
 
-    if (!DATABRICKS_HOST || DATABRICKS_HOST.includes('your-workspace')) {
-      return NextResponse.json({ success: false, error: 'AI service is not configured' }, { status: 503 });
-    }
-
-    if (!DATABRICKS_TOKEN || DATABRICKS_TOKEN.includes('your-personal-access-token')) {
+    if (!ANTHROPIC_API_KEY) {
       return NextResponse.json({ success: false, error: 'AI service is not configured' }, { status: 503 });
     }
 
@@ -376,6 +371,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('Thesis API error:', error);
-    return NextResponse.json({ success: false, error: 'Failed to generate thesis report' }, { status: 500 });
+    return NextResponse.json({ success: false, error: "An error occurred" || 'Failed to generate thesis report' }, { status: 500 });
   }
 }

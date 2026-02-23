@@ -120,14 +120,16 @@ export async function POST(request: NextRequest) {
 async function classifyQuery(query: string): Promise<QueryClassification> {
   try {
     const response = await fetch(
-      `${process.env.DATABRICKS_HOST}/serving-endpoints/databricks-claude-haiku-4-5/invocations`,
+      'https://api.anthropic.com/v1/messages',
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${process.env.DATABRICKS_TOKEN}`,
+          'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+          'anthropic-version': '2023-06-01',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
           messages: [
             { role: 'system', content: CLASSIFIER_PROMPT },
             { role: 'user', content: query },
@@ -142,7 +144,7 @@ async function classifyQuery(query: string): Promise<QueryClassification> {
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '{}';
+    const content = data.content?.[0]?.text || '{}';
     
     // Parse JSON response (handle potential markdown wrapping)
     const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
@@ -459,14 +461,16 @@ Answer the question concisely:`;
 
   try {
     const response = await fetch(
-      `${process.env.DATABRICKS_HOST}/serving-endpoints/databricks-claude-haiku-4-5/invocations`,
+      'https://api.anthropic.com/v1/messages',
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${process.env.DATABRICKS_TOKEN}`,
+          'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+          'anthropic-version': '2023-06-01',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
           messages: [
             { role: 'system', content: ANALYSIS_PROMPT },
             { role: 'user', content: query },
@@ -481,7 +485,7 @@ Answer the question concisely:`;
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || 'Unable to generate analysis.';
+    return data.content?.[0]?.text || 'Unable to generate analysis.';
   } catch (error) {
     console.error('Quick analysis error:', error);
     return 'Unable to complete analysis. Please try again.';

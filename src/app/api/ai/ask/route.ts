@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateText } from '@/lib/security';
 
-// Databricks configuration
-const DATABRICKS_HOST = process.env.DATABRICKS_HOST;
-const DATABRICKS_TOKEN = process.env.DATABRICKS_TOKEN;
-// Foundation Model endpoint (NOT the old supervisor agent)
-const HAIKU_ENDPOINT = 'databricks-claude-haiku-4-5';
+// Anthropic API (direct — no Databricks needed for LLM)
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 const SYSTEM_PROMPT = `You are Yodha, a concise day-trading analyst embedded in the TradeYodha platform.
 
@@ -20,14 +17,7 @@ Rules:
 
 export async function POST(request: NextRequest) {
   try {
-    if (!DATABRICKS_HOST || DATABRICKS_HOST.includes('your-workspace')) {
-      return NextResponse.json(
-        { success: false, error: 'AI service is not configured' },
-        { status: 503 }
-      );
-    }
-
-    if (!DATABRICKS_TOKEN || DATABRICKS_TOKEN.includes('your-personal-access-token')) {
+    if (!ANTHROPIC_API_KEY) {
       return NextResponse.json(
         { success: false, error: 'AI service is not configured' },
         { status: 503 }
@@ -44,10 +34,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Build messages array for Foundation Model API (OpenAI-compatible)
-    const messages: { role: string; content: string }[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
-    ];
+    // Build messages array for Anthropic Messages API
+    const messages: { role: string; content: string }[] = [];
 
     // Add conversation history (last 10 turns)
     if (history && Array.isArray(history)) {
@@ -64,31 +52,31 @@ export async function POST(request: NextRequest) {
 
     const startTime = Date.now();
 
-    // Call Claude Haiku via Databricks Foundation Model API
-    const response = await fetch(
-      `${DATABRICKS_HOST}/serving-endpoints/${HAIKU_ENDPOINT}/invocations`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${DATABRICKS_TOKEN}`,
-        },
-        body: JSON.stringify({
-          messages,
-          max_tokens: 1000,
-        }),
-        signal: AbortSignal.timeout(30000), // 30s timeout (Haiku is fast)
-      }
-    );
+    // Call Anthropic API directly
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        system: SYSTEM_PROMPT,
+        messages,
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[AI Ask] Haiku error:', response.status, errorText);
+      console.error('[AI Ask] Anthropic error:', response.status, errorText);
 
       let errorMessage = 'AI service error';
       try {
         const errorJson = JSON.parse(errorText);
-        errorMessage = errorJson.error?.message || errorJson.message || `HTTP ${response.status}`;
+        errorMessage = errorJson.error?.message || `HTTP ${response.status}`;
       } catch {
         errorMessage = `HTTP ${response.status}`;
       }
@@ -102,23 +90,23 @@ export async function POST(request: NextRequest) {
     const data = await response.json();
     const elapsedMs = Date.now() - startTime;
 
-    // Databricks Foundation Model API returns OpenAI-compatible format:
-    // { choices: [{ message: { content: "..." } }] }
+    // Anthropic Messages API format:
+    // { content: [{ type: "text", text: "..." }], ... }
     let message = '';
 
-    if (data.choices?.[0]?.message?.content) {
-      message = data.choices[0].message.content;
-    } else if (data.content) {
-      // Fallback: direct content format
-      message = Array.isArray(data.content)
-        ? data.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n\n')
-        : typeof data.content === 'string' ? data.content : '';
+    if (data.content && Array.isArray(data.content)) {
+      message = data.content
+        .filter((b: any) => b.type === 'text')
+        .map((b: any) => b.text)
+        .join('\n\n');
+    } else if (typeof data.content === 'string') {
+      message = data.content;
     }
 
     if (!message || message.trim() === '') {
-      console.error('[AI Ask] Empty response from Haiku:', JSON.stringify(data).substring(0, 500));
+      console.error('[AI Ask] Empty response:', JSON.stringify(data).substring(0, 500));
       return NextResponse.json(
-        { success: false, error: 'Empty response from AI service' },
+        { success: false, error: 'Empty response from AI' },
         { status: 500 }
       );
     }

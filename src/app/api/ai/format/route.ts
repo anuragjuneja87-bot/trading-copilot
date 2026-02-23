@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const DATABRICKS_HOST = process.env.DATABRICKS_HOST;
-const DATABRICKS_TOKEN = process.env.DATABRICKS_TOKEN;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 
 // Template-specific data fetching configs
@@ -632,7 +631,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!DATABRICKS_HOST || !DATABRICKS_TOKEN) {
+    if (!ANTHROPIC_API_KEY) {
       return NextResponse.json(
         { success: false, error: 'AI service is not configured' },
         { status: 500 }
@@ -1125,25 +1124,24 @@ export async function POST(request: NextRequest) {
     }
 
     // ========================================
-    // STEP 3: Call Claude Haiku via Databricks
+    // STEP 3: Call Claude Haiku via Anthropic API
     // ========================================
     const startTime = Date.now();
 
-    const haikuResponse = await fetch(
-      `${DATABRICKS_HOST}/serving-endpoints/databricks-claude-haiku-4-5/invocations`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${DATABRICKS_TOKEN}`,
-        },
-        body: JSON.stringify({
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 1500,
-        }),
-        signal: AbortSignal.timeout(15000), // 15s hard timeout
-      }
-    );
+    const haikuResponse = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY!,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1500,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+      signal: AbortSignal.timeout(15000), // 15s hard timeout
+    });
 
     if (!haikuResponse.ok) {
       const errText = await haikuResponse.text();
@@ -1153,16 +1151,16 @@ export async function POST(request: NextRequest) {
 
     const haikuData = await haikuResponse.json();
 
-    // Databricks Foundation Model API returns OpenAI-compatible format:
-    // { choices: [{ message: { content: "..." } }] }
+    // Anthropic Messages API format:
+    // { content: [{ type: "text", text: "..." }] }
     let narrative = '';
-    if (haikuData.choices?.[0]?.message?.content) {
-      narrative = haikuData.choices[0].message.content;
-    } else if (haikuData.content) {
-      // Fallback: direct content array format
-      narrative = Array.isArray(haikuData.content)
-        ? haikuData.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n\n')
-        : typeof haikuData.content === 'string' ? haikuData.content : '';
+    if (haikuData.content && Array.isArray(haikuData.content)) {
+      narrative = haikuData.content
+        .filter((b: any) => b.type === 'text')
+        .map((b: any) => b.text)
+        .join('\n\n');
+    } else if (typeof haikuData.content === 'string') {
+      narrative = haikuData.content;
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -1191,7 +1189,7 @@ export async function POST(request: NextRequest) {
       );
     }
     return NextResponse.json(
-      { success: false, error: 'An error occurred' },
+      { success: false, error: "An error occurred" || 'Failed to format analysis' },
       { status: 500 }
     );
   }

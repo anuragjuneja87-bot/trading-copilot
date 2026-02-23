@@ -51,14 +51,16 @@ export async function POST(request: NextRequest) {
 
     // Call Databricks Claude Haiku
     const response = await fetch(
-      `${process.env.DATABRICKS_HOST}/serving-endpoints/databricks-claude-haiku-4-5/invocations`,
+      'https://api.anthropic.com/v1/messages',
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${process.env.DATABRICKS_TOKEN}`,
+          'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+          'anthropic-version': '2023-06-01',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
           messages: [
             { role: 'system', content: SYSTEM_PROMPT },
             { role: 'user', content: context },
@@ -75,7 +77,7 @@ export async function POST(request: NextRequest) {
     }
 
     const data = await response.json();
-    const insight = data.choices?.[0]?.message?.content || null;
+    const insight = data.content?.[0]?.text || null;
 
     return NextResponse.json({
       success: true,
@@ -90,7 +92,7 @@ export async function POST(request: NextRequest) {
     console.error('Flow insight error:', error);
     return NextResponse.json({
       success: false,
-      error: 'An error occurred',
+      error: "An error occurred" || 'Failed to generate insight',
     }, { status: 500 });
   }
 }
