@@ -19,7 +19,7 @@ interface ThesisData {
   error?: string;
 }
 
-/** ML prediction shape from B→C pipeline (same as /api/ml/predict) */
+/** ML prediction shape from B→C pipeline */
 interface MLPredictionContext {
   move_probability: number;
   has_signal: boolean;
@@ -28,7 +28,29 @@ interface MLPredictionContext {
   signal_strength: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
 }
 
-// Helper: extract text from Databricks response (same logic as /api/ai/ask)
+/* ──────────────────────────────────────────────────────────
+   YODHA SYSTEM PROMPT — Unified persona
+   ────────────────────────────────────────────────────────── */
+
+const YODHA_SYSTEM_PROMPT = `You are Yodha, a senior trading analyst at an institutional desk. You analyze real-time market data and deliver clear, actionable trading theses. You never hedge with "this is not financial advice." You speak with conviction when the data supports it, and with appropriate caution when it doesn't.
+
+Your analysis is grounded in:
+1. ML model output (move probability, direction, confidence)
+2. Options flow data (institutional positioning)
+3. Dark pool activity (smart money accumulation/distribution)
+4. Gamma exposure levels (key support/resistance)
+5. Relative strength (sector context)
+6. News sentiment (catalyst awareness)
+
+Structure your response as:
+- CONFIDENCE: One sentence summarizing signal strength and direction
+- THESIS: 2-3 sentences explaining what the data is showing
+- SETUP: Entry, targets, and stop levels based on key levels
+- RISK: What would invalidate this thesis
+
+Be specific. Use the actual price levels from the data. Never invent numbers. If data is missing, say so briefly and focus on what IS available.`;
+
+// Helper: extract text from Databricks response
 function extractTextFromDatabricksResponse(data: unknown): string {
   const TEXT_TYPES = ['text', 'output_text'];
 
@@ -60,9 +82,7 @@ function extractTextFromDatabricksResponse(data: unknown): string {
           }
         }
       }
-      if (texts.length > 0) {
-        return texts[texts.length - 1];
-      }
+      if (texts.length > 0) return texts[texts.length - 1];
     }
   }
 
@@ -87,17 +107,13 @@ function extractTextFromDatabricksResponse(data: unknown): string {
       const t = extractFromContentArray(content);
       if (t) return t;
     }
-    if (typeof content === 'string' && content.trim()) {
-      return content.trim();
-    }
+    if (typeof content === 'string' && content.trim()) return content.trim();
   }
 
   // Format 3: direct text field
   if (data && typeof data === 'object' && 'text' in data) {
     const text = (data as any).text;
-    if (typeof text === 'string' && text.trim()) {
-      return text.trim();
-    }
+    if (typeof text === 'string' && text.trim()) return text.trim();
   }
 
   // Format 4: choices array (OpenAI-like)
@@ -108,13 +124,9 @@ function extractTextFromDatabricksResponse(data: unknown): string {
     }
   }
 
-  // Fallback: stringify
+  // Fallback
   if (typeof data === 'string') return data;
-  try {
-    return JSON.stringify(data);
-  } catch {
-    return '';
-  }
+  try { return JSON.stringify(data); } catch { return ''; }
 }
 
 function parseThesisResponse(text: string, ticker?: string): Partial<ThesisData> {
@@ -125,71 +137,44 @@ function parseThesisResponse(text: string, ticker?: string): Partial<ThesisData>
   if (verdictMatch) {
     parsed.verdict = verdictMatch[2].toUpperCase() as 'BUY' | 'SELL' | 'WAIT' | 'HOLD';
   } else {
-    // Fallback: look for BUY/SELL/WAIT in bold or caps
     const verdictFallback = text.match(/\b(BUY|SELL|WAIT|HOLD)\b/);
-    if (verdictFallback) {
-      parsed.verdict = verdictFallback[1].toUpperCase() as 'BUY' | 'SELL' | 'WAIT' | 'HOLD';
-    }
+    if (verdictFallback) parsed.verdict = verdictFallback[1].toUpperCase() as 'BUY' | 'SELL' | 'WAIT' | 'HOLD';
   }
 
-  // Extract levels - look for dollar amounts with context
-  const dollarPattern = /\$(\d+\.?\d*)/g;
-  const matches = [...text.matchAll(dollarPattern)];
-  
-  // Look for keywords near dollar amounts
-  const supportMatch = text.match(
-    /(?:support|sup\b|S:)[^0-9$]{0,20}\$?(\d+\.?\d*)/i
-  );
-  if (supportMatch) {
-    parsed.support = `$${supportMatch[1]}`;
-  }
+  // Extract levels
+  const supportMatch = text.match(/(?:support|sup\b|S:)[^0-9$]{0,20}\$?(\d+\.?\d*)/i);
+  if (supportMatch) parsed.support = `$${supportMatch[1]}`;
 
-  const resistanceMatch = text.match(
-    /(?:resistance|res\b|R:)[^0-9$]{0,20}\$?(\d+\.?\d*)/i
-  );
-  if (resistanceMatch) {
-    parsed.resistance = `$${resistanceMatch[1]}`;
-  }
+  const resistanceMatch = text.match(/(?:resistance|res\b|R:)[^0-9$]{0,20}\$?(\d+\.?\d*)/i);
+  if (resistanceMatch) parsed.resistance = `$${resistanceMatch[1]}`;
 
-  // Extract Entry - more flexible patterns
+  // Entry
   const entryPatterns = [
     /(?:entry|Entry|ENTRY|buy zone|entry zone|buy around|enter at|enter near|entry price|entry level)[:\s-]*\$?(\d+\.?\d*)/i,
-    /entry[:\s]*\$?(\d+\.?\d*)/i,
-    /(?:^|\n)\s*3\.?\s*(?:entry|Entry)[:\s-]*\$?(\d+\.?\d*)/i,
     /entry[:\s]*\$(\d+\.?\d*)/i,
     /entry\s+at\s+\$?(\d+\.?\d*)/i,
     /entry\s+around\s+\$?(\d+\.?\d*)/i,
   ];
   for (const pattern of entryPatterns) {
     const match = text.match(pattern);
-    if (match && match[1]) {
-      parsed.entry = `$${match[1]}`;
-      break;
-    }
+    if (match && match[1]) { parsed.entry = `$${match[1]}`; break; }
   }
 
-  // Extract Target - more flexible patterns
+  // Target
   const targetPatterns = [
     /(?:target|Target|TARGET|pt\b|price target|take profit|tp\b|target price|target level)[:\s-]*\$?(\d+\.?\d*)/i,
-    /target[:\s]*\$?(\d+\.?\d*)/i,
-    /(?:^|\n)\s*4\.?\s*(?:target|Target)[:\s-]*\$?(\d+\.?\d*)/i,
     /target[:\s]*\$(\d+\.?\d*)/i,
     /target\s+at\s+\$?(\d+\.?\d*)/i,
     /target\s+of\s+\$?(\d+\.?\d*)/i,
   ];
   for (const pattern of targetPatterns) {
     const match = text.match(pattern);
-    if (match && match[1]) {
-      parsed.target = `$${match[1]}`;
-      break;
-    }
+    if (match && match[1]) { parsed.target = `$${match[1]}`; break; }
   }
 
-  // Extract Stop - more flexible patterns
+  // Stop
   const stopPatterns = [
     /(?:stop|Stop|STOP|stop loss|Stop Loss|\bsl\b|stop at|stop below|stop above|stop price|stop level)[:\s-]*\$?(\d+\.?\d*)/i,
-    /stop[:\s]*\$?(\d+\.?\d*)/i,
-    /(?:^|\n)\s*5\.?\s*(?:stop|Stop|stop loss)[:\s-]*\$?(\d+\.?\d*)/i,
     /stop[:\s]*\$(\d+\.?\d*)/i,
     /stop\s+at\s+\$?(\d+\.?\d*)/i,
     /stop\s+below\s+\$?(\d+\.?\d*)/i,
@@ -197,15 +182,11 @@ function parseThesisResponse(text: string, ticker?: string): Partial<ThesisData>
   ];
   for (const pattern of stopPatterns) {
     const match = text.match(pattern);
-    if (match && match[1]) {
-      parsed.stop = `$${match[1]}`;
-      break;
-    }
+    if (match && match[1]) { parsed.stop = `$${match[1]}`; break; }
   }
 
-  // Fallback: Try to extract from structured format (Entry: $X, Target: $Y, Stop: $Z)
+  // Fallback structured
   if (!parsed.entry || !parsed.target || !parsed.stop) {
-    // Look for patterns like "Entry: $190, Target: $195, Stop: $185"
     const structuredMatch = text.match(/(?:entry|Entry)[:\s]*\$?(\d+\.?\d*).*?(?:target|Target)[:\s]*\$?(\d+\.?\d*).*?(?:stop|Stop)[:\s]*\$?(\d+\.?\d*)/i);
     if (structuredMatch) {
       if (!parsed.entry) parsed.entry = `$${structuredMatch[1]}`;
@@ -214,60 +195,56 @@ function parseThesisResponse(text: string, ticker?: string): Partial<ThesisData>
     }
   }
 
-  // Additional fallback: Find dollar amounts near keywords (within 30 characters)
+  // Line-by-line fallback
   if (!parsed.entry || !parsed.target || !parsed.stop) {
     const lines = text.split(/\n/);
     for (const line of lines) {
       const lowerLine = line.toLowerCase();
-      
-      // Check for entry
       if (!parsed.entry && (lowerLine.includes('entry') || lowerLine.includes('enter'))) {
         const dollarMatch = line.match(/\$(\d+\.?\d*)/);
-        if (dollarMatch) {
-          parsed.entry = `$${dollarMatch[1]}`;
-        }
+        if (dollarMatch) parsed.entry = `$${dollarMatch[1]}`;
       }
-      
-      // Check for target
       if (!parsed.target && (lowerLine.includes('target') || lowerLine.includes('take profit') || lowerLine.includes('tp'))) {
         const dollarMatch = line.match(/\$(\d+\.?\d*)/);
-        if (dollarMatch) {
-          parsed.target = `$${dollarMatch[1]}`;
-        }
+        if (dollarMatch) parsed.target = `$${dollarMatch[1]}`;
       }
-      
-      // Check for stop
       if (!parsed.stop && (lowerLine.includes('stop') || lowerLine.includes('stop loss') || lowerLine.includes('sl'))) {
         const dollarMatch = line.match(/\$(\d+\.?\d*)/);
-        if (dollarMatch) {
-          parsed.stop = `$${dollarMatch[1]}`;
-        }
+        if (dollarMatch) parsed.stop = `$${dollarMatch[1]}`;
       }
     }
   }
 
-  // Debug logging (can be removed in production)
-  if (!parsed.entry || !parsed.target || !parsed.stop) {
-    console.log(`[Thesis Parse] Missing values for ${ticker || 'unknown'}:`, {
-      entry: parsed.entry,
-      target: parsed.target,
-      stop: parsed.stop,
-      support: parsed.support,
-      resistance: parsed.resistance,
-      textPreview: text.substring(0, 200),
-    });
+  // Support/Resistance fallback for entry/target/stop
+  if ((!parsed.entry || !parsed.target || !parsed.stop) && parsed.support && parsed.resistance) {
+    const supportNum = parseFloat(parsed.support.replace('$', ''));
+    const resistanceNum = parseFloat(parsed.resistance.replace('$', ''));
+    if (!isNaN(supportNum) && !isNaN(resistanceNum)) {
+      const verdict = parsed.verdict || 'WAIT';
+      if (verdict === 'BUY') {
+        if (!parsed.entry) parsed.entry = `$${(supportNum + (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
+        if (!parsed.target) parsed.target = `$${(resistanceNum - (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
+        if (!parsed.stop) parsed.stop = `$${(supportNum - (resistanceNum - supportNum) * 0.05).toFixed(2)}`;
+      } else if (verdict === 'SELL') {
+        if (!parsed.entry) parsed.entry = `$${(resistanceNum - (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
+        if (!parsed.target) parsed.target = `$${(supportNum + (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
+        if (!parsed.stop) parsed.stop = `$${(resistanceNum + (resistanceNum - supportNum) * 0.05).toFixed(2)}`;
+      } else {
+        const midpoint = (supportNum + resistanceNum) / 2;
+        if (!parsed.entry) parsed.entry = `$${midpoint.toFixed(2)}`;
+        if (!parsed.target) parsed.target = `$${resistanceNum.toFixed(2)}`;
+        if (!parsed.stop) parsed.stop = `$${supportNum.toFixed(2)}`;
+      }
+    }
   }
 
-  // Extract reasoning - look for "reasoning", "because", or take first sentence
+  // Reasoning
   const reasoningMatch = text.match(/(?:reasoning|Reasoning|REASONING|because|Because)[:\s]*(.+?)(?:\n|$)/i);
   if (reasoningMatch) {
     parsed.reasoning = reasoningMatch[1].trim().substring(0, 150);
   } else {
-    // Fallback: take first sentence after verdict
     const sentences = text.split(/[.!?]\s+/);
-    if (sentences.length > 0) {
-      parsed.reasoning = sentences[0].substring(0, 150);
-    }
+    if (sentences.length > 0) parsed.reasoning = sentences[0].substring(0, 150);
   }
 
   return parsed;
@@ -299,22 +276,26 @@ async function generateThesisForTicker(
   const mlContext = prediction ? buildMLContext(prediction) : '';
   const prompt = `${mlContext}Give me a concise day trading thesis for ${ticker} today. You MUST format your response exactly as follows:
 
+CONFIDENCE: [one sentence summarizing signal strength and direction]
+THESIS: [2-3 sentences explaining what the data is showing]
+SETUP:
+  Entry: $[price]
+  Target 1: $[price] (level name)
+  Target 2: $[price] (level name)
+  Stop: $[price] (level name)
+RISK: [what would invalidate this thesis]
+
 VERDICT: [BUY/SELL/WAIT]
 Support: $[price]
 Resistance: $[price]
-Entry: $[price]
-Target: $[price]
-Stop: $[price]
-Reasoning: [one sentence explanation]
 
-IMPORTANT: You must provide Entry, Target, and Stop prices. If VERDICT is BUY, Entry should be near support, Target should be near resistance, and Stop should be below support. If VERDICT is SELL, Entry should be near resistance, Target should be near support, and Stop should be above resistance. If VERDICT is WAIT, provide reasonable levels based on current price action.
+IMPORTANT: You must provide Entry, Target, and Stop prices. Be specific. Use actual price levels. Never invent numbers. If data is missing, say so briefly.
 
-Keep it under 100 words.`;
+Keep it under 150 words.`;
 
   try {
-    // Call Databricks endpoint
     const endpointUrl = `${DATABRICKS_HOST}/serving-endpoints/${DATABRICKS_ENDPOINT}/invocations`;
-    
+
     const response = await fetch(endpointUrl, {
       method: 'POST',
       headers: {
@@ -323,10 +304,8 @@ Keep it under 100 words.`;
       },
       body: JSON.stringify({
         input: [
-          {
-            role: 'user',
-            content: prompt,
-          },
+          { role: 'system', content: YODHA_SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
         ],
       }),
       signal: AbortSignal.timeout(DATABRICKS_TIMEOUT),
@@ -337,69 +316,24 @@ Keep it under 100 words.`;
     }
 
     const data = await response.json();
-
-    // Reuse the same robust extraction logic as /api/ai/ask
     const fullTextRaw = extractTextFromDatabricksResponse(data);
-
-    // Treat null / empty as an error so UI shows a clear message instead of "null"
     const fullText = fullTextRaw && fullTextRaw.trim().toLowerCase() !== 'null'
       ? fullTextRaw.trim()
       : '';
 
-    if (!fullText) {
-      throw new Error('Empty response from AI service for this ticker');
-    }
+    if (!fullText) throw new Error('Empty response from AI service for this ticker');
 
-    // Parse the response
     const parsed = parseThesisResponse(fullText, ticker);
 
-    // Fallback: If Entry/Target/Stop are missing but Support/Resistance exist, calculate them
-    if ((!parsed.entry || !parsed.target || !parsed.stop) && parsed.support && parsed.resistance) {
-      const supportNum = parseFloat(parsed.support.replace('$', ''));
-      const resistanceNum = parseFloat(parsed.resistance.replace('$', ''));
-      
-      if (!isNaN(supportNum) && !isNaN(resistanceNum)) {
-        const verdict = parsed.verdict || 'WAIT';
-        
-        if (verdict === 'BUY') {
-          // For BUY: Entry near support, Target near resistance, Stop below support
-          if (!parsed.entry) parsed.entry = `$${(supportNum + (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
-          if (!parsed.target) parsed.target = `$${(resistanceNum - (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
-          if (!parsed.stop) parsed.stop = `$${(supportNum - (resistanceNum - supportNum) * 0.05).toFixed(2)}`;
-        } else if (verdict === 'SELL') {
-          // For SELL: Entry near resistance, Target near support, Stop above resistance
-          if (!parsed.entry) parsed.entry = `$${(resistanceNum - (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
-          if (!parsed.target) parsed.target = `$${(supportNum + (resistanceNum - supportNum) * 0.1).toFixed(2)}`;
-          if (!parsed.stop) parsed.stop = `$${(resistanceNum + (resistanceNum - supportNum) * 0.05).toFixed(2)}`;
-        } else {
-          // For WAIT/HOLD: Use midpoint logic
-          const midpoint = (supportNum + resistanceNum) / 2;
-          if (!parsed.entry) parsed.entry = `$${midpoint.toFixed(2)}`;
-          if (!parsed.target) parsed.target = `$${resistanceNum.toFixed(2)}`;
-          if (!parsed.stop) parsed.stop = `$${supportNum.toFixed(2)}`;
-        }
-      }
-    }
-
-    return {
-      ticker,
-      ...parsed,
-      fullResponse: fullText,
-    };
+    return { ticker, ...parsed, fullResponse: fullText };
   } catch (error: any) {
     console.error(`Error generating thesis for ${ticker}:`, error);
-    return {
-      ticker,
-      fullResponse: '',
-      error: error.message || 'Failed to generate thesis',
-    };
+    return { ticker, fullResponse: '', error: error.message || 'Failed to generate thesis' };
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // No auth required for personal use
-
     const body = await request.json();
     const { tickers, warRoomData, prediction } = body as {
       tickers: string[];
@@ -408,35 +342,21 @@ export async function POST(request: NextRequest) {
     };
 
     if (!tickers || !Array.isArray(tickers) || tickers.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'Tickers array is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'Tickers array is required' }, { status: 400 });
     }
 
     if (tickers.length > 20) {
-      return NextResponse.json(
-        { success: false, error: 'Maximum 20 tickers allowed' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'Maximum 20 tickers allowed' }, { status: 400 });
     }
 
-    // Validate Databricks configuration
     if (!DATABRICKS_HOST || DATABRICKS_HOST.includes('your-workspace')) {
-      return NextResponse.json(
-        { success: false, error: 'Databricks configuration is missing' },
-        { status: 500 }
-      );
+      return NextResponse.json({ success: false, error: 'Databricks configuration is missing' }, { status: 500 });
     }
 
     if (!DATABRICKS_TOKEN || DATABRICKS_TOKEN.includes('your-personal-access-token')) {
-      return NextResponse.json(
-        { success: false, error: 'Databricks token is missing' },
-        { status: 500 }
-      );
+      return NextResponse.json({ success: false, error: 'Databricks token is missing' }, { status: 500 });
     }
 
-    // Generate thesis for each ticker; pass prediction/warRoomData for single-ticker context
     const theses: ThesisData[] = [];
     const useContext = tickers.length === 1 && (prediction != null || warRoomData != null);
 
@@ -452,16 +372,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      data: {
-        generatedAt: new Date().toISOString(),
-        theses,
-      },
+      data: { generatedAt: new Date().toISOString(), theses },
     });
   } catch (error: any) {
     console.error('Thesis API error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to generate thesis report' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message || 'Failed to generate thesis report' }, { status: 500 });
   }
 }
