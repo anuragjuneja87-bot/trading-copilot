@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils';
 
-export type Timeframe = '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
+export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
 
 export const DEFAULT_TIMEFRAME: Timeframe = '15m';
 
@@ -13,6 +13,8 @@ interface TimeframeSelectorProps {
 }
 
 const TIMEFRAMES: { value: Timeframe; label: string }[] = [
+  { value: '1m', label: '1M' },
+  { value: '5m', label: '5M' },
   { value: '15m', label: '15M' },
   { value: '30m', label: '30M' },
   { value: '1h', label: '1H' },
@@ -51,6 +53,7 @@ export function TimeframeSelector({ value, onChange, className }: TimeframeSelec
 // Helper: Convert timeframe to milliseconds for API queries
 export function getTimeframeMs(tf: Timeframe): number {
   switch (tf) {
+    case '1m': return 1 * 60 * 1000;
     case '5m': return 5 * 60 * 1000;
     case '15m': return 15 * 60 * 1000;
     case '30m': return 30 * 60 * 1000;
@@ -95,6 +98,7 @@ export function getTimeframeRange(tf: Timeframe): {
   
   // For hours/minutes, simple subtraction
   const labels: Record<string, string> = {
+    '1m': 'Last 1 min',
     '5m': 'Last 5 min',
     '15m': 'Last 15 min',
     '30m': 'Last 30 min',
@@ -115,7 +119,7 @@ const MARKET_HOLIDAYS = [
   '2024-06-19', '2024-07-04', '2024-09-02', '2024-11-28', '2024-12-25',
   '2025-01-01', '2025-01-20', '2025-02-17', '2025-04-18', '2025-05-26',
   '2025-06-19', '2025-07-04', '2025-09-01', '2025-11-27', '2025-12-25',
-  '2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25', // Feb 16 = President's Day
+  '2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25',
   '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
 ];
 
@@ -219,6 +223,10 @@ export function getAdjustedTimeframeRange(tf: Timeframe): TimeframeRangeResult {
   let label: string;
   
   switch (tf) {
+    case '1m':
+      from = endTime - 1 * 60 * 1000;
+      label = isMarketOpen ? 'Last 1 min' : `Last 1 min (${tradingDayStr})`;
+      break;
     case '5m':
       from = endTime - 5 * 60 * 1000;
       label = isMarketOpen ? 'Last 5 min' : `Last 5 min (${tradingDayStr})`;

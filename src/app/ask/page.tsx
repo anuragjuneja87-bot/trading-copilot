@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useWatchlistStore } from '@/stores';
 import { useWarRoomData } from '@/hooks/use-war-room-data';
+import { useMLPrediction } from '@/hooks/use-ml-prediction';
 import { calculateConfidence } from '@/lib/confidence-calculator';
 import { COLORS } from '@/lib/echarts-theme';
 import { ArrowLeft, RefreshCw, Search } from 'lucide-react';
@@ -21,6 +22,7 @@ import { TradingViewPanel } from '@/components/ask/tradingview-panel';
 import { VolumePressurePanel } from '@/components/ask/volume-pressure-panel';
 import { RelativeStrengthPanel } from '@/components/ask/relative-strength-panel';
 import { AIThesisPanel } from '@/components/ask/ai-thesis-panel';
+import { MLSignalPanel } from '@/components/ask/ml-signal-panel';
 import { FearGreedGauge } from '@/components/pulse/fear-greed-gauge';
 import { 
   TimeframeSelector, 
@@ -57,6 +59,9 @@ function AskPageContent() {
 
   // Unified data hook (includes marketSession, preMarketData, relativeStrength)
   const data = useWarRoomData(selectedTicker || '', timeframeParams);
+
+  // ML prediction (lifted so we can pass to thesis API when needed)
+  const mlResult = useMLPrediction(selectedTicker || '', data);
   
   // Volume pressure (separate fetch)
   const [volumePressure, setVolumePressure] = useState<number | undefined>(undefined);
@@ -142,6 +147,20 @@ function AskPageContent() {
               {data.levels?.vwap && <LevelRow label="VWAP" value={data.levels.vwap} color={COLORS.cyan} currentPrice={data.price} />}
             </div>
             <GexContext price={data.price} gexFlip={data.levels?.gexFlip || null} />
+          </div>
+          
+          {/* ML Signal Panel */}
+          <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
+            <MLSignalPanel
+              ticker={selectedTicker}
+              warRoomData={data}
+              prediction={mlResult.prediction}
+              isLoading={mlResult.isLoading}
+              error={mlResult.error}
+              meta={mlResult.meta}
+              refresh={mlResult.refresh}
+              lastUpdate={mlResult.lastUpdate}
+            />
           </div>
           
           <div className="flex-1 overflow-y-auto p-3">
@@ -341,7 +360,7 @@ function AskPageContent() {
               {/* Row 4: Relative Strength + News */}
               <div className="grid grid-cols-2 gap-3 h-[400px]">
                 <div className="h-full overflow-hidden">
-                  <RelativeStrengthPanel ticker={selectedTicker} />
+                  <RelativeStrengthPanel ticker={selectedTicker} timeframeRange={timeframeRange}/>
                 </div>
                 <div className="h-full overflow-hidden">
                   <NewsSentimentPanel

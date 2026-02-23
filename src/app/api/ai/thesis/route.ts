@@ -19,6 +19,15 @@ interface ThesisData {
   error?: string;
 }
 
+/** ML prediction shape from B→C pipeline (same as /api/ml/predict) */
+interface MLPredictionContext {
+  move_probability: number;
+  has_signal: boolean;
+  direction: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  direction_confidence: number;
+  signal_strength: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+}
+
 // Helper: extract text from Databricks response (same logic as /api/ai/ask)
 function extractTextFromDatabricksResponse(data: unknown): string {
   const TEXT_TYPES = ['text', 'output_text'];
@@ -264,8 +273,31 @@ function parseThesisResponse(text: string, ticker?: string): Partial<ThesisData>
   return parsed;
 }
 
-async function generateThesisForTicker(ticker: string): Promise<ThesisData> {
-  const prompt = `Give me a concise day trading thesis for ${ticker} today. You MUST format your response exactly as follows:
+function buildMLContext(prediction: MLPredictionContext): string {
+  const movePct = (prediction.move_probability * 100).toFixed(1);
+  const signalLine = prediction.has_signal
+    ? `${prediction.signal_strength} ${prediction.direction}`
+    : 'NO SIGNAL (below 80% threshold)';
+  const dirConfPct = (prediction.direction_confidence * 100).toFixed(0);
+  const instruction = prediction.has_signal
+    ? `The ML model detects a ${prediction.signal_strength.toLowerCase()}-confidence ${prediction.direction.toLowerCase()} signal. Factor this into your analysis but also consider whether the flow data, dark pool activity, and options positioning confirm or contradict this signal.`
+    : `The ML model does not detect a significant move. Focus your analysis on the current flow data and positioning without asserting strong directional conviction.`;
+  return `
+ML MODEL SIGNAL (LightGBM B→C Pipeline):
+- Move Probability: ${movePct}%
+- Signal: ${signalLine}
+- Direction Confidence: ${dirConfPct}%
+${instruction}
+`;
+}
+
+async function generateThesisForTicker(
+  ticker: string,
+  prediction?: MLPredictionContext | null,
+  _warRoomData?: any
+): Promise<ThesisData> {
+  const mlContext = prediction ? buildMLContext(prediction) : '';
+  const prompt = `${mlContext}Give me a concise day trading thesis for ${ticker} today. You MUST format your response exactly as follows:
 
 VERDICT: [BUY/SELL/WAIT]
 Support: $[price]
@@ -368,7 +400,12 @@ export async function POST(request: NextRequest) {
   try {
     // No auth required for personal use
 
-    const { tickers } = await request.json();
+    const body = await request.json();
+    const { tickers, warRoomData, prediction } = body as {
+      tickers: string[];
+      warRoomData?: any;
+      prediction?: MLPredictionContext | null;
+    };
 
     if (!tickers || !Array.isArray(tickers) || tickers.length === 0) {
       return NextResponse.json(
@@ -399,11 +436,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate thesis for each ticker
+    // Generate thesis for each ticker; pass prediction/warRoomData for single-ticker context
     const theses: ThesisData[] = [];
-    
-    for (const ticker of tickers) {
-      const thesis = await generateThesisForTicker(ticker.toUpperCase());
+    const useContext = tickers.length === 1 && (prediction != null || warRoomData != null);
+
+    for (let i = 0; i < tickers.length; i++) {
+      const ticker = tickers[i].toUpperCase();
+      const thesis = await generateThesisForTicker(
+        ticker,
+        useContext ? prediction ?? null : undefined,
+        useContext ? warRoomData : undefined
+      );
       theses.push(thesis);
     }
 

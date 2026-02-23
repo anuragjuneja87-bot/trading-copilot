@@ -916,8 +916,19 @@ function calculateEnhancedStats(trades: EnhancedOptionTrade[]): EnhancedFlowStat
     .sort((a, b) => (b.callPremium + b.putPremium) - (a.callPremium + a.putPremium))
     .slice(0, 15);
   
-  // Time series (5-min buckets)
-  const bucketSize = 5 * 60 * 1000;
+  // Time series - dynamic bucket size based on data range
+  const tradeTimeRange = trades.length > 1 
+    ? trades[trades.length - 1].timestampMs - trades[0].timestampMs 
+    : 30 * 60 * 1000;
+  const tradeRangeMinutes = tradeTimeRange / (60 * 1000);
+  const bucketMinutes = tradeRangeMinutes <= 1 ? 1
+    : tradeRangeMinutes <= 5 ? 1
+    : tradeRangeMinutes <= 15 ? 1
+    : tradeRangeMinutes <= 30 ? 2
+    : tradeRangeMinutes <= 60 ? 5
+    : tradeRangeMinutes <= 240 ? 5
+    : 15;
+  const bucketSize = bucketMinutes * 60 * 1000;
   const timeBuckets = new Map<number, FlowTimeSeries>();
   let runningCDAF = 0;
   
@@ -926,7 +937,7 @@ function calculateEnhancedStats(trades: EnhancedOptionTrade[]): EnhancedFlowStat
   sortedTrades.forEach(t => {
     const bucket = Math.floor(t.timestampMs / bucketSize) * bucketSize;
     const existing = timeBuckets.get(bucket) || {
-      time: new Date(bucket).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      time: new Date(bucket).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' }),
       timeMs: bucket,
       callPremium: 0,
       putPremium: 0,

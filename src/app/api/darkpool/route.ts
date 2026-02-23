@@ -156,11 +156,24 @@ function calculateDarkPoolStats(prints: DarkPoolPrint[]): DarkPoolStats {
     printCount: number;
   }>();
 
-  const bucketSize = 15 * 60 * 1000;
+  // Dynamic bucket size based on data time range
+  const printTimes = prints.map(p => p.timestampMs);
+  const timeRangeMs = printTimes.length > 1 
+    ? Math.max(...printTimes) - Math.min(...printTimes)
+    : 60 * 60 * 1000; // default 1 hour if single print
+  const rangeMinutes = timeRangeMs / (60 * 1000);
+  const dpBucketMinutes = rangeMinutes <= 1 ? 1
+    : rangeMinutes <= 5 ? 1
+    : rangeMinutes <= 15 ? 1
+    : rangeMinutes <= 30 ? 5
+    : rangeMinutes <= 60 ? 5
+    : rangeMinutes <= 240 ? 15
+    : 15;
+  const bucketSize = dpBucketMinutes * 60 * 1000;
   prints.forEach(p => {
     const bucket = Math.floor(p.timestampMs / bucketSize) * bucketSize;
     const existing = timeBuckets.get(bucket) || {
-      time: new Date(bucket).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      time: new Date(bucket).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' }),
       timeMs: bucket,
       bullishValue: 0,
       bearishValue: 0,

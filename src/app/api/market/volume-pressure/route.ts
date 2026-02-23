@@ -158,7 +158,7 @@ export async function GET(request: NextRequest) {
         const date = new Date(key);
         const total = value.buyVolume + value.sellVolume;
         return {
-          time: date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+          time: date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }),
           timeMs: value.timeMs,
           buyVolume: Math.round(value.buyVolume),
           sellVolume: Math.round(value.sellVolume),

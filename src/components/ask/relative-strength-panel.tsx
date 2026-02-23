@@ -7,6 +7,13 @@ import { TrendingUp, TrendingDown, Minus, Activity } from 'lucide-react';
 
 interface RelativeStrengthPanelProps {
   ticker: string;
+  timeframeRange?: {
+    from: number;
+    to: number;
+    label: string;
+    isMarketClosed?: boolean;
+    tradingDay?: string;
+  };
 }
 
 interface RSSummary {
@@ -30,7 +37,7 @@ interface RSDataPoint {
   rsVsQqq: number;
 }
 
-export function RelativeStrengthPanel({ ticker }: RelativeStrengthPanelProps) {
+export function RelativeStrengthPanel({ ticker, timeframeRange }: RelativeStrengthPanelProps) {
   const [data, setData] = useState<RSDataPoint[]>([]);
   const [summary, setSummary] = useState<RSSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,10 +71,51 @@ export function RelativeStrengthPanel({ ticker }: RelativeStrengthPanelProps) {
     return () => clearInterval(interval);
   }, [ticker]);
 
+  // Filter data to timeframe window (always fetch full day, filter client-side)
+  const filteredData = useMemo(() => {
+    if (!data.length || !timeframeRange) return data;
+    return data.filter(d => d.timeMs >= timeframeRange.from && d.timeMs <= timeframeRange.to);
+  }, [data, timeframeRange]);
+
+  // Recompute summary for the filtered window
+  const filteredSummary = useMemo((): RSSummary | null => {
+    if (!filteredData.length || !summary) return summary;
+    // If no timeframe filter or showing all data, use original summary
+    if (!timeframeRange || filteredData.length === data.length) return summary;
+
+    const last = filteredData[filteredData.length - 1];
+    const first = filteredData[0];
+    // Compute change within the window (not from open)
+    const tickerChange = last.tickerPct - first.tickerPct;
+    const spyChange = last.spyPct - first.spyPct;
+    const qqqChange = last.qqqPct - first.qqqPct;
+    const rsVsSpy = Math.round((tickerChange - spyChange) * 100) / 100;
+    const rsVsQqq = Math.round((tickerChange - qqqChange) * 100) / 100;
+    const avgRS = (rsVsSpy + rsVsQqq) / 2;
+
+    let regime: string;
+    if (avgRS > 1.5) regime = 'STRONG_OUTPERFORM';
+    else if (avgRS > 0.5) regime = 'OUTPERFORM';
+    else if (avgRS > -0.5) regime = 'INLINE';
+    else if (avgRS > -1.5) regime = 'UNDERPERFORM';
+    else regime = 'STRONG_UNDERPERFORM';
+
+    return {
+      tickerChange: Math.round(tickerChange * 100) / 100,
+      spyChange: Math.round(spyChange * 100) / 100,
+      qqqChange: Math.round(qqqChange * 100) / 100,
+      rsVsSpy,
+      rsVsQqq,
+      corrSpy: summary.corrSpy, // keep full-day correlation
+      corrQqq: summary.corrQqq,
+      regime,
+    };
+  }, [filteredData, data, summary, timeframeRange]);
+
   const chartOption = useMemo(() => {
-    if (!data.length) return {};
+    if (!filteredData.length) return {};
     
-    const times = data.map(d => d.time);
+    const times = filteredData.map(d => d.time);
     
     return {
       backgroundColor: 'transparent',
@@ -152,7 +200,7 @@ export function RelativeStrengthPanel({ ticker }: RelativeStrengthPanelProps) {
         {
           name: ticker,
           type: 'line',
-          data: data.map(d => Math.round(d.tickerPct * 100) / 100),
+          data: filteredData.map(d => Math.round(d.tickerPct * 100) / 100),
           smooth: true,
           lineStyle: { width: 2.5, color: COLORS.cyan },
           itemStyle: { color: COLORS.cyan },
@@ -162,7 +210,7 @@ export function RelativeStrengthPanel({ ticker }: RelativeStrengthPanelProps) {
         {
           name: 'SPY',
           type: 'line',
-          data: data.map(d => Math.round(d.spyPct * 100) / 100),
+          data: filteredData.map(d => Math.round(d.spyPct * 100) / 100),
           smooth: true,
           lineStyle: { width: 1.5, color: COLORS.green, type: 'dashed' },
           itemStyle: { color: COLORS.green },
@@ -172,7 +220,7 @@ export function RelativeStrengthPanel({ ticker }: RelativeStrengthPanelProps) {
         {
           name: 'QQQ',
           type: 'line',
-          data: data.map(d => Math.round(d.qqqPct * 100) / 100),
+          data: filteredData.map(d => Math.round(d.qqqPct * 100) / 100),
           smooth: true,
           lineStyle: { width: 1.5, color: '#a855f7', type: 'dashed' },
           itemStyle: { color: '#a855f7' },
@@ -181,12 +229,12 @@ export function RelativeStrengthPanel({ ticker }: RelativeStrengthPanelProps) {
         },
       ],
     };
-  }, [data, ticker]);
+  }, [filteredData, ticker]);
 
   // Regime display
   const regimeConfig = useMemo(() => {
-    if (!summary) return { label: '—', color: '#888', bg: 'rgba(255,255,255,0.05)', icon: Minus };
-    switch (summary.regime) {
+    if (!filteredSummary) return { label: '—', color: '#888', bg: 'rgba(255,255,255,0.05)', icon: Minus };
+    switch (filteredSummary.regime) {
       case 'STRONG_OUTPERFORM': return { label: 'STRONG LEADER', color: COLORS.green, bg: 'rgba(0,230,118,0.12)', icon: TrendingUp };
       case 'OUTPERFORM': return { label: 'OUTPERFORMING', color: COLORS.green, bg: 'rgba(0,230,118,0.08)', icon: TrendingUp };
       case 'INLINE': return { label: 'IN LINE', color: '#ffc107', bg: 'rgba(255,193,7,0.08)', icon: Minus };
@@ -194,7 +242,7 @@ export function RelativeStrengthPanel({ ticker }: RelativeStrengthPanelProps) {
       case 'STRONG_UNDERPERFORM': return { label: 'STRONG LAGGARD', color: COLORS.red, bg: 'rgba(255,82,82,0.12)', icon: TrendingDown };
       default: return { label: '—', color: '#888', bg: 'rgba(255,255,255,0.05)', icon: Minus };
     }
-  }, [summary]);
+  }, [filteredSummary]);
 
   const RegimeIcon = regimeConfig.icon;
 
@@ -214,13 +262,13 @@ export function RelativeStrengthPanel({ ticker }: RelativeStrengthPanelProps) {
       </div>
       
       {/* Stats row */}
-      {summary && (
+      {filteredSummary && (
         <div className="grid grid-cols-5 gap-2 px-4 py-2 border-b" style={{ borderColor: COLORS.cardBorder }}>
-          <StatBox label={ticker} value={`${summary.tickerChange >= 0 ? '+' : ''}${summary.tickerChange.toFixed(2)}%`} color={summary.tickerChange >= 0 ? COLORS.green : COLORS.red} />
-          <StatBox label="SPY" value={`${summary.spyChange >= 0 ? '+' : ''}${summary.spyChange.toFixed(2)}%`} color={summary.spyChange >= 0 ? COLORS.green : COLORS.red} />
-          <StatBox label="RS vs SPY" value={`${summary.rsVsSpy >= 0 ? '+' : ''}${summary.rsVsSpy.toFixed(2)}%`} color={summary.rsVsSpy >= 0 ? COLORS.green : COLORS.red} highlight />
-          <StatBox label="RS vs QQQ" value={`${summary.rsVsQqq >= 0 ? '+' : ''}${summary.rsVsQqq.toFixed(2)}%`} color={summary.rsVsQqq >= 0 ? COLORS.green : COLORS.red} highlight />
-          <StatBox label="Corr SPY" value={summary.corrSpy.toFixed(2)} color={Math.abs(summary.corrSpy) > 0.7 ? COLORS.cyan : '#888'} />
+          <StatBox label={ticker} value={`${filteredSummary.tickerChange >= 0 ? '+' : ''}${filteredSummary.tickerChange.toFixed(2)}%`} color={filteredSummary.tickerChange >= 0 ? COLORS.green : COLORS.red} />
+          <StatBox label="SPY" value={`${filteredSummary.spyChange >= 0 ? '+' : ''}${filteredSummary.spyChange.toFixed(2)}%`} color={filteredSummary.spyChange >= 0 ? COLORS.green : COLORS.red} />
+          <StatBox label="RS vs SPY" value={`${filteredSummary.rsVsSpy >= 0 ? '+' : ''}${filteredSummary.rsVsSpy.toFixed(2)}%`} color={filteredSummary.rsVsSpy >= 0 ? COLORS.green : COLORS.red} highlight />
+          <StatBox label="RS vs QQQ" value={`${filteredSummary.rsVsQqq >= 0 ? '+' : ''}${filteredSummary.rsVsQqq.toFixed(2)}%`} color={filteredSummary.rsVsQqq >= 0 ? COLORS.green : COLORS.red} highlight />
+          <StatBox label="Corr SPY" value={filteredSummary.corrSpy.toFixed(2)} color={Math.abs(filteredSummary.corrSpy) > 0.7 ? COLORS.cyan : '#888'} />
         </div>
       )}
       
@@ -230,8 +278,8 @@ export function RelativeStrengthPanel({ ticker }: RelativeStrengthPanelProps) {
           <div className="flex items-center justify-center h-full text-gray-500 text-sm">Loading relative strength data...</div>
         ) : error ? (
           <div className="flex items-center justify-center h-full text-red-400 text-sm">{error}</div>
-        ) : data.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-gray-500 text-sm">No data available</div>
+        ) : filteredData.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-gray-500 text-sm">No data for this timeframe</div>
         ) : (
           <ReactECharts option={chartOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'canvas' }} />
         )}
