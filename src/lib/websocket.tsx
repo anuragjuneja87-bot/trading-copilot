@@ -111,8 +111,8 @@ export function WebSocketProvider({ children, apiKey }: WebSocketProviderProps) 
 
   const connect = useCallback(() => {
     if (!apiKey) {
-      console.warn('[WebSocket] No API key provided, skipping connection. Set NEXT_PUBLIC_POLYGON_API_KEY in .env');
-      setError('No API key provided');
+      console.warn('[WebSocket] No API key provided, skipping connection. Waiting for key from /api/ws/token');
+      setError('Waiting for connection key');
       return;
     }
 
