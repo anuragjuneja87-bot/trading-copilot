@@ -201,7 +201,8 @@ function buildNewsSummary(news: any[], ticker: string): PanelSummary {
   if (!news || news.length === 0) return { text: null, color: '#555' };
 
   const tickerSpecific = news.filter((n: any) =>
-    (n.title || n.headline || '').toLowerCase().includes(ticker.toLowerCase())
+    (n.title || n.headline || '').toLowerCase().includes(ticker.toLowerCase()) ||
+    (n.tickers && Array.isArray(n.tickers) && n.tickers.includes(ticker.toUpperCase()))
   ).length;
 
   const positiveWords = ['surge', 'rally', 'gain', 'beat', 'upgrade', 'bull', 'growth', 'record', 'soar', 'jump'];

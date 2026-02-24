@@ -1006,7 +1006,12 @@ function buildNewsSignal(ticker: string, news: any[]): SupportingSignal {
 
   const tickerSpecific = news.filter(n => {
     const title = (n.title || n.headline || '').toLowerCase();
-    return title.includes(ticker.toLowerCase());
+    const tLower = ticker.toLowerCase();
+    // Check headline text
+    if (title.includes(tLower)) return true;
+    // Check tickers array from Polygon API
+    if (n.tickers && Array.isArray(n.tickers) && n.tickers.includes(ticker.toUpperCase())) return true;
+    return false;
   });
   const hasSpecificNews = tickerSpecific.length > 0;
 
