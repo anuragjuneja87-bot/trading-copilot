@@ -168,14 +168,16 @@ export function useMLPrediction(
     // Don't fetch if war room is still loading
     if (warRoomData.isLoading) return;
 
+    const isMarketOpen = warRoomData.marketSession === 'open';
+
+    // Skip ML during pre-market/closed — model needs intraday data
+    if (!isMarketOpen) return;
+
     // Fetch on initial load
     fetchPrediction();
 
     // Auto-refresh every 60s during market hours
-    const isMarketOpen = warRoomData.marketSession === 'open';
-    const refreshInterval = isMarketOpen ? 60000 : 300000; // 1min vs 5min
-
-    const interval = setInterval(fetchPrediction, refreshInterval);
+    const interval = setInterval(fetchPrediction, 60000);
     return () => clearInterval(interval);
   }, [ticker, fetchPrediction, warRoomData?.isLoading, warRoomData?.marketSession]);
 

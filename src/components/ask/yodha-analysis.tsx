@@ -262,7 +262,7 @@ export function YodhaAnalysis({
               {thesis.oneLiner}
             </p>
 
-            {mlError && !mlPrediction && (
+            {mlError && !mlPrediction && marketSession === 'open' && (
               <p className="text-[10px] text-amber-500/70 mt-1">{mlError}</p>
             )}
           </div>
