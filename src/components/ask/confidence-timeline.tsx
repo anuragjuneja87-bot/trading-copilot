@@ -456,71 +456,55 @@ export function ConfidenceTimeline({
 }
 
 /* ──────────────────────────────────────────────────────────
-   HISTORY MANAGER — localStorage persistence
+   HISTORY MANAGER — Server-side API persistence
    ────────────────────────────────────────────────────────── */
 
-const STORAGE_PREFIX = 'yodha-tl-v2'; // v2 = weighted directional score
-const MIN_INTERVAL_MS = 5000; // Min 5s between points
+const DIR_MAP: Record<string, number> = { 'BEARISH': 0, 'NEUTRAL': 1, 'BULLISH': 2 };
+const DIR_REVERSE: Record<number, 'BEARISH' | 'NEUTRAL' | 'BULLISH'> = { 0: 'BEARISH', 1: 'NEUTRAL', 2: 'BULLISH' };
 
-function getStorageKey(ticker: string): string {
-  const today = new Date().toISOString().slice(0, 10);
-  return `${STORAGE_PREFIX}-${ticker}-${today}`;
-}
-
-export function loadTimelineHistory(ticker: string): TimelinePoint[] {
+/**
+ * Fetch full day's timeline from server
+ */
+export async function fetchTimelineHistory(ticker: string): Promise<TimelinePoint[]> {
   try {
-    const key = getStorageKey(ticker);
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    // Filter out invalid 0-confidence points from before signals loaded
-    return Array.isArray(parsed) ? parsed.filter((p: any) => p.confidence > 0) : [];
-  } catch {
+    const res = await fetch(`/api/timeline/${encodeURIComponent(ticker)}`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    // Map compact server format → TimelinePoint
+    return (data.points || [])
+      .filter((p: any) => p.s > 0) // Skip 0-confidence
+      .map((p: any) => ({
+        time: p.t,
+        confidence: p.s,
+        direction: DIR_REVERSE[p.d] || 'NEUTRAL',
+        bullCount: p.bc || 0,
+        bearCount: p.brc || 0,
+        neutralCount: 0,
+      }));
+  } catch (e) {
+    console.error('[Timeline] Fetch error:', e);
     return [];
   }
 }
 
-export function saveTimelineHistory(ticker: string, history: TimelinePoint[]): void {
-  try {
-    const key = getStorageKey(ticker);
-    // Cap at 2000 points (~16hrs at 30s intervals)
-    const capped = history.length > 2000 ? history.slice(-2000) : history;
-    localStorage.setItem(key, JSON.stringify(capped));
-  } catch { /* storage full */ }
-}
-
-export function appendTimelinePoint(
+/**
+ * POST a new point to the server timeline
+ * Fire-and-forget (non-blocking)
+ */
+export function postTimelinePoint(
   ticker: string,
-  existing: TimelinePoint[],
   point: TimelinePoint,
-): TimelinePoint[] {
-  // Deduplicate: skip if last point is too recent
-  const last = existing[existing.length - 1];
-  if (last && (point.time - last.time) < MIN_INTERVAL_MS) {
-    return existing;
-  }
-  
-  const next = [...existing, point];
-  saveTimelineHistory(ticker, next);
-  return next;
-}
-
-// Clean up old days
-export function cleanOldTimelines(): void {
-  try {
-    const today = new Date().toISOString().slice(0, 10);
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const k = localStorage.key(i);
-      if (!k) continue;
-      // Remove ALL old v1 data (stale 50% algorithm)
-      if (k.startsWith('yodha-timeline')) {
-        localStorage.removeItem(k);
-        continue;
-      }
-      // Remove expired v2 data (not today)
-      if (k.startsWith(STORAGE_PREFIX) && !k.endsWith(today)) {
-        localStorage.removeItem(k);
-      }
-    }
-  } catch { /* ignore */ }
+): void {
+  fetch(`/api/timeline/${encodeURIComponent(ticker)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      score: point.confidence,
+      direction: DIR_MAP[point.direction] ?? 1,
+      bullCount: point.bullCount || 0,
+      bearCount: point.bearCount || 0,
+    }),
+  }).catch(() => { /* fire and forget */ });
 }

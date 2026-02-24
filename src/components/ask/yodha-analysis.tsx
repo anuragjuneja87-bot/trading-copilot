@@ -9,7 +9,7 @@ import {
   ChevronDown, ChevronRight, Send, Loader2, Shield,
   BarChart3, Zap, MessageSquare, RefreshCw
 } from 'lucide-react';
-import { ConfidenceTimeline, loadTimelineHistory, appendTimelinePoint, cleanOldTimelines, type TimelinePoint } from './confidence-timeline';
+import { ConfidenceTimeline, fetchTimelineHistory, postTimelinePoint, type TimelinePoint } from './confidence-timeline';
 import type { ConfidencePoint } from '@/hooks/use-ml-prediction';
 
 /* ──────────────────────────────────────────────────────────
@@ -191,14 +191,26 @@ export function YodhaAnalysis({
   const moveProbability = mlConfidence !== null ? mlConfidence : signalStrength;
   const isMLBacked = mlConfidence !== null;
 
-  // ── Confidence Timeline: persistent history with localStorage ──
+  // ── Confidence Timeline: SERVER-SIDE persistence ──
   const [timelineHistory, setTimelineHistory] = useState<TimelinePoint[]>([]);
   
-  // Load history from localStorage on mount / ticker change
+  // Signal counts for the confluence bar (moved up — needed by timeline recorder)
+  const activeSignals = signals.filter(s => s.bias !== 'NO_DATA');
+  const bullCount = activeSignals.filter(s => s.bias === 'BULLISH').length;
+  const bearCount = activeSignals.filter(s => s.bias === 'BEARISH').length;
+  const neutralCount = activeSignals.filter(s => s.bias === 'NEUTRAL').length;
+  const noDataCount = signals.filter(s => s.bias === 'NO_DATA').length;
+
+  // ── Confidence Timeline: SERVER-SIDE persistence ──
+  const [timelineHistory, setTimelineHistory] = useState<TimelinePoint[]>([]);
+  
+  // Load full day's history from server on mount / ticker change
   useEffect(() => {
-    const saved = loadTimelineHistory(ticker);
-    setTimelineHistory(saved);
-    cleanOldTimelines();
+    let cancelled = false;
+    fetchTimelineHistory(ticker).then(points => {
+      if (!cancelled) setTimelineHistory(points);
+    });
+    return () => { cancelled = true; };
   }, [ticker]);
 
   // The direction shown on timeline uses weighted score when ML unavailable
@@ -214,33 +226,48 @@ export function YodhaAnalysis({
     };
   }, [moveProbability, effectiveDirection, bullCount, bearCount, neutralCount]);
 
-  // Record on every signal change (skip 0-confidence initial render)
+  // Last recorded timestamp to avoid duplicates
+  const lastRecordedRef = useRef(0);
+
+  // Record on signal change + POST to server
   useEffect(() => {
     if (marketSession !== 'open' || moveProbability === 0) return;
+    const now = Date.now();
+    if (now - lastRecordedRef.current < 5000) return; // 5s min gap
+    lastRecordedRef.current = now;
+
     const point: TimelinePoint = {
-      time: Date.now(),
+      time: now,
       confidence: moveProbability,
       direction: effectiveDirection,
       bullCount, bearCount, neutralCount,
     };
-    setTimelineHistory(prev => appendTimelinePoint(ticker, prev, point));
+    // Update local chart immediately
+    setTimelineHistory(prev => [...prev, point]);
+    // POST to server (fire-and-forget)
+    postTimelinePoint(ticker, point);
   }, [moveProbability, effectiveDirection, marketSession, ticker, bullCount, bearCount, neutralCount]);
 
-  // ALSO record periodically (every 30s) even when signals are stable
+  // Periodic recording every 30s (even when signals are stable)
   useEffect(() => {
     if (marketSession !== 'open') return;
     const interval = setInterval(() => {
       const v = latestValuesRef.current;
-      if (v.moveProbability === 0) return; // Skip if signals haven't loaded
+      if (v.moveProbability === 0) return;
+      const now = Date.now();
+      if (now - lastRecordedRef.current < 10000) return; // 10s min for interval
+      lastRecordedRef.current = now;
+
       const point: TimelinePoint = {
-        time: Date.now(),
+        time: now,
         confidence: v.moveProbability,
         direction: v.bias,
         bullCount: v.bullCount,
         bearCount: v.bearCount,
         neutralCount: v.neutralCount,
       };
-      setTimelineHistory(prev => appendTimelinePoint(ticker, prev, point));
+      setTimelineHistory(prev => [...prev, point]);
+      postTimelinePoint(ticker, point);
     }, 30000);
     return () => clearInterval(interval);
   }, [marketSession, ticker]);
@@ -250,13 +277,6 @@ export function YodhaAnalysis({
   const biasColor = displayDirection === 'BULLISH' ? COLORS.green
     : displayDirection === 'BEARISH' ? COLORS.red
     : '#ffc107';
-
-  // Signal counts for the confluence bar
-  const activeSignals = signals.filter(s => s.bias !== 'NO_DATA');
-  const bullCount = activeSignals.filter(s => s.bias === 'BULLISH').length;
-  const bearCount = activeSignals.filter(s => s.bias === 'BEARISH').length;
-  const neutralCount = activeSignals.filter(s => s.bias === 'NEUTRAL').length;
-  const noDataCount = signals.filter(s => s.bias === 'NO_DATA').length;
 
   return (
     <div
