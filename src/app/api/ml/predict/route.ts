@@ -23,6 +23,9 @@ const ML_HOST = process.env.DATABRICKS_ML_HOST;
 const ML_TOKEN = process.env.DATABRICKS_ML_TOKEN;
 const ML_ENDPOINT = process.env.DATABRICKS_ML_ENDPOINT || 'tradeyodha-prediction';
 
+// Vercel Pro: allow up to 60s for ML cold starts
+export const maxDuration = 60;
+
 // ─── Types ───────────────────────────────────────────────────────────
 
 interface PredictRequest {
@@ -112,7 +115,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PredictRespon
         body: JSON.stringify({
           dataframe_records: [cleanedFeatures],
         }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(45000),
       });
 
       // If the standard format returns 400, try the "input" format
@@ -131,7 +134,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PredictRespon
           body: JSON.stringify({
             input: cleanedFeatures,
           }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(45000),
         });
       }
     } catch (fetchErr: any) {
@@ -209,7 +212,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PredictRespon
 
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
       return NextResponse.json(
-        { success: false, error: 'ML prediction timed out (15s)' },
+        { success: false, error: 'ML prediction timed out (45s)' },
         { status: 504 }
       );
     }

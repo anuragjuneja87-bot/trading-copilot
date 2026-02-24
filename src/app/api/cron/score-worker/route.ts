@@ -5,6 +5,9 @@ import {
   getTodayET, timelineKey, thesisKey, isMarketOpen,
 } from '@/lib/redis';
 
+// Vercel Pro: allow up to 60s for processing 8 tickers
+export const maxDuration = 60;
+
 /* ──────────────────────────────────────────────────────────
    CRON WORKER — Server-side bias score computation
    
@@ -32,6 +35,8 @@ interface TimelinePoint {
   d: number;    // direction: 0=BEAR, 1=NEUTRAL, 2=BULL
   bc: number;   // bull count
   brc: number;  // bear count
+  bp: number;   // bull pressure 0-100
+  brp: number;  // bear pressure 0-100
 }
 
 // Thesis snapshot for analytics/retraining
@@ -60,8 +65,20 @@ const MIN_INTERVAL_MS = 30000; // 30s between points
 function verifyCron(request: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) return true; // No secret configured = allow (dev mode)
+  
+  // Check Authorization header (Bearer token)
   const auth = request.headers.get('authorization');
-  return auth === `Bearer ${cronSecret}`;
+  if (auth === `Bearer ${cronSecret}`) return true;
+  
+  // Check Vercel cron header
+  const vercelCron = request.headers.get('x-vercel-cron');
+  if (vercelCron) return true; // Vercel cron is trusted
+  
+  // Check query parameter (for external schedulers like cron-job.org)
+  const { searchParams } = new URL(request.url);
+  if (searchParams.get('key') === cronSecret) return true;
+  
+  return false;
 }
 
 // ── Data fetchers (direct Polygon API) ──────────────────
@@ -240,6 +257,8 @@ async function processTicker(ticker: string): Promise<{
       d: DIR_MAP[result.direction] ?? 1,
       bc: flow ? (flow.callRatio > 60 ? 1 : 0) + (dp && dp.bullishPct > 55 ? 1 : 0) : 0,
       brc: flow ? (flow.callRatio < 40 ? 1 : 0) + (dp && dp.bullishPct < 45 ? 1 : 0) : 0,
+      bp: result.bullPressure,
+      brp: result.bearPressure,
     };
 
     existing.push(point);

@@ -122,7 +122,7 @@ export function YodhaAnalysis({
 
   // ── WEIGHTED DIRECTIONAL BIAS SCORE ──
   // Uses shared scoring algorithm (same as server-side cron worker)
-  const { biasScore, biasDirection } = useMemo(() => {
+  const { biasScore, biasDirection, bullPressure, bearPressure } = useMemo(() => {
     const result = computeBiasScore({
       callRatio: flowStats?.callRatio,
       sweepRatio: flowStats?.sweepRatio,
@@ -139,7 +139,12 @@ export function YodhaAnalysis({
       callWall: levels.callWall ?? undefined,
       putWall: levels.putWall ?? undefined,
     });
-    return { biasScore: result.score, biasDirection: result.direction };
+    return {
+      biasScore: result.score,
+      biasDirection: result.direction,
+      bullPressure: result.bullPressure,
+      bearPressure: result.bearPressure,
+    };
   }, [flowStats, darkPoolStats, levels, price, volumePressure, changePercent, relativeStrength]);
 
   const signalStrength = biasScore;  // Alias for compatibility
@@ -172,12 +177,14 @@ export function YodhaAnalysis({
   // Ref to always have latest values for the interval recorder
   const latestValuesRef = useRef({
     moveProbability, bias: effectiveDirection, bullCount, bearCount, neutralCount,
+    bullPressure, bearPressure,
   });
   useEffect(() => {
     latestValuesRef.current = {
       moveProbability, bias: effectiveDirection, bullCount, bearCount, neutralCount,
+      bullPressure, bearPressure,
     };
-  }, [moveProbability, effectiveDirection, bullCount, bearCount, neutralCount]);
+  }, [moveProbability, effectiveDirection, bullCount, bearCount, neutralCount, bullPressure, bearPressure]);
 
   // Last recorded timestamp to avoid duplicates
   const lastRecordedRef = useRef(0);
@@ -194,12 +201,11 @@ export function YodhaAnalysis({
       confidence: moveProbability,
       direction: effectiveDirection,
       bullCount, bearCount, neutralCount,
+      bullPressure, bearPressure,
     };
-    // Update local chart immediately
     setTimelineHistory(prev => [...prev, point]);
-    // POST to server (fire-and-forget)
     postTimelinePoint(ticker, point);
-  }, [moveProbability, effectiveDirection, marketSession, ticker, bullCount, bearCount, neutralCount]);
+  }, [moveProbability, effectiveDirection, marketSession, ticker, bullCount, bearCount, neutralCount, bullPressure, bearPressure]);
 
   // Periodic recording every 30s (even when signals are stable)
   useEffect(() => {
@@ -218,6 +224,8 @@ export function YodhaAnalysis({
         bullCount: v.bullCount,
         bearCount: v.bearCount,
         neutralCount: v.neutralCount,
+        bullPressure: v.bullPressure,
+        bearPressure: v.bearPressure,
       };
       setTimelineHistory(prev => [...prev, point]);
       postTimelinePoint(ticker, point);
@@ -338,7 +346,12 @@ export function YodhaAnalysis({
       <div className="px-4 pb-3">
         <div className="rounded-lg overflow-hidden" style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid rgba(255,255,255,0.04)' }}>
           <div className="flex items-center justify-between px-3 pt-2">
-            <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>Bias Timeline</span>
+            <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>
+              <span style={{ color: COLORS.green }}>▲ Bull</span>
+              {' vs '}
+              <span style={{ color: COLORS.red }}>▼ Bear</span>
+              {' Pressure'}
+            </span>
             <span className="text-[9px] font-mono" style={{ color: 'rgba(255,255,255,0.2)' }}>{timelineHistory.length > 0 ? `${timelineHistory.length} pts` : 'Tracking...'}</span>
           </div>
           <ConfidenceTimeline history={timelineHistory} height={140} marketSession={marketSession} ticker={ticker} />

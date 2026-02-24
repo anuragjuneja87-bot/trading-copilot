@@ -1,15 +1,16 @@
-# New files
+# Scoring algorithm
 cp ~/Downloads/bias-score.ts src/lib/bias-score.ts
-cp ~/Downloads/redis.ts src/lib/redis.ts
-mkdir -p src/app/api/cron/score-worker
+
+# Chart component (full rewrite)
+cp ~/Downloads/confidence-timeline.tsx src/components/ask/confidence-timeline.tsx
+cp ~/Downloads/yodha-analysis.tsx src/components/ask/yodha-analysis.tsx
+
+# APIs
+cp ~/Downloads/timeline-route.ts src/app/api/timeline/\[ticker\]/route.ts
 cp ~/Downloads/score-worker-route.ts src/app/api/cron/score-worker/route.ts
-mkdir -p src/app/api/thesis-history/\[ticker\]
-cp ~/Downloads/thesis-history-route.ts src/app/api/thesis-history/\[ticker\]/route.ts
+cp ~/Downloads/ml-predict-route.ts src/app/api/ml/predict/route.ts
+
+# Vercel cron (every minute, Pro)
 cp ~/Downloads/vercel.json vercel.json
 
-# Updated files
-cp ~/Downloads/yodha-analysis.tsx src/components/ask/yodha-analysis.tsx
-cp ~/Downloads/confidence-timeline.tsx src/components/ask/confidence-timeline.tsx
-cp ~/Downloads/page.tsx src/app/ask/page.tsx
-
-git add -A && git commit -m "feat: cron worker for continuous bias scoring, thesis storage for retraining" && git push
+git add -A && git commit -m "feat: dual bull/bear pressure chart, amplified scoring, ML 60s timeout" && git push

@@ -15,6 +15,8 @@ interface TimelinePoint {
   d: number;    // direction: 0=BEAR, 1=NEUTRAL, 2=BULL
   bc: number;   // bull count
   brc: number;  // bear count
+  bp: number;   // bull pressure (0-100)
+  brp: number;  // bear pressure (0-100)
 }
 
 // ── Storage Backend ─────────────────────────────────────
@@ -114,14 +116,14 @@ export async function POST(
   const { ticker } = await params;
   const key = getDayKey(ticker);
 
-  let body: { score: number; direction: number; bullCount: number; bearCount: number };
+  let body: { score: number; direction: number; bullCount: number; bearCount: number; bullPressure?: number; bearPressure?: number };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { score, direction, bullCount, bearCount } = body;
+  const { score, direction, bullCount, bearCount, bullPressure, bearPressure } = body;
   if (score == null || direction == null) {
     return NextResponse.json({ error: 'Missing score or direction' }, { status: 400 });
   }
@@ -132,6 +134,8 @@ export async function POST(
     d: direction,
     bc: bullCount || 0,
     brc: bearCount || 0,
+    bp: bullPressure ?? 0,
+    brp: bearPressure ?? 0,
   };
 
   // Load existing

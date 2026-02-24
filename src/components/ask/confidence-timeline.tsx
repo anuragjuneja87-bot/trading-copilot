@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
+import { useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { ConfidencePoint } from '@/hooks/use-ml-prediction';
 import { COLORS } from '@/lib/echarts-theme';
@@ -13,6 +13,8 @@ export interface TimelinePoint extends ConfidencePoint {
   bullCount?: number;
   bearCount?: number;
   neutralCount?: number;
+  bullPressure?: number;   // 0-100
+  bearPressure?: number;   // 0-100
 }
 
 interface ConfidenceTimelineProps {
@@ -26,19 +28,14 @@ interface ConfidenceTimelineProps {
    HELPERS
    ────────────────────────────────────────────────────────── */
 
-// Format ET time from a Date object
 function formatET(date: Date): string {
   return date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
+    hour: 'numeric', minute: '2-digit', hour12: true,
     timeZone: 'America/New_York',
   });
 }
 
-// Get today's market session boundaries in UTC ms
-function getSessionBounds(): { preOpen: number; marketOpen: number; marketClose: number } {
-  // Get today's date string in ET timezone
+function getSessionBounds(): { marketOpen: number; marketClose: number } {
   const now = new Date();
   const etFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
@@ -49,396 +46,326 @@ function getSessionBounds(): { preOpen: number; marketOpen: number; marketClose:
   const m = parseInt(parts.find(p => p.type === 'month')?.value || '1');
   const d = parseInt(parts.find(p => p.type === 'day')?.value || '1');
   
-  // Determine if currently EDT or EST by checking ET hour vs UTC hour
   const etHourStr = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    hour: 'numeric', hour12: false,
+    timeZone: 'America/New_York', hour: 'numeric', hour12: false,
   }).format(now);
   const etHour = parseInt(etHourStr);
   const utcHour = now.getUTCHours();
-  const etOffset = utcHour - etHour; // 4 for EDT, 5 for EST
+  const etOffset = utcHour - etHour;
   const offsetHours = etOffset < 0 ? etOffset + 24 : etOffset;
   
-  // Create UTC timestamps for ET market hours
-  const preOpen = Date.UTC(y, m - 1, d, 4 + offsetHours, 0);   // 4:00 AM ET
-  const marketOpen = Date.UTC(y, m - 1, d, 9 + offsetHours, 30); // 9:30 AM ET  
-  const marketClose = Date.UTC(y, m - 1, d, 16 + offsetHours, 0); // 4:00 PM ET
-  
-  return { preOpen, marketOpen, marketClose };
+  const marketOpen = Date.UTC(y, m - 1, d, 9 + offsetHours, 30);
+  const marketClose = Date.UTC(y, m - 1, d, 16 + offsetHours, 0);
+  return { marketOpen, marketClose };
 }
 
-// Detect flip points where direction changes
-function detectFlips(history: TimelinePoint[]): Array<{
+// Detect crossover points where bull/bear pressure swaps dominance
+interface Crossover {
   time: number;
-  from: string;
-  to: string;
-  strength: number;
-}> {
-  const flips: Array<{ time: number; from: string; to: string; strength: number }> = [];
+  to: 'BULLISH' | 'BEARISH';
+  bullP: number;
+  bearP: number;
+}
+
+function detectCrossovers(history: TimelinePoint[]): Crossover[] {
+  const crosses: Crossover[] = [];
   for (let i = 1; i < history.length; i++) {
-    if (history[i].direction !== history[i - 1].direction && 
-        history[i].direction !== 'NEUTRAL' && 
-        history[i - 1].direction !== 'NEUTRAL') {
-      flips.push({
-        time: history[i].time,
-        from: history[i - 1].direction,
-        to: history[i].direction,
-        strength: history[i].confidence,
+    const prev = history[i - 1];
+    const curr = history[i];
+    const prevBull = prev.bullPressure ?? 0;
+    const prevBear = prev.bearPressure ?? 0;
+    const currBull = curr.bullPressure ?? 0;
+    const currBear = curr.bearPressure ?? 0;
+    
+    const prevDom = prevBull > prevBear ? 'BULL' : prevBear > prevBull ? 'BEAR' : 'TIE';
+    const currDom = currBull > currBear ? 'BULL' : currBear > currBull ? 'BEAR' : 'TIE';
+    
+    if (prevDom !== currDom && currDom !== 'TIE') {
+      crosses.push({
+        time: curr.time,
+        to: currDom === 'BULL' ? 'BULLISH' : 'BEARISH',
+        bullP: currBull,
+        bearP: currBear,
       });
     }
   }
-  return flips;
+  return crosses;
 }
 
-// Build colored background segments from history
-function buildBiasSegments(history: TimelinePoint[]): Array<{
-  start: number;
-  end: number;
-  direction: string;
-}> {
-  if (history.length === 0) return [];
-  
-  const segments: Array<{ start: number; end: number; direction: string }> = [];
-  let currentDir = history[0].direction;
-  let segStart = history[0].time;
-  
-  for (let i = 1; i < history.length; i++) {
-    if (history[i].direction !== currentDir) {
-      segments.push({ start: segStart, end: history[i].time, direction: currentDir });
-      currentDir = history[i].direction;
-      segStart = history[i].time;
-    }
-  }
-  // Close final segment
-  segments.push({ start: segStart, end: history[history.length - 1].time, direction: currentDir });
-  
-  return segments;
-}
+const DIR_MAP: Record<string, number> = { BEARISH: 0, NEUTRAL: 1, BULLISH: 2 };
+const DIR_REVERSE: Record<number, string> = { 0: 'BEARISH', 1: 'NEUTRAL', 2: 'BULLISH' };
+
+const STORAGE_PREFIX = 'yodha-tl-v3'; // v3 = dual pressure
+const MIN_INTERVAL_MS = 5000;
 
 /* ──────────────────────────────────────────────────────────
-   MAIN COMPONENT
+   COMPONENT
    ────────────────────────────────────────────────────────── */
 
-export function ConfidenceTimeline({
-  history,
-  height = 140,
-  marketSession,
-  ticker,
-}: ConfidenceTimelineProps) {
-  const chartRef = useRef<any>(null);
-
-  // Build ECharts option
+export function ConfidenceTimeline({ history, height = 160, marketSession, ticker }: ConfidenceTimelineProps) {
   const option = useMemo(() => {
-    // Filter out invalid points (confidence=0 from before signals loaded)
-    const validHistory = history.filter(h => h.confidence > 0);
-    if (validHistory.length < 1) return null;
+    // Filter out invalid points
+    const valid = history.filter(h => h.confidence > 0 || (h.bullPressure ?? 0) > 0 || (h.bearPressure ?? 0) > 0);
+    if (valid.length < 1) return null;
 
     const { marketOpen, marketClose } = getSessionBounds();
     const now = Date.now();
     
-    // If only 1 point, create a synthetic start 2min earlier so the line has length
-    const effectiveHistory = validHistory.length === 1
-      ? [{ ...validHistory[0], time: validHistory[0].time - 120000 }, validHistory[0]]
-      : validHistory;
+    // If only 1 point, synthesize a start
+    const eff = valid.length === 1
+      ? [{ ...valid[0], time: valid[0].time - 120000 }, valid[0]]
+      : valid;
     
-    // X-axis: start from 5min before first data point, end at now + buffer
-    const dataStart = effectiveHistory[0].time;
-    const xMin = dataStart - 5 * 60000; // 5 min padding before first point
-    const xMax = marketSession === 'open' 
-      ? Math.max(now + 2 * 60000, effectiveHistory[effectiveHistory.length - 1].time + 60000) 
+    // X-axis: start from 5min before first point
+    const xMin = eff[0].time - 5 * 60000;
+    const xMax = marketSession === 'open'
+      ? Math.max(now + 2 * 60000, eff[eff.length - 1].time + 60000)
       : marketClose;
-    
-    // Data: [time, confidence, directionCode] where 0=BEARISH, 1=NEUTRAL, 2=BULLISH
-    const lineData = effectiveHistory.map(h => [
-      h.time, 
-      h.confidence, 
-      h.direction === 'BULLISH' ? 2 : h.direction === 'BEARISH' ? 0 : 1,
-    ]);
-    
-    // Bias segments for colored background bands
-    const segments = buildBiasSegments(effectiveHistory);
-    const markAreaData = segments.map(seg => {
-      const color = seg.direction === 'BULLISH' ? COLORS.green
-        : seg.direction === 'BEARISH' ? COLORS.red
-        : '#ffc107';
-      return [{
-        xAxis: seg.start,
-        itemStyle: { 
-          color: {
-            type: 'linear',
-            x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: color + '12' },
-              { offset: 0.5, color: color + '06' },
-              { offset: 1, color: 'transparent' },
-            ],
-          },
-        },
-      }, {
-        xAxis: seg.end,
-      }];
-    });
 
-    // Detect flip points
-    const flips = detectFlips(effectiveHistory);
-    const flipMarkPoints = flips.map(flip => ({
-      coord: [flip.time, flip.strength],
-      symbol: flip.to === 'BULLISH' ? 'triangle' : 'pin',
-      symbolSize: flip.to === 'BULLISH' ? 14 : 12,
-      symbolRotate: flip.to === 'BEARISH' ? 180 : 0,
+    // Data series
+    const bullData = eff.map(h => [h.time, h.bullPressure ?? Math.max(0, (h.confidence - 50) * 2)]);
+    const bearData = eff.map(h => [h.time, h.bearPressure ?? Math.max(0, (50 - h.confidence) * 2)]);
+
+    // Detect crossovers
+    const crosses = detectCrossovers(eff);
+    const crossMarkPoints = crosses.map(c => ({
+      coord: [c.time, Math.max(c.bullP, c.bearP)],
+      symbol: c.to === 'BULLISH' ? 'triangle' : 'pin',
+      symbolSize: 14,
+      symbolRotate: c.to === 'BEARISH' ? 180 : 0,
       itemStyle: {
-        color: flip.to === 'BULLISH' ? COLORS.green : COLORS.red,
+        color: c.to === 'BULLISH' ? COLORS.green : COLORS.red,
         borderColor: 'rgba(6,8,16,0.9)',
         borderWidth: 1.5,
-        shadowColor: (flip.to === 'BULLISH' ? COLORS.green : COLORS.red) + '80',
+        shadowColor: (c.to === 'BULLISH' ? COLORS.green : COLORS.red) + '80',
         shadowBlur: 10,
       },
       label: {
         show: true,
-        formatter: flip.to === 'BULLISH' ? 'BULL FLIP' : 'BEAR FLIP',
-        color: flip.to === 'BULLISH' ? COLORS.green : COLORS.red,
+        formatter: c.to === 'BULLISH' ? 'BULL ✕' : 'BEAR ✕',
+        color: c.to === 'BULLISH' ? COLORS.green : COLORS.red,
         fontSize: 8,
-        fontWeight: 'bold',
+        fontWeight: 'bold' as const,
         fontFamily: "'Oxanium', monospace",
-        position: flip.to === 'BULLISH' ? 'top' : 'bottom',
-        distance: 10,
-        padding: [2, 4],
+        position: 'top' as const,
+        distance: 12,
+        padding: [2, 4] as [number, number],
         backgroundColor: 'rgba(6,8,16,0.85)',
         borderRadius: 2,
-        borderColor: (flip.to === 'BULLISH' ? COLORS.green : COLORS.red) + '40',
+        borderColor: (c.to === 'BULLISH' ? COLORS.green : COLORS.red) + '40',
         borderWidth: 1,
       },
     }));
-    
-    // Current value
-    const current = effectiveHistory[effectiveHistory.length - 1];
-    const currentColor = current.direction === 'BULLISH' ? COLORS.green
-      : current.direction === 'BEARISH' ? COLORS.red
-      : '#ffc107';
+
+    // Current values
+    const lastBull = bullData[bullData.length - 1]?.[1] ?? 0;
+    const lastBear = bearData[bearData.length - 1]?.[1] ?? 0;
+    const lastTime = eff[eff.length - 1].time;
+    const lastDir = eff[eff.length - 1].direction || 'NEUTRAL';
 
     return {
       animation: false,
       grid: {
-        top: 28,
-        right: 52,
-        bottom: 28,
-        left: 8,
-        containLabel: false,
-      },
-      // Color line segments by direction dimension
-      visualMap: {
-        show: false,
-        dimension: 2, // directionCode: 0=BEAR, 1=NEUTRAL, 2=BULL
-        pieces: [
-          { value: 0, color: COLORS.red },    // BEARISH
-          { value: 1, color: '#ffc107' },      // NEUTRAL
-          { value: 2, color: COLORS.green },   // BULLISH
-        ],
-        seriesIndex: 0, // Only apply to main line
-      },
-      tooltip: {
-        trigger: 'axis',
-        backgroundColor: 'rgba(6,8,16,0.95)',
-        borderColor: 'rgba(255,255,255,0.08)',
-        borderWidth: 1,
-        textStyle: {
-          color: '#e0e6f0',
-          fontFamily: "'Oxanium', monospace",
-          fontSize: 11,
-        },
-        formatter: (params: any) => {
-          const p = Array.isArray(params) ? params[0] : params;
-          if (!p || !p.data) return '';
-          const time = formatET(new Date(p.data[0]));
-          const val = p.data[0];
-          const match = effectiveHistory.find(h => Math.abs(h.time - val) < 30000);
-          const dir = match?.direction || 'NEUTRAL';
-          const dirColor = dir === 'BULLISH' ? COLORS.green : dir === 'BEARISH' ? COLORS.red : '#ffc107';
-          const bulls = match?.bullCount ?? '—';
-          const bears = match?.bearCount ?? '—';
-          return `<div style="min-width:150px">
-            <div style="font-size:10px;color:#8b99b0;margin-bottom:4px">${time} ET</div>
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
-              <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dirColor}"></span>
-              <span style="font-weight:700;color:${dirColor};font-size:12px">${dir}</span>
-              <span style="font-size:11px;color:#e0e6f0;margin-left:auto;font-weight:700">${p.data[1]}%</span>
-            </div>
-            <div style="font-size:10px;color:#6b7b8d;border-top:1px solid rgba(255,255,255,0.06);padding-top:4px;margin-top:4px">
-              <span style="color:${COLORS.green}">${bulls} bull</span> · <span style="color:${COLORS.red}">${bears} bear</span> signals
-            </div>
-          </div>`;
-        },
-        axisPointer: {
-          type: 'cross',
-          lineStyle: { color: 'rgba(0,229,255,0.2)', type: 'dashed' },
-          crossStyle: { color: 'rgba(0,229,255,0.15)' },
-          label: {
-            backgroundColor: 'rgba(6,8,16,0.9)',
-            borderColor: 'rgba(0,229,255,0.2)',
-            color: '#e0e6f0',
-            fontFamily: "'Oxanium', monospace",
-            fontSize: 9,
-            formatter: (params: any) => {
-              if (params.axisDimension === 'x') return formatET(new Date(params.value));
-              return `${Math.round(params.value)}%`;
-            },
-          },
-        },
+        top: 20, bottom: 32, left: 42, right: 90,
       },
       xAxis: {
-        type: 'time',
+        type: 'time' as const,
         min: xMin,
         max: xMax,
         axisLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
         axisTick: { show: false },
+        splitLine: { show: false },
         axisLabel: {
-          color: '#4a6070',
+          color: 'rgba(255,255,255,0.25)',
           fontSize: 9,
           fontFamily: "'Oxanium', monospace",
           formatter: (val: number) => formatET(new Date(val)),
         },
-        splitLine: { show: false },
       },
       yAxis: {
-        type: 'value',
+        type: 'value' as const,
         min: 0,
         max: 100,
         interval: 25,
         axisLine: { show: false },
         axisTick: { show: false },
+        splitLine: {
+          lineStyle: { color: 'rgba(255,255,255,0.04)', type: 'dashed' as const },
+        },
         axisLabel: {
-          color: '#3a4a5a',
+          color: 'rgba(255,255,255,0.2)',
           fontSize: 9,
           fontFamily: "'Oxanium', monospace",
           formatter: '{value}%',
         },
-        splitLine: {
-          lineStyle: { color: 'rgba(255,255,255,0.03)' },
+      },
+      tooltip: {
+        trigger: 'axis' as const,
+        backgroundColor: 'rgba(6,8,16,0.92)',
+        borderColor: 'rgba(0,229,255,0.15)',
+        borderWidth: 1,
+        textStyle: { color: '#e0e0e0', fontSize: 11, fontFamily: "'Oxanium', monospace" },
+        axisPointer: {
+          type: 'cross' as const,
+          lineStyle: { color: 'rgba(0,229,255,0.15)' },
+          label: { show: false },
+        },
+        formatter: (params: any) => {
+          if (!Array.isArray(params) || params.length === 0) return '';
+          const time = formatET(new Date(params[0].data[0]));
+          const bull = params.find((p: any) => p.seriesName === 'Bull')?.data?.[1] ?? 0;
+          const bear = params.find((p: any) => p.seriesName === 'Bear')?.data?.[1] ?? 0;
+          const net = bull - bear;
+          const netColor = net > 0 ? COLORS.green : net < 0 ? COLORS.red : '#ffc107';
+          const netLabel = net > 0 ? 'BULLISH' : net < 0 ? 'BEARISH' : 'NEUTRAL';
+          return `<div style="font-size:10px;opacity:0.5">${time} ET</div>
+            <div style="margin-top:4px">
+              <span style="color:${COLORS.green}">▲ Bull: ${Math.round(bull)}%</span>&nbsp;&nbsp;
+              <span style="color:${COLORS.red}">▼ Bear: ${Math.round(bear)}%</span>
+            </div>
+            <div style="margin-top:3px;color:${netColor};font-weight:bold;font-size:12px">
+              Net: ${net > 0 ? '+' : ''}${Math.round(net)} → ${netLabel}
+            </div>`;
         },
       },
       series: [
-        // Main line — colored by visualMap direction
+        // ── BULL PRESSURE (green area) ──
         {
-          name: 'Bias Strength',
-          type: 'line',
-          data: lineData,
+          name: 'Bull',
+          type: 'line' as const,
+          data: bullData,
           smooth: 0.3,
           symbol: 'none',
-          lineStyle: {
-            width: 2.5,
-            shadowColor: currentColor + '60',
-            shadowBlur: 8,
-          },
+          lineStyle: { color: COLORS.green, width: 2 },
           areaStyle: {
-            opacity: 0.08,
+            color: {
+              type: 'linear' as const,
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: COLORS.green + '30' },
+                { offset: 0.7, color: COLORS.green + '08' },
+                { offset: 1, color: 'transparent' },
+              ],
+            },
           },
-          // Bias-colored background bands
-          markArea: {
-            silent: true,
-            data: markAreaData,
-          },
-          // 50% neutral reference line + market open line
-          markLine: {
-            silent: true,
-            symbol: 'none',
-            lineStyle: { type: 'dashed', width: 1 },
+          markPoint: {
             data: [
+              // Current bull value (glowing dot)
               {
-                yAxis: 50,
-                lineStyle: { color: 'rgba(255,255,255,0.06)' },
-                label: {
-                  show: true,
-                  formatter: '50%',
-                  color: '#3a4a5a',
-                  fontSize: 8,
-                  fontFamily: "'Oxanium', monospace",
-                  position: 'end',
+                coord: [lastTime, lastBull],
+                symbol: 'circle',
+                symbolSize: 8,
+                itemStyle: {
+                  color: COLORS.green,
+                  borderColor: COLORS.green + '60',
+                  borderWidth: 3,
+                  shadowColor: COLORS.green + 'A0',
+                  shadowBlur: 12,
                 },
+                label: { show: false },
               },
-              ...(marketSession === 'open' && marketOpen >= xMin && marketOpen <= xMax ? [{
-                xAxis: marketOpen,
-                lineStyle: { color: 'rgba(0,229,255,0.12)', type: 'solid' as const, width: 1 },
-                label: {
-                  show: true,
-                  formatter: '9:30',
-                  color: COLORS.cyan + '50',
-                  fontSize: 8,
-                  fontFamily: "'Oxanium', monospace",
-                  position: 'start' as const,
-                },
-              }] : []),
+              ...crossMarkPoints,
             ],
           },
-          // Flip point markers
+        },
+        // ── BEAR PRESSURE (red area) ──
+        {
+          name: 'Bear',
+          type: 'line' as const,
+          data: bearData,
+          smooth: 0.3,
+          symbol: 'none',
+          lineStyle: { color: COLORS.red, width: 2 },
+          areaStyle: {
+            color: {
+              type: 'linear' as const,
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: COLORS.red + '25' },
+                { offset: 0.7, color: COLORS.red + '06' },
+                { offset: 1, color: 'transparent' },
+              ],
+            },
+          },
           markPoint: {
-            data: flipMarkPoints,
-            animation: false,
+            data: [
+              // Current bear value (glowing dot)
+              {
+                coord: [lastTime, lastBear],
+                symbol: 'circle',
+                symbolSize: 8,
+                itemStyle: {
+                  color: COLORS.red,
+                  borderColor: COLORS.red + '60',
+                  borderWidth: 3,
+                  shadowColor: COLORS.red + 'A0',
+                  shadowBlur: 12,
+                },
+                label: { show: false },
+              },
+            ],
           },
         },
-        // Current value indicator — glowing dot at latest point
+      ],
+      // Labels on right side showing current values
+      graphic: [
+        // Bull pressure label
         {
-          type: 'scatter',
-          data: [[current.time, current.confidence]],
-          symbol: 'circle',
-          symbolSize: 10,
-          itemStyle: {
-            color: currentColor,
-            borderColor: currentColor + '40',
-            borderWidth: 4,
-            shadowColor: currentColor + 'B0',
-            shadowBlur: 16,
+          type: 'text' as const,
+          right: 4,
+          top: (() => {
+            // Position label at the bull line's Y position
+            const pct = 1 - (lastBull / 100);
+            return 20 + pct * (height - 52);
+          })(),
+          style: {
+            text: `▲ ${Math.round(lastBull)}`,
+            fill: COLORS.green,
+            fontSize: 10,
+            fontWeight: 'bold' as const,
+            fontFamily: "'Oxanium', monospace",
           },
-          label: {
-            show: true,
-            formatter: [
-              `{val|${current.confidence}%}`,
-              `{dir|${current.direction}}`,
-            ].join('\n'),
-            rich: {
-              val: {
-                color: '#fff',
-                fontSize: 11,
-                fontWeight: 'bold',
-                fontFamily: "'Oxanium', monospace",
-                lineHeight: 14,
-              },
-              dir: {
-                color: currentColor,
-                fontSize: 8,
-                fontWeight: 'bold',
-                fontFamily: "'Oxanium', monospace",
-                lineHeight: 12,
-              },
-            },
-            position: 'right',
-            distance: 10,
-            backgroundColor: 'rgba(6,8,16,0.85)',
-            borderColor: currentColor + '30',
-            borderWidth: 1,
-            borderRadius: 4,
-            padding: [3, 6],
+        },
+        // Bear pressure label
+        {
+          type: 'text' as const,
+          right: 4,
+          top: (() => {
+            const pct = 1 - (lastBear / 100);
+            return 20 + pct * (height - 52);
+          })(),
+          style: {
+            text: `▼ ${Math.round(lastBear)}`,
+            fill: COLORS.red,
+            fontSize: 10,
+            fontWeight: 'bold' as const,
+            fontFamily: "'Oxanium', monospace",
           },
-          z: 10,
+        },
+        // Net direction label
+        {
+          type: 'text' as const,
+          right: 4,
+          top: 4,
+          style: {
+            text: `${lastDir === 'BULLISH' ? '▲' : lastDir === 'BEARISH' ? '▼' : '◆'} ${lastDir}`,
+            fill: lastDir === 'BULLISH' ? COLORS.green : lastDir === 'BEARISH' ? COLORS.red : '#ffc107',
+            fontSize: 9,
+            fontWeight: 'bold' as const,
+            fontFamily: "'Oxanium', monospace",
+          },
         },
       ],
     };
-  }, [history, marketSession, ticker]);
+  }, [history, marketSession, height]);
 
+  // Empty state
   if (history.length < 1 || !option) {
     return (
-      <div 
-        className="flex flex-col items-center justify-center rounded-lg"
-        style={{ 
-          height, 
-          background: 'rgba(255,255,255,0.02)', 
-          border: '1px dashed rgba(255,255,255,0.06)' 
-        }}
-      >
-        <div className="text-[10px] mb-1" style={{ color: 'rgba(255,255,255,0.2)' }}>
-          ⏳ Building confidence timeline...
-        </div>
-        <div className="text-[9px]" style={{ color: 'rgba(255,255,255,0.12)' }}>
-          Tracking signal alignment in real-time
+      <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.3 }}>
+        <div style={{ textAlign: 'center' }}>
+          <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>⏳ Building pressure timeline...</p>
+          <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', marginTop: 2 }}>Tracking bull vs bear signals in real-time</p>
         </div>
       </div>
     );
@@ -446,7 +373,6 @@ export function ConfidenceTimeline({
 
   return (
     <ReactECharts
-      ref={chartRef}
       option={option}
       style={{ height, width: '100%' }}
       opts={{ renderer: 'canvas' }}
@@ -456,15 +382,9 @@ export function ConfidenceTimeline({
 }
 
 /* ──────────────────────────────────────────────────────────
-   HISTORY MANAGER — Server-side API persistence
+   SERVER API HELPERS
    ────────────────────────────────────────────────────────── */
 
-const DIR_MAP: Record<string, number> = { 'BEARISH': 0, 'NEUTRAL': 1, 'BULLISH': 2 };
-const DIR_REVERSE: Record<number, 'BEARISH' | 'NEUTRAL' | 'BULLISH'> = { 0: 'BEARISH', 1: 'NEUTRAL', 2: 'BULLISH' };
-
-/**
- * Fetch full day's timeline from server
- */
 export async function fetchTimelineHistory(ticker: string): Promise<TimelinePoint[]> {
   try {
     const res = await fetch(`/api/timeline/${encodeURIComponent(ticker)}`, {
@@ -472,9 +392,8 @@ export async function fetchTimelineHistory(ticker: string): Promise<TimelinePoin
     });
     if (!res.ok) return [];
     const data = await res.json();
-    // Map compact server format → TimelinePoint
     return (data.points || [])
-      .filter((p: any) => p.s > 0) // Skip 0-confidence
+      .filter((p: any) => p.s > 0 || (p.bp ?? 0) > 0 || (p.brp ?? 0) > 0)
       .map((p: any) => ({
         time: p.t,
         confidence: p.s,
@@ -482,6 +401,8 @@ export async function fetchTimelineHistory(ticker: string): Promise<TimelinePoin
         bullCount: p.bc || 0,
         bearCount: p.brc || 0,
         neutralCount: 0,
+        bullPressure: p.bp ?? 0,
+        bearPressure: p.brp ?? 0,
       }));
   } catch (e) {
     console.error('[Timeline] Fetch error:', e);
@@ -489,14 +410,7 @@ export async function fetchTimelineHistory(ticker: string): Promise<TimelinePoin
   }
 }
 
-/**
- * POST a new point to the server timeline
- * Fire-and-forget (non-blocking)
- */
-export function postTimelinePoint(
-  ticker: string,
-  point: TimelinePoint,
-): void {
+export function postTimelinePoint(ticker: string, point: TimelinePoint): void {
   fetch(`/api/timeline/${encodeURIComponent(ticker)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -505,6 +419,8 @@ export function postTimelinePoint(
       direction: DIR_MAP[point.direction] ?? 1,
       bullCount: point.bullCount || 0,
       bearCount: point.bearCount || 0,
+      bullPressure: point.bullPressure ?? 0,
+      bearPressure: point.bearPressure ?? 0,
     }),
-  }).catch(() => { /* fire and forget */ });
+  }).catch(() => {});
 }
