@@ -18,7 +18,7 @@ export function DataSourceBadge({ isMarketClosed, tradingDay, lastUpdate }: Data
   if (lastUpdate) {
     const seconds = Math.floor((Date.now() - lastUpdate.getTime()) / 1000);
     return (
-      <span className="text-[10px] text-gray-500">
+      <span className="text-[10px] text-gray-300">
         {seconds < 60 ? `${seconds}s ago` : `${Math.floor(seconds / 60)}m ago`}
       </span>
     );

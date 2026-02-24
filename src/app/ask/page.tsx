@@ -309,7 +309,7 @@ function AskPageContent() {
           </div>
 
           <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
-            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Key Levels</div>
+            <div className="text-[10px] font-bold text-gray-200 uppercase tracking-wider mb-2">Key Levels</div>
             <div className="space-y-1">
               <LevelRow label="Call Wall" value={data.levels?.callWall || null} color={COLORS.green} currentPrice={data.price} />
               <LevelRow label="Put Wall" value={data.levels?.putWall || null} color={COLORS.red} currentPrice={data.price} />
@@ -403,7 +403,7 @@ function AskPageContent() {
               <TimeframeSelector value={timeframe} onChange={setTimeframe} />
               <div className="flex items-center gap-4">
                 <MarketClock />
-                <span className="text-xs text-gray-400">{timeframeRange.label}</span>
+                <span className="text-xs text-gray-300">{timeframeRange.label}</span>
               </div>
             </div>
           </div>
@@ -554,7 +554,7 @@ function SymbolSearch({ onSelect }: { onSelect: (ticker: string) => void }) {
   if (!open) {
     return (
       <button onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all ml-1"
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-all ml-1"
         style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
         <Search className="w-3 h-3" /><span>Search</span>
         <kbd className="hidden sm:inline text-[9px] text-gray-500 ml-1 px-1 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.06)' }}>⌘K</kbd>
@@ -587,7 +587,7 @@ function LevelRow({ label, value, color, currentPrice }: { label: string; value:
   const distancePct = value && currentPrice ? ((value - currentPrice) / currentPrice) * 100 : null;
   return (
     <div className="flex justify-between items-center py-1">
-      <span className="text-[10px] text-gray-300 font-semibold">{label}</span>
+      <span className="text-[10px] text-white font-semibold">{label}</span>
       <div className="text-right">
         <span className="text-xs font-mono font-bold" style={{ color }}>
           {value ? `$${value.toFixed(2)}` : '—'}
@@ -610,7 +610,7 @@ function GexContext({ price, gexFlip }: { price: number; gexFlip: number | null 
       <div className="font-bold text-xs" style={{ color: isAbove ? '#00e676' : '#ff5252' }}>
         {isAbove ? '↑ ABOVE FLIP' : '↓ BELOW FLIP'}
       </div>
-      <div className="text-gray-300 mt-0.5 text-[10px]">
+      <div className="text-gray-200 mt-0.5 text-[10px]">
         {isAbove ? 'Mean reversion zone' : 'Trend amplification'}
       </div>
     </div>
@@ -624,7 +624,7 @@ function AskLandingView({ onSelectTicker, watchlist }: { onSelectTicker: (ticker
       <div className="text-center max-w-md">
         <YodhaLogo size={56} className="mx-auto mb-4" />
         <h1 className="text-3xl font-bold text-white mb-1" style={{ fontFamily: "'Oxanium', monospace" }}>War Room</h1>
-        <p className="text-gray-400 text-sm mb-6">Enter a symbol to begin analysis</p>
+        <p className="text-gray-300 text-sm mb-6">Enter a symbol to begin analysis</p>
         <div className="mb-6">
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === 'Enter' && search && onSelectTicker(search)}

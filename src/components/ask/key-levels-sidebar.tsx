@@ -85,7 +85,7 @@ export function KeyLevelsSidebar({ ticker, className }: KeyLevelsSidebarProps) {
 
   if (error || !levels) {
     return (
-      <div className={cn("p-4 text-gray-400 text-sm", className)}>
+      <div className={cn("p-4 text-gray-200 text-sm", className)}>
         Unable to load key levels
       </div>
     );
@@ -142,7 +142,7 @@ export function KeyLevelsSidebar({ ticker, className }: KeyLevelsSidebarProps) {
 
   return (
     <div className={cn("space-y-1", className)}>
-      <div className="text-xs font-bold text-gray-400 uppercase mb-3 px-2">
+      <div className="text-xs font-bold text-gray-200 uppercase mb-3 px-2">
         Key Levels
       </div>
       
@@ -169,7 +169,7 @@ export function KeyLevelsSidebar({ ticker, className }: KeyLevelsSidebarProps) {
             )}
           >
             <div className="flex flex-col">
-              <span className="text-xs text-gray-400">{item.key}</span>
+              <span className="text-xs text-gray-200">{item.key}</span>
             </div>
             <div className="text-right">
               <span className={cn("font-bold text-sm", item.color)}>
@@ -192,12 +192,12 @@ export function KeyLevelsSidebar({ ticker, className }: KeyLevelsSidebarProps) {
       {levels.expectedMove && (
         <div className="mx-2 mt-3 pt-3 border-t border-white/10">
           <div className="flex justify-between items-center">
-            <span className="text-xs text-gray-500">Expected Move</span>
+            <span className="text-xs text-gray-300">Expected Move</span>
             <span className="text-sm font-bold text-cyan-400">
               ±${levels.expectedMove.toFixed(2)}
             </span>
           </div>
-          <div className="text-[10px] text-gray-500 mt-1">
+          <div className="text-[10px] text-gray-300 mt-1">
             Range: ${(levels.currentPrice - levels.expectedMove).toFixed(2)} - ${(levels.currentPrice + levels.expectedMove).toFixed(2)}
           </div>
         </div>

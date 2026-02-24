@@ -133,7 +133,7 @@ export function ConfluenceIndicator({
       style={{ background: COLORS.cardBg, border: `1px solid ${COLORS.cardBorder}` }}
     >
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
+        <h3 className="text-sm font-bold text-gray-200 uppercase tracking-wider">
           Signal Confluence
         </h3>
         <div 
@@ -160,7 +160,7 @@ export function ConfluenceIndicator({
       </div>
       
       {/* Score */}
-      <div className="text-center text-sm text-gray-400 mb-4">
+      <div className="text-center text-sm text-gray-200 mb-4">
         <span style={{ color: COLORS.green }} className="font-semibold">{confluenceScore.bullish} bullish</span>
         {' / '}
         <span style={{ color: COLORS.red }} className="font-semibold">{confluenceScore.bearish} bearish</span>
@@ -171,7 +171,7 @@ export function ConfluenceIndicator({
         {confluenceScore.noData > 0 && (
           <>
             {' / '}
-            <span className="font-semibold text-gray-500">{confluenceScore.noData} no data</span>
+            <span className="font-semibold text-gray-400">{confluenceScore.noData} no data</span>
           </>
         )}
       </div>
@@ -180,7 +180,7 @@ export function ConfluenceIndicator({
       <div className="mt-4 space-y-2">
         {signals.map((signal, i) => (
           <div key={i} className="flex items-center justify-between text-sm">
-            <span className="text-gray-400 font-medium">{signal.name}</span>
+            <span className="text-gray-200 font-medium">{signal.name}</span>
             <div className="flex items-center gap-2">
               <span 
                 className="font-semibold"
