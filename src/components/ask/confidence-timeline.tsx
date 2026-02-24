@@ -3,7 +3,6 @@
 import { useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { ConfidencePoint } from '@/hooks/use-ml-prediction';
-import { COLORS } from '@/lib/echarts-theme';
 
 /* ──────────────────────────────────────────────────────────
    TYPES
@@ -13,8 +12,8 @@ export interface TimelinePoint extends ConfidencePoint {
   bullCount?: number;
   bearCount?: number;
   neutralCount?: number;
-  bullPressure?: number;   // 0-100
-  bearPressure?: number;   // 0-100
+  bullPressure?: number;
+  bearPressure?: number;
 }
 
 interface ConfidenceTimelineProps {
@@ -23,6 +22,27 @@ interface ConfidenceTimelineProps {
   marketSession: 'pre-market' | 'open' | 'after-hours' | 'closed';
   ticker: string;
 }
+
+/* ──────────────────────────────────────────────────────────
+   COLORS — TradingView-inspired palette
+   ────────────────────────────────────────────────────────── */
+
+const TV = {
+  bull: '#26a69a',        // TradingView green
+  bullLight: '#26a69a40', // Fill
+  bullFaint: '#26a69a10',
+  bear: '#ef5350',        // TradingView red
+  bearLight: '#ef535040',
+  bearFaint: '#ef535010',
+  grid: 'rgba(42,46,57,0.6)',
+  gridFaint: 'rgba(42,46,57,0.3)',
+  text: 'rgba(209,212,220,0.7)',
+  textDim: 'rgba(209,212,220,0.35)',
+  bg: '#131722',
+  crosshair: 'rgba(120,123,134,0.4)',
+  tooltipBg: 'rgba(19,23,34,0.95)',
+  tooltipBorder: 'rgba(42,46,57,0.8)',
+};
 
 /* ──────────────────────────────────────────────────────────
    HELPERS
@@ -59,12 +79,11 @@ function getSessionBounds(): { marketOpen: number; marketClose: number } {
   return { marketOpen, marketClose };
 }
 
-// Detect crossover points where bull/bear pressure swaps dominance
+// Detect crossover points
 interface Crossover {
   time: number;
   to: 'BULLISH' | 'BEARISH';
-  bullP: number;
-  bearP: number;
+  value: number;
 }
 
 function detectCrossovers(history: TimelinePoint[]): Crossover[] {
@@ -84,8 +103,7 @@ function detectCrossovers(history: TimelinePoint[]): Crossover[] {
       crosses.push({
         time: curr.time,
         to: currDom === 'BULL' ? 'BULLISH' : 'BEARISH',
-        bullP: currBull,
-        bearP: currBear,
+        value: Math.max(currBull, currBear),
       });
     }
   }
@@ -95,91 +113,57 @@ function detectCrossovers(history: TimelinePoint[]): Crossover[] {
 const DIR_MAP: Record<string, number> = { BEARISH: 0, NEUTRAL: 1, BULLISH: 2 };
 const DIR_REVERSE: Record<number, string> = { 0: 'BEARISH', 1: 'NEUTRAL', 2: 'BULLISH' };
 
-const STORAGE_PREFIX = 'yodha-tl-v3'; // v3 = dual pressure
-const MIN_INTERVAL_MS = 5000;
-
 /* ──────────────────────────────────────────────────────────
    COMPONENT
    ────────────────────────────────────────────────────────── */
 
 export function ConfidenceTimeline({ history, height = 160, marketSession, ticker }: ConfidenceTimelineProps) {
   const option = useMemo(() => {
-    // Filter out invalid points
     const valid = history.filter(h => h.confidence > 0 || (h.bullPressure ?? 0) > 0 || (h.bearPressure ?? 0) > 0);
     if (valid.length < 1) return null;
 
     const { marketOpen, marketClose } = getSessionBounds();
     const now = Date.now();
     
-    // If only 1 point, synthesize a start
     const eff = valid.length === 1
       ? [{ ...valid[0], time: valid[0].time - 120000 }, valid[0]]
       : valid;
     
-    // X-axis: start from 5min before first point
-    const xMin = eff[0].time - 5 * 60000;
+    const xMin = eff[0].time - 3 * 60000;
     const xMax = marketSession === 'open'
       ? Math.max(now + 2 * 60000, eff[eff.length - 1].time + 60000)
       : marketClose;
 
-    // Data series
     const bullData = eff.map(h => [h.time, h.bullPressure ?? Math.max(0, (h.confidence - 50) * 2)]);
     const bearData = eff.map(h => [h.time, h.bearPressure ?? Math.max(0, (50 - h.confidence) * 2)]);
 
-    // Detect crossovers
     const crosses = detectCrossovers(eff);
-    const crossMarkPoints = crosses.map(c => ({
-      coord: [c.time, Math.max(c.bullP, c.bearP)],
-      symbol: c.to === 'BULLISH' ? 'triangle' : 'pin',
-      symbolSize: 14,
-      symbolRotate: c.to === 'BEARISH' ? 180 : 0,
-      itemStyle: {
-        color: c.to === 'BULLISH' ? COLORS.green : COLORS.red,
-        borderColor: 'rgba(6,8,16,0.9)',
-        borderWidth: 1.5,
-        shadowColor: (c.to === 'BULLISH' ? COLORS.green : COLORS.red) + '80',
-        shadowBlur: 10,
-      },
-      label: {
-        show: true,
-        formatter: c.to === 'BULLISH' ? 'BULL ✕' : 'BEAR ✕',
-        color: c.to === 'BULLISH' ? COLORS.green : COLORS.red,
-        fontSize: 8,
-        fontWeight: 'bold' as const,
-        fontFamily: "'Oxanium', monospace",
-        position: 'top' as const,
-        distance: 12,
-        padding: [2, 4] as [number, number],
-        backgroundColor: 'rgba(6,8,16,0.85)',
-        borderRadius: 2,
-        borderColor: (c.to === 'BULLISH' ? COLORS.green : COLORS.red) + '40',
-        borderWidth: 1,
-      },
-    }));
-
-    // Current values
-    const lastBull = bullData[bullData.length - 1]?.[1] ?? 0;
-    const lastBear = bearData[bearData.length - 1]?.[1] ?? 0;
-    const lastTime = eff[eff.length - 1].time;
-    const lastDir = eff[eff.length - 1].direction || 'NEUTRAL';
+    
+    const lastBull = (bullData[bullData.length - 1]?.[1] ?? 0) as number;
+    const lastBear = (bearData[bearData.length - 1]?.[1] ?? 0) as number;
 
     return {
       animation: false,
+      backgroundColor: 'transparent',
       grid: {
-        top: 20, bottom: 32, left: 42, right: 90,
+        top: 8, bottom: 24, left: 36, right: 54,
       },
       xAxis: {
         type: 'time' as const,
         min: xMin,
         max: xMax,
-        axisLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+        axisLine: { lineStyle: { color: TV.gridFaint } },
         axisTick: { show: false },
-        splitLine: { show: false },
+        splitLine: {
+          show: true,
+          lineStyle: { color: TV.gridFaint, type: 'solid' as const },
+        },
         axisLabel: {
-          color: 'rgba(255,255,255,0.25)',
-          fontSize: 9,
-          fontFamily: "'Oxanium', monospace",
+          color: TV.textDim,
+          fontSize: 10,
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif",
           formatter: (val: number) => formatET(new Date(val)),
+          margin: 8,
         },
       },
       yAxis: {
@@ -190,169 +174,203 @@ export function ConfidenceTimeline({ history, height = 160, marketSession, ticke
         axisLine: { show: false },
         axisTick: { show: false },
         splitLine: {
-          lineStyle: { color: 'rgba(255,255,255,0.04)', type: 'dashed' as const },
+          lineStyle: { color: TV.gridFaint, type: 'solid' as const },
         },
         axisLabel: {
-          color: 'rgba(255,255,255,0.2)',
-          fontSize: 9,
-          fontFamily: "'Oxanium', monospace",
-          formatter: '{value}%',
+          color: TV.textDim,
+          fontSize: 10,
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif",
+          formatter: '{value}',
+          margin: 4,
         },
       },
       tooltip: {
         trigger: 'axis' as const,
-        backgroundColor: 'rgba(6,8,16,0.92)',
-        borderColor: 'rgba(0,229,255,0.15)',
+        backgroundColor: TV.tooltipBg,
+        borderColor: TV.tooltipBorder,
         borderWidth: 1,
-        textStyle: { color: '#e0e0e0', fontSize: 11, fontFamily: "'Oxanium', monospace" },
+        padding: [8, 12],
+        textStyle: {
+          color: '#d1d4dc',
+          fontSize: 12,
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif",
+        },
         axisPointer: {
           type: 'cross' as const,
-          lineStyle: { color: 'rgba(0,229,255,0.15)' },
-          label: { show: false },
+          lineStyle: { color: TV.crosshair, width: 1, type: 'dashed' as const },
+          label: {
+            backgroundColor: 'rgba(42,46,57,0.9)',
+            color: '#d1d4dc',
+            fontSize: 10,
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif",
+            formatter: (params: any) => {
+              if (params.axisDimension === 'x') {
+                return formatET(new Date(params.value));
+              }
+              return Math.round(params.value).toString();
+            },
+          },
         },
         formatter: (params: any) => {
           if (!Array.isArray(params) || params.length === 0) return '';
           const time = formatET(new Date(params[0].data[0]));
-          const bull = params.find((p: any) => p.seriesName === 'Bull')?.data?.[1] ?? 0;
-          const bear = params.find((p: any) => p.seriesName === 'Bear')?.data?.[1] ?? 0;
-          const net = bull - bear;
-          const netColor = net > 0 ? COLORS.green : net < 0 ? COLORS.red : '#ffc107';
-          const netLabel = net > 0 ? 'BULLISH' : net < 0 ? 'BEARISH' : 'NEUTRAL';
-          return `<div style="font-size:10px;opacity:0.5">${time} ET</div>
-            <div style="margin-top:4px">
-              <span style="color:${COLORS.green}">▲ Bull: ${Math.round(bull)}%</span>&nbsp;&nbsp;
-              <span style="color:${COLORS.red}">▼ Bear: ${Math.round(bear)}%</span>
+          const bull = params.find((p: any) => p.seriesName === 'Bull Pressure')?.data?.[1] ?? 0;
+          const bear = params.find((p: any) => p.seriesName === 'Bear Pressure')?.data?.[1] ?? 0;
+          const spread = Math.round(bull - bear);
+          const spreadColor = spread > 0 ? TV.bull : spread < 0 ? TV.bear : TV.text;
+          return `
+            <div style="font-size:11px;color:${TV.textDim};margin-bottom:6px">${time} ET</div>
+            <div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:4px">
+              <span style="color:${TV.bull}">● Bull <b>${Math.round(bull)}</b></span>
+              <span style="color:${TV.bear}">● Bear <b>${Math.round(bear)}</b></span>
             </div>
-            <div style="margin-top:3px;color:${netColor};font-weight:bold;font-size:12px">
-              Net: ${net > 0 ? '+' : ''}${Math.round(net)} → ${netLabel}
+            <div style="border-top:1px solid ${TV.gridFaint};padding-top:4px;color:${spreadColor};font-weight:600">
+              Spread: ${spread > 0 ? '+' : ''}${spread}
             </div>`;
         },
       },
       series: [
-        // ── BULL PRESSURE (green area) ──
+        // ── BULL PRESSURE ──
         {
-          name: 'Bull',
+          name: 'Bull Pressure',
           type: 'line' as const,
           data: bullData,
-          smooth: 0.3,
+          smooth: 0.35,
           symbol: 'none',
-          lineStyle: { color: COLORS.green, width: 2 },
+          sampling: 'lttb' as const,
+          lineStyle: { color: TV.bull, width: 1.5 },
           areaStyle: {
             color: {
               type: 'linear' as const,
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: COLORS.green + '30' },
-                { offset: 0.7, color: COLORS.green + '08' },
-                { offset: 1, color: 'transparent' },
+                { offset: 0, color: TV.bullLight },
+                { offset: 1, color: TV.bullFaint },
               ],
             },
           },
+          emphasis: { disabled: true },
           markPoint: {
-            data: [
-              // Current bull value (glowing dot)
-              {
-                coord: [lastTime, lastBull],
-                symbol: 'circle',
-                symbolSize: 8,
-                itemStyle: {
-                  color: COLORS.green,
-                  borderColor: COLORS.green + '60',
-                  borderWidth: 3,
-                  shadowColor: COLORS.green + 'A0',
-                  shadowBlur: 12,
+            data: crosses
+              .filter(c => c.to === 'BULLISH')
+              .map(c => ({
+                coord: [c.time, c.value],
+                symbol: 'triangle',
+                symbolSize: 10,
+                symbolOffset: [0, 4],
+                itemStyle: { color: TV.bull, borderColor: TV.bull, borderWidth: 0 },
+                label: {
+                  show: true,
+                  formatter: '▲',
+                  position: 'top' as const,
+                  distance: 4,
+                  color: TV.bull,
+                  fontSize: 8,
+                  fontWeight: 'bold' as const,
                 },
-                label: { show: false },
-              },
-              ...crossMarkPoints,
-            ],
+              })),
+            animation: false,
           },
         },
-        // ── BEAR PRESSURE (red area) ──
+        // ── BEAR PRESSURE ──
         {
-          name: 'Bear',
+          name: 'Bear Pressure',
           type: 'line' as const,
           data: bearData,
-          smooth: 0.3,
+          smooth: 0.35,
           symbol: 'none',
-          lineStyle: { color: COLORS.red, width: 2 },
+          sampling: 'lttb' as const,
+          lineStyle: { color: TV.bear, width: 1.5 },
           areaStyle: {
             color: {
               type: 'linear' as const,
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: COLORS.red + '25' },
-                { offset: 0.7, color: COLORS.red + '06' },
-                { offset: 1, color: 'transparent' },
+                { offset: 0, color: TV.bearLight },
+                { offset: 1, color: TV.bearFaint },
               ],
             },
           },
+          emphasis: { disabled: true },
           markPoint: {
-            data: [
-              // Current bear value (glowing dot)
-              {
-                coord: [lastTime, lastBear],
-                symbol: 'circle',
-                symbolSize: 8,
-                itemStyle: {
-                  color: COLORS.red,
-                  borderColor: COLORS.red + '60',
-                  borderWidth: 3,
-                  shadowColor: COLORS.red + 'A0',
-                  shadowBlur: 12,
+            data: crosses
+              .filter(c => c.to === 'BEARISH')
+              .map(c => ({
+                coord: [c.time, c.value],
+                symbol: 'pin',
+                symbolSize: 10,
+                symbolRotate: 180,
+                itemStyle: { color: TV.bear, borderColor: TV.bear, borderWidth: 0 },
+                label: {
+                  show: true,
+                  formatter: '▼',
+                  position: 'bottom' as const,
+                  distance: 4,
+                  color: TV.bear,
+                  fontSize: 8,
+                  fontWeight: 'bold' as const,
                 },
-                label: { show: false },
+              })),
+            animation: false,
+          },
+        },
+        // ── RIGHT-SIDE CURRENT VALUE MARKERS (TradingView-style price tags) ──
+        {
+          name: '_bullTag',
+          type: 'line' as const,
+          data: [],
+          markLine: {
+            animation: false,
+            silent: true,
+            symbol: ['none', 'none'],
+            data: [
+              {
+                yAxis: lastBull,
+                lineStyle: { color: TV.bull, width: 1, type: 'dashed' as const, opacity: 0.4 },
+                label: {
+                  show: true,
+                  position: 'end' as const,
+                  formatter: `{a|${Math.round(lastBull)}}`,
+                  backgroundColor: TV.bull,
+                  padding: [2, 6, 2, 6],
+                  borderRadius: 2,
+                  color: '#fff',
+                  fontSize: 10,
+                  fontWeight: 'bold' as const,
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif",
+                  rich: { a: { color: '#fff', fontSize: 10, fontWeight: 'bold' as const } },
+                },
               },
             ],
           },
         },
-      ],
-      // Labels on right side showing current values
-      graphic: [
-        // Bull pressure label
         {
-          type: 'text' as const,
-          right: 4,
-          top: (() => {
-            // Position label at the bull line's Y position
-            const pct = 1 - (lastBull / 100);
-            return 20 + pct * (height - 52);
-          })(),
-          style: {
-            text: `▲ ${Math.round(lastBull)}`,
-            fill: COLORS.green,
-            fontSize: 10,
-            fontWeight: 'bold' as const,
-            fontFamily: "'Oxanium', monospace",
-          },
-        },
-        // Bear pressure label
-        {
-          type: 'text' as const,
-          right: 4,
-          top: (() => {
-            const pct = 1 - (lastBear / 100);
-            return 20 + pct * (height - 52);
-          })(),
-          style: {
-            text: `▼ ${Math.round(lastBear)}`,
-            fill: COLORS.red,
-            fontSize: 10,
-            fontWeight: 'bold' as const,
-            fontFamily: "'Oxanium', monospace",
-          },
-        },
-        // Net direction label
-        {
-          type: 'text' as const,
-          right: 4,
-          top: 4,
-          style: {
-            text: `${lastDir === 'BULLISH' ? '▲' : lastDir === 'BEARISH' ? '▼' : '◆'} ${lastDir}`,
-            fill: lastDir === 'BULLISH' ? COLORS.green : lastDir === 'BEARISH' ? COLORS.red : '#ffc107',
-            fontSize: 9,
-            fontWeight: 'bold' as const,
-            fontFamily: "'Oxanium', monospace",
+          name: '_bearTag',
+          type: 'line' as const,
+          data: [],
+          markLine: {
+            animation: false,
+            silent: true,
+            symbol: ['none', 'none'],
+            data: [
+              {
+                yAxis: lastBear,
+                lineStyle: { color: TV.bear, width: 1, type: 'dashed' as const, opacity: 0.4 },
+                label: {
+                  show: true,
+                  position: 'end' as const,
+                  formatter: `{a|${Math.round(lastBear)}}`,
+                  backgroundColor: TV.bear,
+                  padding: [2, 6, 2, 6],
+                  borderRadius: 2,
+                  color: '#fff',
+                  fontSize: 10,
+                  fontWeight: 'bold' as const,
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif",
+                  rich: { a: { color: '#fff', fontSize: 10, fontWeight: 'bold' as const } },
+                },
+              },
+            ],
           },
         },
       ],
@@ -362,22 +380,32 @@ export function ConfidenceTimeline({ history, height = 160, marketSession, ticke
   // Empty state
   if (history.length < 1 || !option) {
     return (
-      <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.3 }}>
+      <div
+        style={{
+          height,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(19,23,34,0.5)', borderRadius: 4,
+        }}
+      >
         <div style={{ textAlign: 'center' }}>
-          <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>⏳ Building pressure timeline...</p>
-          <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', marginTop: 2 }}>Tracking bull vs bear signals in real-time</p>
+          <p style={{ fontSize: 11, color: TV.textDim }}>⏳ Building pressure timeline...</p>
+          <p style={{ fontSize: 9, color: TV.textDim, marginTop: 2, opacity: 0.6 }}>
+            Tracking bull vs bear signals in real-time
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <ReactECharts
-      option={option}
-      style={{ height, width: '100%' }}
-      opts={{ renderer: 'canvas' }}
-      notMerge={true}
-    />
+    <div style={{ background: 'rgba(19,23,34,0.4)', borderRadius: 4, padding: '4px 0' }}>
+      <ReactECharts
+        option={option}
+        style={{ height, width: '100%' }}
+        opts={{ renderer: 'canvas' }}
+        notMerge={true}
+      />
+    </div>
   );
 }
 

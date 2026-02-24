@@ -51,7 +51,10 @@ export function RelativeStrengthPanel({ ticker, timeframeRange }: RelativeStreng
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/market/relative-strength?ticker=${ticker}`);
+        const cacheBust = Date.now();
+        const res = await fetch(`/api/market/relative-strength?ticker=${ticker}&_t=${cacheBust}`, {
+          cache: 'no-store',
+        });
         const json = await res.json();
         
         if (json.success && json.data) {

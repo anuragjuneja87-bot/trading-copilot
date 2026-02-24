@@ -342,19 +342,19 @@ export function YodhaAnalysis({
         </div>
       </div>
 
-      {/* ── CONFIDENCE TIMELINE (THE MOAT) ─────────────── */}
+      {/* ── BULL vs BEAR PRESSURE (TradingView-style) ──── */}
       <div className="px-4 pb-3">
-        <div className="rounded-lg overflow-hidden" style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid rgba(255,255,255,0.04)' }}>
-          <div className="flex items-center justify-between px-3 pt-2">
-            <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>
-              <span style={{ color: COLORS.green }}>▲ Bull</span>
-              {' vs '}
-              <span style={{ color: COLORS.red }}>▼ Bear</span>
-              {' Pressure'}
+        <div className="rounded overflow-hidden" style={{ background: 'rgba(19,23,34,0.5)', border: '1px solid rgba(42,46,57,0.5)' }}>
+          <div className="flex items-center justify-between px-3 pt-1.5 pb-0">
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] font-medium" style={{ color: '#26a69a' }}>● Bull</span>
+              <span className="text-[10px] font-medium" style={{ color: '#ef5350' }}>● Bear</span>
+            </div>
+            <span className="text-[9px]" style={{ color: 'rgba(209,212,220,0.3)' }}>
+              {timelineHistory.length > 0 ? `${timelineHistory.length} pts` : ''}
             </span>
-            <span className="text-[9px] font-mono" style={{ color: 'rgba(255,255,255,0.2)' }}>{timelineHistory.length > 0 ? `${timelineHistory.length} pts` : 'Tracking...'}</span>
           </div>
-          <ConfidenceTimeline history={timelineHistory} height={140} marketSession={marketSession} ticker={ticker} />
+          <ConfidenceTimeline history={timelineHistory} height={150} marketSession={marketSession} ticker={ticker} />
         </div>
       </div>
 

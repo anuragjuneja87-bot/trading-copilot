@@ -214,7 +214,9 @@ export function useWarRoomData(
     
     const fetchRS = async () => {
       try {
-        const res = await fetch(`/api/market/relative-strength?ticker=${ticker}`);
+        const res = await fetch(`/api/market/relative-strength?ticker=${ticker}&_t=${Date.now()}`, {
+          cache: 'no-store',
+        });
         const json = await res.json();
         if (json.success && json.data?.summary) {
           setRelativeStrength(json.data.summary);
