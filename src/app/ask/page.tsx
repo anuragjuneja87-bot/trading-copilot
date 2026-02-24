@@ -13,7 +13,7 @@ import { YodhaLogo, YodhaWordmark } from '@/components/brand/yodha-logo';
 import { LiveTickerBar } from '@/components/layout/live-ticker-bar';
 import { ConfluenceIndicator } from '@/components/war-room/confluence-indicator';
 import { YodhaAnalysis, AskYodhaChat } from '@/components/ask/yodha-analysis';
-import { TradingViewPanel } from '@/components/ask/tradingview-panel';
+import { YodhaChart } from '@/components/ask/yodha-chart';
 import { OptionsFlowPanel } from '@/components/ask/options-flow-panel';
 import { DarkPoolPanel } from '@/components/ask/dark-pool-panel';
 import { GammaLevelsPanel } from '@/components/ask/gamma-levels-panel';
@@ -439,6 +439,18 @@ function AskPageContent() {
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             <div className="p-3 space-y-3 max-w-[1200px] mx-auto">
 
+              {/* ★ YODHA CHART — UNIFIED PRICE + PRESSURE ★ */}
+              <div className="h-[420px] rounded" style={{ border: '1px solid rgba(42,46,57,0.5)' }}>
+                <YodhaChart
+                  ticker={selectedTicker}
+                  timeframe={timeframe}
+                  levels={data.levels}
+                  price={data.price}
+                  changePercent={data.changePercent}
+                  marketSession={data.marketSession}
+                />
+              </div>
+
               {/* ★ YODHA ANALYSIS — THE CENTERPIECE ★ */}
               <YodhaAnalysis
                 ticker={selectedTicker}
@@ -473,11 +485,6 @@ function AskPageContent() {
                 mlPrediction={mlResult.prediction}
                 volumePressure={volumePressure}
               />
-
-              {/* CHART */}
-              <div className="h-[400px]">
-                <TradingViewPanel ticker={selectedTicker} timeframe={timeframe} />
-              </div>
 
               {/* DETAILED DATA PANELS (collapsible) */}
               <div className="flex items-center justify-end mb-1">

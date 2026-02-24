@@ -9,7 +9,7 @@ import {
   ChevronDown, ChevronRight, Send, Loader2, Shield,
   BarChart3, Zap, MessageSquare, RefreshCw
 } from 'lucide-react';
-import { ConfidenceTimeline, fetchTimelineHistory, postTimelinePoint, type TimelinePoint } from './confidence-timeline';
+import { fetchTimelineHistory, postTimelinePoint, type TimelinePoint } from './confidence-timeline';
 import { computeBiasScore } from '@/lib/bias-score';
 import type { ConfidencePoint } from '@/hooks/use-ml-prediction';
 
@@ -339,22 +339,6 @@ export function YodhaAnalysis({
             </div>
             <span className="text-[8px]" style={{ color: 'rgba(255,255,255,0.3)' }}>{bullCount} bull · {bearCount} bear</span>
           </div>
-        </div>
-      </div>
-
-      {/* ── BULL vs BEAR PRESSURE (TradingView-style) ──── */}
-      <div className="px-4 pb-3">
-        <div className="rounded overflow-hidden" style={{ background: 'rgba(19,23,34,0.5)', border: '1px solid rgba(42,46,57,0.5)' }}>
-          <div className="flex items-center justify-between px-3 pt-1.5 pb-0">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-medium" style={{ color: '#26a69a' }}>● Bull</span>
-              <span className="text-[10px] font-medium" style={{ color: '#ef5350' }}>● Bear</span>
-            </div>
-            <span className="text-[9px]" style={{ color: 'rgba(209,212,220,0.3)' }}>
-              {timelineHistory.length > 0 ? `${timelineHistory.length} pts` : ''}
-            </span>
-          </div>
-          <ConfidenceTimeline history={timelineHistory} height={150} marketSession={marketSession} ticker={ticker} />
         </div>
       </div>
 
