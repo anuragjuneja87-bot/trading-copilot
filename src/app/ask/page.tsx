@@ -109,13 +109,14 @@ function buildFlowSummary(flow: any, session: string): PanelSummary {
   if (!flow?.tradeCount) {
     return { text: session !== 'open' ? 'Market closed · No live data' : null, color: '#555' };
   }
-  const callPct = flow.callRatio ? (flow.callRatio * 100).toFixed(0) : '—';
+  // callRatio and putRatio are already 0-100 from the API
+  const callPct = flow.callRatio != null ? flow.callRatio.toFixed(0) : '—';
   const sweeps = flow.sweepRatio ? (flow.sweepRatio * 100).toFixed(0) : '0';
   const unusual = flow.unusualCount || 0;
   const netDelta = flow.netDeltaAdjustedFlow;
   const netStr = netDelta ? `${netDelta > 0 ? '+' : ''}$${(netDelta / 1e6).toFixed(1)}M delta` : '';
 
-  const bias = (flow.callRatio || 0) >= 0.6 ? 'bullish' : (flow.putRatio || 0) >= 0.6 ? 'bearish' : 'mixed';
+  const bias = (flow.callRatio || 50) >= 60 ? 'bullish' : (flow.putRatio || 50) >= 60 ? 'bearish' : 'mixed';
   const color = bias === 'bullish' ? COLORS.green : bias === 'bearish' ? COLORS.red : '#ffc107';
 
   const parts = [`${callPct}% calls`];
@@ -131,18 +132,25 @@ function buildDarkPoolSummary(dp: any, session: string): PanelSummary {
   if (!dp?.printCount) {
     return { text: session !== 'open' ? 'Market closed · No live data' : null, color: '#555' };
   }
-  const bullPct = dp.bullishPct?.toFixed(0) || '—';
+  const bullPct = dp.bullishPct ?? 50;
+  const bearPct = 100 - bullPct;
   const prints = dp.printCount;
   const val = dp.totalValue
     ? dp.totalValue >= 1e6 ? `$${(dp.totalValue / 1e6).toFixed(1)}M` : `$${(dp.totalValue / 1e3).toFixed(0)}K`
     : '';
 
-  const bias = (dp.bullishPct || 50) > 55 ? 'bullish' : (dp.bullishPct || 50) < 45 ? 'bearish' : 'neutral';
+  const bias = bullPct > 55 ? 'bullish' : bullPct < 45 ? 'bearish' : 'neutral';
   const color = bias === 'bullish' ? COLORS.green : bias === 'bearish' ? COLORS.red : '#ffc107';
 
   const parts: string[] = [];
   if (session !== 'open') parts.push('Last session');
-  parts.push(`${prints} prints`, `${bullPct}% bullish`);
+  parts.push(`${prints} prints`);
+  // Show the dominant direction's percentage
+  if (bias === 'bearish') {
+    parts.push(`${bearPct.toFixed(0)}% bearish`);
+  } else {
+    parts.push(`${bullPct.toFixed(0)}% bullish`);
+  }
   if (val) parts.push(val);
 
   return { text: parts.join(' · '), color };
@@ -175,12 +183,15 @@ function buildGammaSummary(levels: any, price: number): PanelSummary {
 function buildVolumeSummary(vp: number | undefined, session?: string): PanelSummary {
   if (vp === undefined) return { text: null, color: '#555' };
 
-  const clamped = Math.max(0, Math.min(100, vp));
-  const label = clamped > 60 ? 'Buying pressure' : clamped < 40 ? 'Selling pressure' : 'Balanced';
-  const color = clamped > 60 ? COLORS.green : clamped < 40 ? COLORS.red : '#ffc107';
   const prefix = session !== 'open' ? 'Last session · ' : '';
-
-  return { text: `${prefix}${clamped.toFixed(0)}% buy-side · ${label}`, color };
+  // vp ranges from roughly -100 to +100 (buy-sell pressure delta)
+  if (vp > 20) {
+    return { text: `${prefix}+${vp}% buy pressure`, color: COLORS.green };
+  } else if (vp < -20) {
+    return { text: `${prefix}${vp}% sell pressure`, color: COLORS.red };
+  } else {
+    return { text: `${prefix}Balanced (${vp > 0 ? '+' : ''}${vp}%)`, color: '#ffc107' };
+  }
 }
 
 function buildRSSummary(rs: any, ticker: string): PanelSummary {

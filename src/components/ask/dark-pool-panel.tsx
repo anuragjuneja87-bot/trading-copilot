@@ -181,8 +181,8 @@ export function DarkPoolPanel({
           color={prints.length === 0 ? '#555' : '#fff'}
         />
         <StatBox 
-          label="Bullish" 
-          value={prints.length === 0 ? '—' : `${stats?.bullishPct || 0}%`}
+          label={prints.length === 0 ? 'Sentiment' : (stats?.bullishPct ?? 50) >= 50 ? 'Bullish' : 'Bearish'} 
+          value={prints.length === 0 ? '—' : (stats?.bullishPct ?? 50) >= 50 ? `${stats?.bullishPct || 0}%` : `${(100 - (stats?.bullishPct || 0)).toFixed(0)}%`}
           color={prints.length === 0 ? '#555' : (stats?.bullishPct || 0) > 50 ? COLORS.green : COLORS.red}
         />
         <StatBox 

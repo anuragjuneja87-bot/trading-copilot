@@ -68,10 +68,11 @@ export function ConfluenceIndicator({
     const hasDpData = dpPrintCount > 0 && dpBullish !== undefined && dpBullish !== null;
     
     if (hasDpData) {
+      const dpBearish = 100 - dpBullish;
       result.push({
         name: 'Dark Pool',
         status: dpBullish > 55 ? 'bullish' : dpBullish < 45 ? 'bearish' : 'neutral',
-        value: `${dpBullish}% bullish`,
+        value: dpBullish < 45 ? `${dpBearish.toFixed(0)}% bearish` : `${dpBullish.toFixed(0)}% bullish`,
       });
     } else {
       result.push({

@@ -301,7 +301,7 @@ export function YodhaAnalysis({
             </p>
 
             {mlError && !mlPrediction && marketSession === 'open' && (
-              <p className="text-[10px] text-amber-500/70 mt-1">{mlError}</p>
+              <p className="text-[9px] mt-1" style={{ color: 'rgba(255,255,255,0.2)' }}>ML offline — using signal-based analysis</p>
             )}
           </div>
         </div>
@@ -362,7 +362,35 @@ export function YodhaAnalysis({
       </div>
 
       {/* ── SETUP (entry/targets/stop) ────────────────────── */}
-      {thesis.setup && (thesis.setup.entry || thesis.setup.targets.length > 0 || thesis.setup.stop) && (
+      {thesis.bearSetup ? (
+        /* Mixed signals: show BOTH setups */
+        <div className="px-5 pb-3 space-y-2">
+          {/* Bull setup */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <div className="w-1.5 h-1.5 rounded-full" style={{ background: COLORS.green }} />
+              <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: COLORS.green }}>Bull Setup</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {thesis.setup.entry && <SetupLevel label="Entry" value={thesis.setup.entry} color={COLORS.green} />}
+              {thesis.setup.targets.map((t, i) => <SetupLevel key={i} label={`Target ${i + 1}`} value={t} color={COLORS.green} />)}
+              {thesis.setup.stop && <SetupLevel label="Stop" value={thesis.setup.stop} color={COLORS.red} />}
+            </div>
+          </div>
+          {/* Bear setup */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <div className="w-1.5 h-1.5 rounded-full" style={{ background: COLORS.red }} />
+              <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: COLORS.red }}>Bear Setup</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {thesis.bearSetup.entry && <SetupLevel label="Entry" value={thesis.bearSetup.entry} color={COLORS.red} />}
+              {thesis.bearSetup.targets.map((t, i) => <SetupLevel key={i} label={`Target ${i + 1}`} value={t} color={COLORS.red} />)}
+              {thesis.bearSetup.stop && <SetupLevel label="Stop" value={thesis.bearSetup.stop} color={COLORS.green} />}
+            </div>
+          </div>
+        </div>
+      ) : thesis.setup && (thesis.setup.entry || thesis.setup.targets.length > 0 || thesis.setup.stop) ? (
         <div className="px-5 pb-3">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {thesis.setup.entry && (
@@ -376,7 +404,7 @@ export function YodhaAnalysis({
             )}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* ── RISK ──────────────────────────────────────────── */}
       {thesis.risk && (
@@ -585,7 +613,7 @@ function buildWarRoomContext(props: AskYodhaChatProps): string {
   // Options Flow
   if (flowStats) {
     const flowParts: string[] = [];
-    if (flowStats.callRatio !== undefined) flowParts.push(`Call ratio: ${(flowStats.callRatio * 100).toFixed(0)}%`);
+    if (flowStats.callRatio !== undefined) flowParts.push(`Call ratio: ${flowStats.callRatio.toFixed(0)}%`);
     if (flowStats.netDeltaAdjustedFlow !== undefined) {
       const ndf = flowStats.netDeltaAdjustedFlow;
       flowParts.push(`Net delta-adjusted flow: ${ndf >= 0 ? '+' : ''}$${(ndf / 1e6).toFixed(1)}M (${ndf > 0 ? 'bullish' : 'bearish'})`);
@@ -1139,6 +1167,11 @@ interface UnifiedThesis {
     targets: string[];
     stop: string | null;
   };
+  bearSetup?: {
+    entry: string | null;
+    targets: string[];
+    stop: string | null;
+  } | null;
   risk: string | null;
 }
 
@@ -1292,6 +1325,7 @@ function buildUnifiedThesis(
   const activeSignals = signals.filter(t => t.bias !== 'NO_DATA');
   const bullish = activeSignals.filter(t => t.bias === 'BULLISH').length;
   const bearish = activeSignals.filter(t => t.bias === 'BEARISH').length;
+  const total = activeSignals.length;
 
   let bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
 
@@ -1309,18 +1343,30 @@ function buildUnifiedThesis(
     else if (bearish >= 2 && bullish === 0) bias = 'BEARISH';
   }
 
-  // Build one-liner (Confidence section)
+  const isMixed = bullish > 0 && bearish > 0;
+
+  // Build one-liner
   const movePct = ml ? (ml.move_probability * 100).toFixed(0) : '—';
-  const biasWord = bias === 'BULLISH' ? 'Bullish bias' : bias === 'BEARISH' ? 'Bearish bias' : 'Neutral stance';
-  const moveDesc = ml && ml.move_probability >= 0.8 ? 'High move probability' : ml && ml.move_probability >= 0.6 ? 'Moderate move probability' : 'Low move probability';
-  const oneLiner = `${biasWord} · ${moveDesc}`;
+  let oneLiner: string;
+  if (isMixed) {
+    oneLiner = `Mixed signals · ${bullish} bull / ${bearish} bear · Both setups below`;
+  } else if (bias === 'BULLISH') {
+    oneLiner = `Bullish bias · ${bullish}/${total} signals aligned`;
+  } else if (bias === 'BEARISH') {
+    oneLiner = `Bearish bias · ${bearish}/${total} signals aligned`;
+  } else {
+    oneLiner = `Neutral · Waiting for signal alignment`;
+  }
+  if (ml?.has_signal) {
+    oneLiner += ` · ML ${movePct}% move prob`;
+  }
 
   // Build thesis body
   const bodyParts: string[] = [];
 
   // ML context
   if (ml?.has_signal) {
-    bodyParts.push(`The ML model shows ${movePct}% probability of a significant move with ${ml.direction.toLowerCase()} directional bias.`);
+    bodyParts.push(`ML model: ${movePct}% move probability, ${ml.direction.toLowerCase()} bias.`);
   }
 
   // Flow context
@@ -1347,24 +1393,45 @@ function buildUnifiedThesis(
     bodyParts.push(`Price ${aboveFlip ? 'above' : 'below'} GEX flip ($${levels.gexFlip.toFixed(0)}) — ${aboveFlip ? 'mean-reversion zone, moves likely capped' : 'trend zone, moves can extend'}.`);
   }
 
-  if (bodyParts.length === 0) {
-    bodyParts.push(`${ticker} at $${price.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%). Limited data available — wait for more signals before committing.`);
+  // For mixed signals: add explicit bull/bear case summary
+  if (isMixed) {
+    const bullSignals = activeSignals.filter(s => s.bias === 'BULLISH').map(s => s.label).join(', ');
+    const bearSignals = activeSignals.filter(s => s.bias === 'BEARISH').map(s => s.label).join(', ');
+    bodyParts.push(`Bull case (${bullSignals}) vs Bear case (${bearSignals}). VWAP${levels.vwap ? ` ($${levels.vwap.toFixed(0)})` : ''} is the pivot — bulls need to hold it, bears need to break it.`);
   }
 
-  // Build setup
-  const setup: UnifiedThesis['setup'] = { entry: null, targets: [], stop: null };
+  if (bodyParts.length === 0) {
+    bodyParts.push(`${ticker} at $${price.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%). Limited data — wait for more signals.`);
+  }
 
-  if (bias === 'BULLISH') {
+  // Build setups — ALWAYS show both when mixed
+  const setup: UnifiedThesis['setup'] = { entry: null, targets: [], stop: null };
+  let bearSetup: UnifiedThesis['bearSetup'] = null;
+
+  if (isMixed) {
+    // Bull setup
+    if (levels.vwap) setup.entry = `$${levels.vwap.toFixed(2)} (VWAP hold)`;
+    else setup.entry = `$${price.toFixed(2)} (current)`;
+    if (levels.callWall && levels.callWall > price) setup.targets.push(`$${levels.callWall.toFixed(2)} (call wall)`);
+    if (levels.gexFlip && levels.gexFlip > price) setup.targets.push(`$${levels.gexFlip.toFixed(2)} (GEX flip)`);
+    setup.stop = levels.gexFlip ? `$${levels.gexFlip.toFixed(2)} (GEX flip)` : levels.putWall ? `$${levels.putWall.toFixed(2)} (put wall)` : null;
+
+    // Bear setup
+    bearSetup = { entry: null, targets: [], stop: null };
+    if (levels.vwap) bearSetup.entry = `$${levels.vwap.toFixed(2)} (VWAP break)`;
+    else bearSetup.entry = `$${price.toFixed(2)} (current)`;
+    if (levels.gexFlip && levels.gexFlip < price) bearSetup.targets.push(`$${levels.gexFlip.toFixed(2)} (GEX flip)`);
+    if (levels.putWall && levels.putWall < price) bearSetup.targets.push(`$${levels.putWall.toFixed(2)} (put wall)`);
+    bearSetup.stop = levels.callWall ? `$${levels.callWall.toFixed(2)} (call wall)` : null;
+  } else if (bias === 'BULLISH') {
     if (levels.vwap) setup.entry = `$${levels.vwap.toFixed(2)} (VWAP)`;
     else setup.entry = `$${price.toFixed(2)} (current)`;
-
     if (levels.gexFlip && levels.gexFlip > price) setup.targets.push(`$${levels.gexFlip.toFixed(2)} (GEX flip)`);
     if (levels.callWall && levels.callWall > price) setup.targets.push(`$${levels.callWall.toFixed(2)} (call wall)`);
     if (levels.putWall) setup.stop = `$${levels.putWall.toFixed(2)} (put wall)`;
   } else if (bias === 'BEARISH') {
     if (levels.vwap) setup.entry = `$${levels.vwap.toFixed(2)} (VWAP)`;
     else setup.entry = `$${price.toFixed(2)} (current)`;
-
     if (levels.gexFlip && levels.gexFlip < price) setup.targets.push(`$${levels.gexFlip.toFixed(2)} (GEX flip)`);
     if (levels.putWall && levels.putWall < price) setup.targets.push(`$${levels.putWall.toFixed(2)} (put wall)`);
     if (levels.callWall) setup.stop = `$${levels.callWall.toFixed(2)} (call wall)`;
@@ -1372,12 +1439,14 @@ function buildUnifiedThesis(
 
   // Build risk
   let risk: string | null = null;
-  if (bias === 'BULLISH' && levels.putWall) {
+  if (isMixed) {
+    risk = `Signals conflicting — VWAP${levels.vwap ? ` ($${levels.vwap.toFixed(0)})` : ''} is the decision level. Above it favors bulls, below it favors bears. Wait for flow/dark pool to align before sizing up.`;
+  } else if (bias === 'BULLISH' && levels.putWall) {
     risk = `Thesis invalidated below $${levels.putWall.toFixed(2)} (put wall). Watch for reversal in options flow direction.`;
   } else if (bias === 'BEARISH' && levels.callWall) {
     risk = `Thesis invalidated above $${levels.callWall.toFixed(2)} (call wall). Watch for sudden call sweep activity.`;
   } else if (bias === 'NEUTRAL') {
-    risk = `Mixed signals — avoid directional bets until confluence improves. Key levels to watch: call wall at $${levels.callWall?.toFixed(2) || '—'}, put wall at $${levels.putWall?.toFixed(2) || '—'}.`;
+    risk = `No strong directional signal. Key levels: call wall $${levels.callWall?.toFixed(0) || '—'}, put wall $${levels.putWall?.toFixed(0) || '—'}. Wait for alignment.`;
   }
 
   return {
@@ -1385,6 +1454,7 @@ function buildUnifiedThesis(
     oneLiner,
     body: bodyParts.join(' '),
     setup,
+    bearSetup,
     risk,
   };
 }
