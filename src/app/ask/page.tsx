@@ -341,6 +341,7 @@ function AskPageContent() {
                 price={data.price}
                 levels={data.levels}
                 marketSession={data.marketSession}
+                changePercent={data.changePercent}
               />
 
               <div className="h-4" />

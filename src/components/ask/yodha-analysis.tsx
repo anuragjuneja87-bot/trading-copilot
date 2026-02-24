@@ -362,20 +362,123 @@ interface AskYodhaChatProps {
   price: number;
   levels: YodhaAnalysisProps['levels'];
   marketSession: string;
+  changePercent?: number;
 }
 
-export function AskYodhaChat({ ticker, price, levels, marketSession }: AskYodhaChatProps) {
+/* Animated glowing Yodha icon */
+function YodhaGlowIcon({ size = 28, pulse = true }: { size?: number; pulse?: boolean }) {
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: size + 12, height: size + 12 }}>
+      {/* Outer glow rings */}
+      {pulse && (
+        <>
+          <div
+            className="absolute inset-0 rounded-full animate-ping"
+            style={{
+              background: `radial-gradient(circle, ${COLORS.cyan}30 0%, transparent 70%)`,
+              animationDuration: '3s',
+            }}
+          />
+          <div
+            className="absolute rounded-full"
+            style={{
+              inset: 2,
+              background: `radial-gradient(circle, ${COLORS.cyan}15 0%, transparent 60%)`,
+              animation: 'pulse 2s ease-in-out infinite',
+            }}
+          />
+        </>
+      )}
+      {/* Core icon */}
+      <div
+        className="relative z-10 flex items-center justify-center rounded-full"
+        style={{
+          width: size,
+          height: size,
+          background: `linear-gradient(135deg, ${COLORS.cyan}25, ${COLORS.purple}20)`,
+          border: `1.5px solid ${COLORS.cyan}50`,
+          boxShadow: `0 0 12px ${COLORS.cyan}30, 0 0 4px ${COLORS.cyan}20`,
+        }}
+      >
+        <Shield className="text-white" style={{ width: size * 0.5, height: size * 0.5, color: COLORS.cyan }} />
+      </div>
+    </div>
+  );
+}
+
+/** Generate smart suggestions based on current market context */
+function getContextSuggestions(
+  ticker: string,
+  session: string,
+  levels: AskYodhaChatProps['levels'],
+  changePercent?: number,
+): string[] {
+  const t = ticker;
+
+  // Session-aware suggestions
+  if (session === 'pre-market' || session === 'premarket') {
+    return [
+      `How should I play the ${t} gap today?`,
+      `What does premarket flow say about ${t}?`,
+      `Key levels to watch for ${t} at open`,
+      `Is this a fade or follow for ${t}?`,
+    ];
+  }
+
+  if (session === 'closed' || session === 'after-hours') {
+    return [
+      `Recap ${t}'s session — what stood out?`,
+      `What's the setup for ${t} tomorrow?`,
+      `Where are the key gamma levels for ${t}?`,
+      `Break down today's dark pool activity on ${t}`,
+    ];
+  }
+
+  // Market-hours suggestions — adapt to price action
+  const isSelling = (changePercent ?? 0) < -1.5;
+  const isRipping = (changePercent ?? 0) > 1.5;
+
+  if (isSelling) {
+    return [
+      `Is ${t} finding support here or more downside?`,
+      `Where's the put wall floor for ${t}?`,
+      `Is smart money buying this ${t} dip?`,
+      `Risk/reward to go long ${t} here?`,
+    ];
+  }
+
+  if (isRipping) {
+    return [
+      `Is ${t} extended or just getting started?`,
+      `Where does ${t} run into call wall resistance?`,
+      `Is the ${t} rally backed by flow?`,
+      `Where should I take profit on ${t}?`,
+    ];
+  }
+
+  // Default market-hours (choppy / neutral)
+  return [
+    `What's the best entry for ${t} right now?`,
+    `Bull or bear case for ${t} today?`,
+    `Is options flow confirming the ${t} move?`,
+    `What would invalidate the ${t} thesis?`,
+  ];
+}
+
+export function AskYodhaChat({ ticker, price, levels, marketSession, changePercent }: AskYodhaChatProps) {
   const [query, setQuery] = useState('');
   const [answer, setAnswer] = useState('');
   const [loading, setLoading] = useState(false);
+  const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const suggestions = [
-    `What's the risk if VIX spikes?`,
-    `Where are the key gamma levels?`,
-    `Is the dark pool data bullish or bearish?`,
-    `Show me the put wall risk.`,
-  ];
+  const suggestions = useMemo(
+    () => getContextSuggestions(ticker, marketSession, levels, changePercent),
+    [ticker, marketSession, levels, changePercent]
+  );
+
+  // Reset answer when ticker changes
+  useEffect(() => { setAnswer(''); }, [ticker]);
 
   const handleAsk = useCallback(async (q?: string) => {
     const question = q || query.trim();
@@ -404,31 +507,82 @@ export function AskYodhaChat({ ticker, price, levels, marketSession }: AskYodhaC
     }
   }, [query, ticker, price, levels, marketSession]);
 
+  const borderColor = focused || loading ? COLORS.cyan : 'rgba(0,229,255,0.15)';
+
   return (
     <div
-      className="rounded-xl overflow-hidden"
-      style={{ background: COLORS.cardBg, border: `1px solid ${COLORS.cardBorder}` }}
+      className="rounded-xl overflow-hidden relative transition-all duration-500"
+      style={{
+        background: `linear-gradient(135deg, rgba(0,229,255,0.04) 0%, rgba(124,77,255,0.03) 50%, rgba(0,229,255,0.02) 100%)`,
+        border: `1px solid ${borderColor}`,
+        boxShadow: focused || loading
+          ? `0 0 20px ${COLORS.cyan}15, 0 0 40px ${COLORS.cyan}08`
+          : `0 0 10px ${COLORS.cyan}06`,
+      }}
     >
+      {/* Header with glowing icon */}
+      <div className="px-4 pt-3.5 pb-1 flex items-center gap-2.5">
+        <YodhaGlowIcon size={24} pulse={!answer && !loading} />
+        <div className="flex-1">
+          <span
+            className="text-xs font-bold tracking-wide"
+            style={{ color: COLORS.cyan, fontFamily: "'Oxanium', monospace" }}
+          >
+            ASK YODHA
+          </span>
+          <span className="text-[10px] text-gray-500 ml-2">
+            AI Trading Analysis
+          </span>
+        </div>
+        {answer && (
+          <button
+            onClick={() => setAnswer('')}
+            className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 rounded"
+            style={{ background: 'rgba(255,255,255,0.04)' }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       {/* Answer area */}
       {answer && (
-        <div className="px-5 py-4 border-b" style={{ borderColor: COLORS.cardBorder }}>
-          <div className="flex items-center gap-2 mb-2">
-            <Shield className="w-3.5 h-3.5" style={{ color: COLORS.cyan }} />
-            <span className="text-xs font-bold" style={{ color: COLORS.cyan }}>Yodha</span>
+        <div className="px-4 pt-2 pb-3">
+          <div
+            className="rounded-lg px-4 py-3"
+            style={{
+              background: `linear-gradient(135deg, ${COLORS.cyan}08, ${COLORS.purple}05)`,
+              border: `1px solid ${COLORS.cyan}15`,
+            }}
+          >
+            <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">{answer}</p>
           </div>
-          <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">{answer}</p>
         </div>
       )}
 
-      {/* Suggestions */}
-      {!answer && (
-        <div className="px-5 pt-3 pb-1 flex flex-wrap gap-1.5">
+      {/* Suggestions — only show when no answer */}
+      {!answer && !loading && (
+        <div className="px-4 pt-1 pb-1 flex flex-wrap gap-1.5">
           {suggestions.map((s, i) => (
             <button
               key={i}
               onClick={() => { setQuery(s); handleAsk(s); }}
-              className="px-2.5 py-1 rounded-full text-[10px] text-gray-400 hover:text-gray-200 transition-colors"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
+              className="group px-3 py-1.5 rounded-full text-[11px] transition-all duration-200"
+              style={{
+                color: 'rgba(255,255,255,0.5)',
+                background: 'rgba(0,229,255,0.04)',
+                border: '1px solid rgba(0,229,255,0.08)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = `${COLORS.cyan}30`;
+                e.currentTarget.style.color = 'rgba(255,255,255,0.8)';
+                e.currentTarget.style.background = `${COLORS.cyan}10`;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(0,229,255,0.08)';
+                e.currentTarget.style.color = 'rgba(255,255,255,0.5)';
+                e.currentTarget.style.background = 'rgba(0,229,255,0.04)';
+              }}
             >
               {s}
             </button>
@@ -436,16 +590,29 @@ export function AskYodhaChat({ ticker, price, levels, marketSession }: AskYodhaC
         </div>
       )}
 
-      {/* Input */}
+      {/* Loading state */}
+      {loading && !answer && (
+        <div className="px-4 pt-2 pb-1 flex items-center gap-2">
+          <div className="flex gap-1">
+            <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: COLORS.cyan, animationDelay: '0ms' }} />
+            <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: COLORS.cyan, animationDelay: '150ms' }} />
+            <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: COLORS.cyan, animationDelay: '300ms' }} />
+          </div>
+          <span className="text-xs text-gray-500">Yodha is analyzing {ticker}...</span>
+        </div>
+      )}
+
+      {/* Input bar */}
       <div className="px-4 py-3 flex items-center gap-2">
-        <MessageSquare className="w-4 h-4 text-gray-600 flex-shrink-0" />
         <input
           ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAsk()}
-          placeholder={`Ask Yodha about ${ticker}...`}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder={`Ask about ${ticker}...`}
           className="flex-1 bg-transparent text-sm text-white placeholder-gray-600 focus:outline-none"
           style={{ fontFamily: "'Oxanium', monospace" }}
           disabled={loading}
@@ -453,8 +620,12 @@ export function AskYodhaChat({ ticker, price, levels, marketSession }: AskYodhaC
         <button
           onClick={() => handleAsk()}
           disabled={loading || !query.trim()}
-          className="p-2 rounded-lg transition-all disabled:opacity-30"
-          style={{ background: query.trim() ? `${COLORS.cyan}20` : 'transparent', color: COLORS.cyan }}
+          className="p-2 rounded-lg transition-all duration-200 disabled:opacity-20"
+          style={{
+            background: query.trim() ? `${COLORS.cyan}20` : 'transparent',
+            color: COLORS.cyan,
+            boxShadow: query.trim() ? `0 0 8px ${COLORS.cyan}20` : 'none',
+          }}
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </button>
