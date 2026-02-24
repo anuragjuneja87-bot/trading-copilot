@@ -82,19 +82,23 @@ export function LiveTickerBar() {
 
   // Merge WebSocket data with REST fallback
   const getTickerData = (ticker: string): TickerData | null => {
-    // Prefer WebSocket data if available and fresh
+    const restData = tickerData.get(ticker) || null;
+    
+    // Prefer WebSocket data if available, fresh, AND market is open
     const wsQuote = ws?.getQuote(ticker);
     if (wsQuote && wsQuote.price > 0) {
+      // When market is closed, WS may report 0% change — use REST change instead
+      const useRestChange = !isMarketOpen && restData && Math.abs(restData.changePercent) > 0.001 && Math.abs(wsQuote.changePercent) < 0.001;
       return {
         ticker: wsQuote.ticker,
         price: wsQuote.price,
-        change: wsQuote.change,
-        changePercent: wsQuote.changePercent,
+        change: useRestChange ? restData!.change : wsQuote.change,
+        changePercent: useRestChange ? restData!.changePercent : wsQuote.changePercent,
       };
     }
     
     // Fall back to REST data
-    return tickerData.get(ticker) || null;
+    return restData;
   };
 
   // Double the tickers for seamless loop

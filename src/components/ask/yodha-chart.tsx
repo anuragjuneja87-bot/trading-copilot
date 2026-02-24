@@ -5,28 +5,25 @@ import { useState, useEffect, useRef, useCallback, memo } from 'react';
 /* ════════════════════════════════════════════════════════════════
    YODHA CHART — Pressure-colored candlestick chart
    
-   Replaces TradingView widget with custom Lightweight Charts.
-   Secret sauce: candle colors driven by scoring algo + ML.
-   Color is computed SERVER-SIDE and returned per bar.
+   v2: Added volume sub-pane, session markers, prev day levels,
+       today O/H/L tracking, bigger AI Pressure Engine branding.
    
    Data contract:
      /api/candles/[ticker]?tf=5m → { bars: [{ t, o, h, l, c, v, vw, bp, brp, color }] }
-     bp = bull pressure (0-100), brp = bear pressure (0-100)
-     color = hex color from server scoring algo
    ════════════════════════════════════════════════════════════════ */
 
 // ── Types ────────────────────────────────────────────
 
 interface Bar {
-  t: number;       // UTC timestamp (ms from Polygon)
+  t: number;       // UTC timestamp (seconds from API)
   o: number;       // open
   h: number;       // high
   l: number;       // low
   c: number;       // close
   v: number;       // volume
   vw: number;      // VWAP
-  bp?: number;     // bull pressure 0-100 (from scoring algo)
-  brp?: number;    // bear pressure 0-100 (from scoring algo)
+  bp?: number;     // bull pressure 0-100
+  brp?: number;    // bear pressure 0-100
   color?: string;  // hex candle color (server-computed)
 }
 
@@ -52,11 +49,11 @@ interface YodhaChartProps {
     maxPain?: number | null;
     vwap?: number | null;
   };
-  // Optional: Camarilla inputs (prev day H/L/C)
   prevDayHLC?: { h: number; l: number; c: number };
+  todayOHL?: { o: number; h: number; l: number } | null;
 }
 
-// ── Pressure → Color (client fallback if server doesn't provide color) ──
+// ── Pressure → Color (client fallback) ──
 
 const PRESSURE_COLORS = {
   strongBull: '#26a69a',
@@ -90,6 +87,21 @@ function fmtDateET(utcMs: number): string {
   });
 }
 
+/** Get ET hours/minutes from a UTC-seconds timestamp */
+function getETTime(utcSec: number): { hour: number; minute: number; dayStr: string } {
+  const d = new Date(utcSec * 1000);
+  const etStr = d.toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const et = new Date(etStr);
+  const dayStr = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  return { hour: et.getHours(), minute: et.getMinutes(), dayStr };
+}
+
+function formatVolume(v: number): string {
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(0)}K`;
+  return v.toString();
+}
+
 // ── Constants ──
 
 const TF_MAP: Record<string, { apiTf: string; label: string; barMins: number }> = {
@@ -106,24 +118,27 @@ const FONT = "'JetBrains Mono', 'SF Mono', monospace";
 // ── Component ──────────────────────────────────────────
 
 function YodhaChartInner({
-  ticker, timeframe, price, changePercent, marketSession, levels, prevDayHLC,
+  ticker, timeframe, price, changePercent, marketSession, levels, prevDayHLC, todayOHL,
 }: YodhaChartProps) {
   const mainRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const candleSeriesRef = useRef<any>(null);
+  const volumeSeriesRef = useRef<any>(null);
   const vwapSeriesRef = useRef<any>(null);
   const activeLevelsRef = useRef<Record<string, any>>({});
-  const pressureMapRef = useRef<Record<number, { bp: number; brp: number }>>({});
-  const lcRef = useRef<any>(null); // lightweight-charts module
+  const pressureMapRef = useRef<Record<number, { bp: number; brp: number; v: number }>>({});
+  const lcRef = useRef<any>(null);
 
   const [bars, setBars] = useState<Bar[]>([]);
   const [activeTF, setActiveTF] = useState(timeframe || '5m');
-  const [groupVis, setGroupVis] = useState({ vwap: true, walls: true, cam: true });
+  const [groupVis, setGroupVis] = useState({ vwap: true, walls: true, cam: true, prevDay: true });
   const [loading, setLoading] = useState(true);
+
+  // Track today's session stats from bars
+  const [sessionStats, setSessionStats] = useState<{ totalVol: number; barCount: number } | null>(null);
 
   // ── Sync internal TF when parent timeframe prop changes ──
   useEffect(() => {
-    // Map parent timeframe (1M, 5M, 15M, 30M, 1H, 4H, 1D, 1W) to our TF format
     const mapped = timeframe?.toLowerCase().replace(/\s/g, '') || '5m';
     const valid = TF_MAP[mapped] ? mapped : '5m';
     if (valid !== activeTF) {
@@ -135,7 +150,7 @@ function YodhaChartInner({
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Compute Camarilla levels from prev day HLC (or use levels from API) ──
+  // ── Compute Camarilla levels ──
   const camLevels = prevDayHLC ? (() => {
     const R = prevDayHLC.h - prevDayHLC.l;
     return {
@@ -166,14 +181,13 @@ function YodhaChartInner({
     }
   }, [ticker]);
 
-  // ── Initialize Lightweight Charts (dynamic import) ──
+  // ── Initialize Lightweight Charts ──
   useEffect(() => {
     if (!mainRef.current) return;
 
     let destroyed = false;
 
     (async () => {
-      // Dynamic import — lightweight-charts is a client-only library
       const LC = await import('lightweight-charts');
       if (destroyed) return;
       lcRef.current = LC;
@@ -201,7 +215,7 @@ function YodhaChartInner({
         },
         rightPriceScale: {
           borderColor: 'rgba(42,46,57,0.6)',
-          scaleMargins: { top: 0.06, bottom: 0.06 },
+          scaleMargins: { top: 0.04, bottom: 0.18 }, // Leave room for volume at bottom
         },
         timeScale: {
           borderColor: 'rgba(42,46,57,0.6)',
@@ -212,7 +226,6 @@ function YodhaChartInner({
           minBarSpacing: 2,
           visible: true,
           tickMarkFormatter: (time: number, type: number) => {
-            // type: 0=Year, 1=Month, 2=Day, 3=Time
             const ms = (time as number) * 1000;
             return type <= 2 ? fmtDateET(ms) : fmtET(ms);
           },
@@ -226,13 +239,23 @@ function YodhaChartInner({
 
       chartRef.current = chart;
 
-      // Candle series (colors overridden per-bar)
+      // Candle series
       const cs = chart.addCandlestickSeries({
         upColor: '#26a69a', downColor: '#ef5350',
         borderUpColor: '#26a69a', borderDownColor: '#ef5350',
         wickUpColor: '#26a69a', wickDownColor: '#ef5350',
       });
       candleSeriesRef.current = cs;
+
+      // ★ VOLUME HISTOGRAM — separate price scale at bottom ★
+      const volSeries = chart.addHistogramSeries({
+        priceFormat: { type: 'volume' },
+        priceScaleId: 'volume',
+      });
+      volSeries.priceScale().applyOptions({
+        scaleMargins: { top: 0.85, bottom: 0 }, // Volume in bottom 15%
+      });
+      volumeSeriesRef.current = volSeries;
 
       // VWAP line
       const vwap = chart.addLineSeries({
@@ -241,7 +264,7 @@ function YodhaChartInner({
       });
       vwapSeriesRef.current = vwap;
 
-      // Crosshair → show pressure in overlay
+      // Crosshair → show pressure + volume in overlay
       chart.subscribeCrosshairMove((param: any) => {
         const el = document.getElementById('yodha-pressure-readout');
         if (!el) return;
@@ -255,7 +278,9 @@ function YodhaChartInner({
             `<span style="color:rgba(209,212,220,0.15);margin:0 5px">|</span>` +
             `<span style="color:#ef5350;font-weight:700">▼ ${Math.round(p.brp)}</span>` +
             `<span style="color:rgba(209,212,220,0.15);margin:0 5px">|</span>` +
-            `<span style="color:${sp >= 0 ? '#26a69a' : '#ef5350'};font-weight:700">Δ${sp >= 0 ? '+' : ''}${sp}</span>`;
+            `<span style="color:${sp >= 0 ? '#26a69a' : '#ef5350'};font-weight:700">Δ${sp >= 0 ? '+' : ''}${sp}</span>` +
+            `<span style="color:rgba(209,212,220,0.15);margin:0 5px">|</span>` +
+            `<span style="color:rgba(209,212,220,0.45);font-weight:600">Vol ${formatVolume(p.v || 0)}</span>`;
         } else {
           el.innerHTML = '';
         }
@@ -276,13 +301,14 @@ function YodhaChartInner({
     return () => {
       destroyed = true;
       candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
       vwapSeriesRef.current = null;
       if (chartRef.current) {
         try { chartRef.current.remove(); } catch {}
         chartRef.current = null;
       }
     };
-  }, [ticker]); // Only reinit chart on ticker change
+  }, [ticker]);
 
   // ── Update chart data when bars change ──
   useEffect(() => {
@@ -290,52 +316,102 @@ function YodhaChartInner({
 
     const cs = candleSeriesRef.current;
     const vwapSeries = vwapSeriesRef.current;
+    const volSeries = volumeSeriesRef.current;
 
-    // Build pressure map + candle data with colors
-    // API returns t in seconds; if bar.t looks like ms (>= 1e10), convert to seconds
     const toTime = (t: number) => (t >= 1e10 ? Math.floor(t / 1000) : t) as number;
-    const pressureMap: Record<number, { bp: number; brp: number }> = {};
+    const pressureMap: Record<number, { bp: number; brp: number; v: number }> = {};
     const candleByTime = new Map<number, any>();
     const vwapByTime = new Map<number, number>();
+    const volumeByTime = new Map<number, any>();
+
+    // Track today's date to detect session boundaries
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    let totalVol = 0;
+    let barCount = 0;
 
     for (const bar of bars) {
       const timeSec = toTime(bar.t);
       const bp = bar.bp ?? 0;
       const brp = bar.brp ?? 0;
       const col = bar.color || pressureToColor(bp, brp);
+      
       candleByTime.set(timeSec, {
         time: timeSec,
-        open: bar.o,
-        high: bar.h,
-        low: bar.l,
-        close: bar.c,
-        color: col,
-        borderColor: col,
-        wickColor: col,
+        open: bar.o, high: bar.h, low: bar.l, close: bar.c,
+        color: col, borderColor: col, wickColor: col,
       });
+      
       vwapByTime.set(timeSec, bar.vw);
-      pressureMap[timeSec] = { bp, brp };
+      
+      // Volume colored by candle direction
+      const isUp = bar.c >= bar.o;
+      volumeByTime.set(timeSec, {
+        time: timeSec,
+        value: bar.v,
+        color: isUp ? 'rgba(38,166,154,0.35)' : 'rgba(239,83,80,0.35)',
+      });
+      
+      pressureMap[timeSec] = { bp, brp, v: bar.v };
+      
+      // Session stats
+      const { dayStr } = getETTime(timeSec);
+      if (dayStr === todayStr) {
+        totalVol += bar.v;
+        barCount++;
+      }
     }
 
-    // Strictly ascending time (dedupe by time, keep last bar per time)
-    const candleData = Array.from(candleByTime.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([, d]) => d);
-    const vwapData = Array.from(vwapByTime.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([time, value]) => ({ time, value }));
+    setSessionStats(barCount > 0 ? { totalVol, barCount } : null);
+
+    // Strictly ascending time
+    const candleData = Array.from(candleByTime.entries()).sort((a, b) => a[0] - b[0]).map(([, d]) => d);
+    const vwapData = Array.from(vwapByTime.entries()).sort((a, b) => a[0] - b[0]).map(([time, value]) => ({ time, value }));
+    const volumeData = Array.from(volumeByTime.entries()).sort((a, b) => a[0] - b[0]).map(([, d]) => d);
 
     pressureMapRef.current = pressureMap;
     try {
       cs.setData(candleData);
       if (vwapSeries) vwapSeries.setData(vwapData);
+      if (volSeries) volSeries.setData(volumeData);
       drawLevels();
+      
+      // ★ Add session markers (vertical lines at 9:30 AM ET) ★
+      addSessionMarkers(candleData);
+      
       if (chartRef.current) chartRef.current.timeScale().fitContent();
     } catch (e) {
-      // Chart/series may be disposed (e.g. ticker changed or unmount)
       if (String(e).indexOf('disposed') === -1) console.error('[YodhaChart] setData:', e);
     }
-  }, [bars, groupVis, levels, camLevels]);
+  }, [bars, groupVis, levels, camLevels, prevDayHLC]);
+
+  // ── Add session open markers ──
+  const addSessionMarkers = useCallback((candleData: any[]) => {
+    const cs = candleSeriesRef.current;
+    if (!cs || !candleData.length) return;
+
+    const markers: any[] = [];
+    let lastDay = '';
+
+    for (const candle of candleData) {
+      const { hour, minute, dayStr } = getETTime(candle.time);
+      // Mark first bar of each trading day (9:30 AM)
+      if (dayStr !== lastDay && hour === 9 && minute >= 30 && minute < 35) {
+        markers.push({
+          time: candle.time,
+          position: 'aboveBar',
+          color: 'rgba(255,255,255,0.3)',
+          shape: 'arrowDown',
+          text: `OPEN ${dayStr.slice(5)}`, // "02-24"
+          size: 0.5,
+        });
+        lastDay = dayStr;
+      }
+    }
+
+    if (markers.length > 0) {
+      try { cs.setMarkers(markers); } catch {}
+    }
+  }, []);
 
   // ── Draw levels on candle series ──
   const drawLevels = useCallback(() => {
@@ -353,7 +429,7 @@ function YodhaChartInner({
 
     const allLevels: Record<string, LevelDef> = {};
 
-    // VWAP (from latest bar's vw or levels prop)
+    // VWAP
     const lastBar = bars[bars.length - 1];
     const vwapPrice = levels.vwap || lastBar?.vw;
     if (vwapPrice && groupVis.vwap) {
@@ -374,6 +450,13 @@ function YodhaChartInner({
       allLevels.s4 = { price: camLevels.s4, label: 'S4', color: '#ff7043', style: LineStyle.Dotted, group: 'cam' };
     }
 
+    // ★ PREVIOUS DAY LEVELS — prev close, prev high, prev low ★
+    if (groupVis.prevDay && prevDayHLC) {
+      allLevels.prevClose = { price: prevDayHLC.c, label: 'PC', color: '#ffeb3b', style: LineStyle.Dashed, width: 1, group: 'prevDay' };
+      allLevels.prevHigh = { price: prevDayHLC.h, label: 'PH', color: 'rgba(255,235,59,0.45)', style: LineStyle.Dotted, width: 1, group: 'prevDay' };
+      allLevels.prevLow = { price: prevDayHLC.l, label: 'PL', color: 'rgba(255,235,59,0.45)', style: LineStyle.Dotted, width: 1, group: 'prevDay' };
+    }
+
     // Create price lines
     Object.entries(allLevels).forEach(([key, lv]) => {
       activeLevelsRef.current[key] = cs.createPriceLine({
@@ -385,7 +468,7 @@ function YodhaChartInner({
         title: `${lv.label} ${lv.price.toFixed(2)}`,
       });
     });
-  }, [bars, groupVis, levels, camLevels]);
+  }, [bars, groupVis, levels, camLevels, prevDayHLC]);
 
   // ── Timeframe change ──
   const handleTFChange = useCallback(async (tf: string) => {
@@ -399,7 +482,6 @@ function YodhaChartInner({
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
 
-    // Poll rate based on TF and market session
     const config = TF_MAP[activeTF] || TF_MAP['5m'];
     let interval: number;
     if (marketSession === 'open') {
@@ -418,6 +500,14 @@ function YodhaChartInner({
   const toggleGroup = useCallback((group: string) => {
     setGroupVis(prev => ({ ...prev, [group]: !prev[group as keyof typeof prev] }));
   }, []);
+
+  // ── Compute last bar pressure for legend ──
+  const lastBarPressure = bars.length > 0 ? (() => {
+    const last = bars[bars.length - 1];
+    const bp = last.bp ?? 0;
+    const brp = last.brp ?? 0;
+    return { bp: Math.round(bp), brp: Math.round(brp), delta: Math.round(bp - brp) };
+  })() : null;
 
   // ── Render ──
   const isUp = changePercent >= 0;
@@ -440,6 +530,16 @@ function YodhaChartInner({
         }}>
           {isUp ? '+' : ''}{changePercent.toFixed(2)}%
         </span>
+
+        {/* Session volume */}
+        {sessionStats && (
+          <>
+            <div style={{ width: 1, height: 18, background: 'rgba(42,46,57,0.6)' }} />
+            <span style={{ fontSize: 9, color: 'rgba(209,212,220,0.4)', letterSpacing: 0.3 }}>
+              Vol {formatVolume(sessionStats.totalVol)}
+            </span>
+          </>
+        )}
 
         <div style={{ width: 1, height: 18, background: 'rgba(42,46,57,0.6)' }} />
 
@@ -470,6 +570,7 @@ function YodhaChartInner({
             { group: 'vwap', label: 'VWAP', color: '#2962ff' },
             { group: 'walls', label: 'CW / PW', color: '#ff9800' },
             ...(camLevels ? [{ group: 'cam', label: 'Camarilla', color: '#00bcd4' }] : []),
+            ...(prevDayHLC ? [{ group: 'prevDay', label: 'Prev Day', color: '#ffeb3b' }] : []),
           ].map(chip => {
             const vis = groupVis[chip.group as keyof typeof groupVis];
             return (
@@ -496,35 +597,66 @@ function YodhaChartInner({
 
       {/* ── Chart Area ── */}
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-        {/* Pressure Legend + Live Readout (overlay) */}
+        {/* ★ AI PRESSURE ENGINE — Bigger, more prominent branding ★ */}
         <div style={{
           position: 'absolute', top: 6, left: 10, zIndex: 5,
-          display: 'flex', alignItems: 'center', gap: 10,
-          pointerEvents: 'none', fontSize: 9, fontWeight: 600, fontFamily: FONT,
+          display: 'flex', flexDirection: 'column', gap: 4,
+          pointerEvents: 'none', fontFamily: FONT,
         }}>
+          {/* Main label row */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8,
-            background: 'rgba(19,23,34,0.85)', padding: '4px 10px', borderRadius: 4,
-            border: '1px solid rgba(42,46,57,0.4)',
+            background: 'rgba(19,23,34,0.9)', padding: '5px 12px', borderRadius: 5,
+            border: '1px solid rgba(42,46,57,0.5)',
           }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#26a69a', animation: 'yodha-pulse 2s ease-in-out infinite', boxShadow: '0 0 4px rgba(38,166,154,0.5)' }} />
-            <span style={{ color: 'rgba(209,212,220,0.55)', fontSize: 8, letterSpacing: '0.5px', textTransform: 'uppercase' }}>AI Pressure Engine</span>
-            <div style={{ width: 1, height: 10, background: 'rgba(42,46,57,0.5)' }} />
-            <div style={{ width: 10, height: 10, borderRadius: 2, background: '#26a69a' }} />
-            <span style={{ color: 'rgba(209,212,220,0.4)' }}>Bullish</span>
-            <div style={{ width: 10, height: 10, borderRadius: 2, background: '#ff9800' }} />
-            <span style={{ color: 'rgba(209,212,220,0.4)' }}>Crossover</span>
-            <div style={{ width: 10, height: 10, borderRadius: 2, background: '#ef5350' }} />
-            <span style={{ color: 'rgba(209,212,220,0.4)' }}>Bearish</span>
+            <div style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: '#26a69a', animation: 'yodha-pulse 2s ease-in-out infinite',
+              boxShadow: '0 0 6px rgba(38,166,154,0.5)',
+            }} />
+            <span style={{ color: '#26a69a', fontSize: 10, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}>
+              AI Pressure Engine
+            </span>
+            <div style={{ width: 1, height: 12, background: 'rgba(42,46,57,0.5)' }} />
+            {/* Color key */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {[
+                { color: '#26a69a', label: 'Bull' },
+                { color: '#ff9800', label: 'Crossover' },
+                { color: '#ef5350', label: 'Bear' },
+              ].map(k => (
+                <div key={k.label} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: 2, background: k.color }} />
+                  <span style={{ color: 'rgba(209,212,220,0.45)', fontSize: 9 }}>{k.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div
-            id="yodha-pressure-readout"
-            style={{
-              background: 'rgba(19,23,34,0.85)', padding: '4px 10px', borderRadius: 4,
-              border: '1px solid rgba(42,46,57,0.4)', fontSize: 10,
-            }}
-          />
+
+          {/* Live pressure readout */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div
+              id="yodha-pressure-readout"
+              style={{
+                background: 'rgba(19,23,34,0.9)', padding: '4px 10px', borderRadius: 4,
+                border: '1px solid rgba(42,46,57,0.4)', fontSize: 10, minHeight: 20,
+              }}
+            />
+            {/* Static last-bar readout when crosshair not active */}
+            {lastBarPressure && (
+              <div style={{
+                background: 'rgba(19,23,34,0.7)', padding: '3px 8px', borderRadius: 4,
+                border: '1px solid rgba(42,46,57,0.3)', fontSize: 9,
+                color: 'rgba(209,212,220,0.3)',
+              }}>
+                Last: <span style={{ color: lastBarPressure.delta >= 0 ? '#26a69a' : '#ef5350', fontWeight: 600 }}>
+                  Δ{lastBarPressure.delta >= 0 ? '+' : ''}{lastBarPressure.delta}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
+
         <style>{`@keyframes yodha-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
 
         {/* Loading overlay */}
@@ -557,31 +689,3 @@ function YodhaChartInner({
 }
 
 export const YodhaChart = memo(YodhaChartInner);
-
-/* ════════════════════════════════════════════════════════════════
-   SERVER-SIDE: Add to /api/candles/[ticker]/route.ts
-   
-   After computing VWAP for each bar, also compute pressure + color:
-   
-   ```ts
-   import { computeBarPressure } from '@/lib/bias-score';
-   
-   const processedBars = bars.map((bar, i) => {
-     const { bp, brp } = computeBarPressure(bar, prevBars, flowData, mlScore);
-     const spread = bp - brp;
-     const color = spread > 25  ? '#26a69a'   // strong bull
-                 : spread > 8   ? '#1b8a7a'   // bull
-                 : spread > -8  ? '#ff9800'    // crossover
-                 : spread > -25 ? '#c94442'    // bear
-                 : '#ef5350';                  // strong bear
-     return {
-       t: bar.t, o: bar.o, h: bar.h, l: bar.l, c: bar.c,
-       v: bar.v, vw: computedVwap,
-       bp, brp, color,
-     };
-   });
-   ```
-   
-   This keeps your scoring algo + ML model server-side.
-   The client just renders whatever color the API sends.
-   ════════════════════════════════════════════════════════════════ */

@@ -92,6 +92,10 @@ interface WarRoomData {
     prevHigh: number | null;
     prevLow: number | null;
     prevClose: number | null;
+    // Today's session levels (from Polygon snapshot.day)
+    todayOpen: number | null;
+    todayHigh: number | null;
+    todayLow: number | null;
   };
   
   verdict: {
@@ -346,7 +350,7 @@ export function useWarRoomData(
         flow: { stats: null, trades: [], loading: false, error: err.message },
         darkpool: { prints: [], stats: null, loading: false, error: err.message, meta: undefined },
         news: { items: [], loading: false },
-        levels: { callWall: null, putWall: null, maxGamma: null, gexFlip: null, maxPain: null, vwap: null, r3: null, r4: null, s3: null, s4: null, prevHigh: null, prevLow: null, prevClose: null },
+        levels: { callWall: null, putWall: null, maxGamma: null, gexFlip: null, maxPain: null, vwap: null, r3: null, r4: null, s3: null, s4: null, prevHigh: null, prevLow: null, prevClose: null, todayOpen: null, todayHigh: null, todayLow: null },
         verdict: { bias: 'NEUTRAL', confidence: 0, summary: 'Error loading data', signals: { flow: 'NEUTRAL', darkpool: 'NEUTRAL', newsAlignment: false } },
       });
     } finally {
@@ -373,7 +377,7 @@ export function useWarRoomData(
     flow: data.flow || { stats: null, trades: [], loading: true, error: null },
     darkpool: data.darkpool || { prints: [], stats: null, loading: true, error: null, meta: undefined },
     news: data.news || { items: [], loading: true },
-    levels: data.levels || { callWall: null, putWall: null, maxGamma: null, gexFlip: null, maxPain: null, vwap: null, r3: null, r4: null, s3: null, s4: null, prevHigh: null, prevLow: null, prevClose: null },
+    levels: data.levels || { callWall: null, putWall: null, maxGamma: null, gexFlip: null, maxPain: null, vwap: null, r3: null, r4: null, s3: null, s4: null, prevHigh: null, prevLow: null, prevClose: null, todayOpen: null, todayHigh: null, todayLow: null },
     verdict: data.verdict || { bias: 'NEUTRAL', confidence: 0, summary: '', signals: { flow: 'NEUTRAL', darkpool: 'NEUTRAL', newsAlignment: false } },
     marketSession,
     preMarketData,
@@ -502,6 +506,9 @@ function computeKeyLevels(flow: EnhancedFlowStats | null, levelsData: any): WarR
       s3: levelsData.s3 || null, s4: levelsData.s4 || null,
       prevHigh: levelsData.prevHigh || null, prevLow: levelsData.prevLow || null,
       prevClose: levelsData.prevClose || levelsData.prevDay?.c || null,
+      todayOpen: levelsData.open || null,
+      todayHigh: levelsData.high || null,
+      todayLow: levelsData.low || null,
     };
   }
 
@@ -526,5 +533,8 @@ function computeKeyLevels(flow: EnhancedFlowStats | null, levelsData: any): WarR
     s3: levelsData?.s3 || null, s4: levelsData?.s4 || null,
     prevHigh: levelsData?.prevHigh || null, prevLow: levelsData?.prevLow || null,
     prevClose: levelsData?.prevClose || null,
+    todayOpen: levelsData?.open || null,
+    todayHigh: levelsData?.high || null,
+    todayLow: levelsData?.low || null,
   };
 }

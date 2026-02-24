@@ -26,6 +26,7 @@ interface ConfluenceIndicatorProps {
   volumePressure: number;
   priceVsGexFlip: 'above' | 'below';
   priceChange: number;
+  marketSession?: 'pre-market' | 'open' | 'after-hours' | 'closed';
 }
 
 // Match the exact candle color palette from yodha-chart
@@ -43,7 +44,10 @@ export function ConfluenceIndicator({
   volumePressure,
   priceVsGexFlip,
   priceChange,
+  marketSession,
 }: ConfluenceIndicatorProps) {
+  
+  const isClosed = marketSession === 'closed' || marketSession === 'after-hours';
   
   const signals = useMemo((): Signal[] => {
     const result: Signal[] = [];
@@ -56,20 +60,20 @@ export function ConfluenceIndicator({
       result.push({
         name: 'Options Flow',
         status: callRatio >= 60 ? 'bullish' : callRatio <= 40 ? 'bearish' : 'neutral',
-        value: `${callRatio}% calls`,
+        value: isClosed ? `${callRatio}% calls (close)` : `${callRatio}% calls`,
       });
     } else {
-      result.push({ name: 'Options Flow', status: 'no_data', value: 'No data' });
+      result.push({ name: 'Options Flow', status: 'no_data', value: isClosed ? 'Market closed' : 'No data' });
     }
     
-    if (volumePressure !== undefined && volumePressure !== null && !isNaN(volumePressure)) {
+    if (volumePressure !== undefined && volumePressure !== null && !isNaN(volumePressure) && volumePressure !== 0) {
       result.push({
         name: 'Volume',
         status: volumePressure > 20 ? 'bullish' : volumePressure < -20 ? 'bearish' : 'neutral',
-        value: `${volumePressure > 0 ? '+' : ''}${volumePressure}%`,
+        value: isClosed ? `${volumePressure > 0 ? '+' : ''}${volumePressure}% (close)` : `${volumePressure > 0 ? '+' : ''}${volumePressure}%`,
       });
     } else {
-      result.push({ name: 'Volume', status: 'no_data', value: 'No data' });
+      result.push({ name: 'Volume', status: 'no_data', value: isClosed ? 'Market closed' : 'No data' });
     }
     
     const dpPrintCount = darkPoolStats?.printCount || 0;
@@ -81,10 +85,12 @@ export function ConfluenceIndicator({
       result.push({
         name: 'Dark Pool',
         status: dpBullish > 55 ? 'bullish' : dpBullish < 45 ? 'bearish' : 'neutral',
-        value: dpBullish < 45 ? `${dpBearish.toFixed(0)}% bearish` : `${dpBullish.toFixed(0)}% bullish`,
+        value: dpBullish < 45 
+          ? `${dpBearish.toFixed(0)}% bearish${isClosed ? ' (close)' : ''}`
+          : `${dpBullish.toFixed(0)}% bullish${isClosed ? ' (close)' : ''}`,
       });
     } else {
-      result.push({ name: 'Dark Pool', status: 'no_data', value: 'No prints' });
+      result.push({ name: 'Dark Pool', status: 'no_data', value: isClosed ? 'Market closed' : 'No prints' });
     }
     
     result.push({
@@ -100,7 +106,7 @@ export function ConfluenceIndicator({
     });
     
     return result;
-  }, [flowStats, darkPoolStats, volumePressure, priceVsGexFlip, priceChange]);
+  }, [flowStats, darkPoolStats, volumePressure, priceVsGexFlip, priceChange, isClosed]);
   
   const confluenceScore = useMemo(() => {
     const activeSignals = signals.filter(s => s.status !== 'no_data');
@@ -153,7 +159,7 @@ export function ConfluenceIndicator({
           </div>
         </div>
         <div className="text-[9px] pl-4" style={{ color: 'rgba(209,212,220,0.25)' }}>
-          Real-time ML model feeding candle colors
+          {isClosed ? 'Showing last session signals' : 'Real-time ML model feeding candle colors'}
         </div>
       </div>
       

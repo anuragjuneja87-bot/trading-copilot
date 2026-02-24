@@ -20,7 +20,6 @@ import { GammaLevelsPanel } from '@/components/ask/gamma-levels-panel';
 import { NewsSentimentPanel } from '@/components/ask/news-sentiment-panel';
 import { VolumePressurePanel } from '@/components/ask/volume-pressure-panel';
 import { RelativeStrengthPanel } from '@/components/ask/relative-strength-panel';
-import { FearGreedGauge } from '@/components/pulse/fear-greed-gauge';
 import {
   TimeframeSelector,
   Timeframe,
@@ -56,7 +55,6 @@ function CollapsiblePanel({
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const dotColor = subtitleColor || '#555';
 
-  // Sync with external forceOpen when it changes
   useEffect(() => {
     if (forceOpen !== undefined) setIsOpen(forceOpen);
   }, [forceOpen]);
@@ -109,7 +107,6 @@ function buildFlowSummary(flow: any, session: string): PanelSummary {
   if (!flow?.tradeCount) {
     return { text: session !== 'open' ? 'Market closed · No live data' : null, color: '#555' };
   }
-  // callRatio and putRatio are already 0-100 from the API
   const callPct = flow.callRatio != null ? flow.callRatio.toFixed(0) : '—';
   const sweeps = flow.sweepRatio ? (flow.sweepRatio * 100).toFixed(0) : '0';
   const unusual = flow.unusualCount || 0;
@@ -145,7 +142,6 @@ function buildDarkPoolSummary(dp: any, session: string): PanelSummary {
   const parts: string[] = [];
   if (session !== 'open') parts.push('Last session');
   parts.push(`${prints} prints`);
-  // Show the dominant direction's percentage
   if (bias === 'bearish') {
     parts.push(`${bearPct.toFixed(0)}% bearish`);
   } else {
@@ -184,7 +180,6 @@ function buildVolumeSummary(vp: number | undefined, session?: string): PanelSumm
   if (vp === undefined) return { text: null, color: '#555' };
 
   const prefix = session !== 'open' ? 'Last session · ' : '';
-  // vp ranges from roughly -100 to +100 (buy-sell pressure delta)
   if (vp > 20) {
     return { text: `${prefix}+${vp}% buy pressure`, color: COLORS.green };
   } else if (vp < -20) {
@@ -295,7 +290,7 @@ function AskPageContent() {
 
   const dataAgeSeconds = data.lastUpdate ? Math.floor((Date.now() - data.lastUpdate.getTime()) / 1000) : 0;
 
-  // Panel header summaries (rule-based, zero API cost)
+  // Panel header summaries
   const ps = useMemo(() => ({
     flow: buildFlowSummary(data.flow?.stats, data.marketSession),
     darkPool: buildDarkPoolSummary(data.darkpool?.stats, data.marketSession),
@@ -305,6 +300,15 @@ function AskPageContent() {
     news: buildNewsSummary(data.news.items, selectedTicker || ''),
   }), [data.flow?.stats, data.darkpool?.stats, data.levels, data.price, data.marketSession, volumePressure, data.relativeStrength, data.news.items, selectedTicker]);
 
+  // ★ Compute today's O/H/L from levels API (todayOpen, todayHigh, todayLow)
+  const todayOHL = useMemo(() => {
+    const l = data.levels as any;
+    if (l?.todayOpen || l?.todayHigh || l?.todayLow) {
+      return { o: l.todayOpen || 0, h: l.todayHigh || 0, l: l.todayLow || 0 };
+    }
+    return null;
+  }, [data.levels]);
+
   const handleSelectTicker = (ticker: string) => {
     setTimeframe(DEFAULT_TIMEFRAME);
     router.push(`/ask?symbol=${ticker}`);
@@ -313,6 +317,9 @@ function AskPageContent() {
   if (!selectedTicker) {
     return <AskLandingView onSelectTicker={handleSelectTicker} watchlist={watchlist} />;
   }
+
+  // Check if ticker is an index (SPY/QQQ) — hide RS for self-comparison
+  const isIndex = ['SPY', 'QQQ', 'IWM', 'DIA'].includes(selectedTicker.toUpperCase());
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: COLORS.bg }}>
@@ -325,37 +332,54 @@ function AskPageContent() {
           className="w-[240px] flex-shrink-0 flex flex-col border-r overflow-hidden"
           style={{ borderColor: COLORS.cardBorder, background: 'rgba(0,0,0,0.2)' }}
         >
+          {/* ── TODAY'S SESSION ── */}
           <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
-            <FearGreedGauge size="small" hideDetails />
+            <div className="text-[10px] font-bold text-gray-200 uppercase tracking-wider mb-2">Today&apos;s Session</div>
+            <div className="space-y-1">
+              {todayOHL?.o ? (
+                <LevelRow label="Open" value={todayOHL.o} color="rgba(255,255,255,0.6)" currentPrice={data.price} />
+              ) : null}
+              {todayOHL?.h ? (
+                <LevelRow label="High" value={todayOHL.h} color="#26a69a" currentPrice={data.price} />
+              ) : null}
+              {todayOHL?.l ? (
+                <LevelRow label="Low" value={todayOHL.l} color="#ef5350" currentPrice={data.price} />
+              ) : null}
+              {data.levels?.prevClose && (
+                <LevelRow label="Prev Close" value={data.levels.prevClose} color="#ffeb3b" currentPrice={data.price} />
+              )}
+              {data.levels?.vwap && <LevelRow label="VWAP" value={data.levels.vwap} color={COLORS.cyan} currentPrice={data.price} />}
+            </div>
           </div>
 
+          {/* ── GAMMA LEVELS ── */}
           <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
-            <div className="text-[10px] font-bold text-gray-200 uppercase tracking-wider mb-2">Key Levels</div>
+            <div className="text-[10px] font-bold text-gray-200 uppercase tracking-wider mb-2">Gamma Levels</div>
             <div className="space-y-1">
               <LevelRow label="Call Wall" value={data.levels?.callWall || null} color={COLORS.green} currentPrice={data.price} />
               <LevelRow label="Put Wall" value={data.levels?.putWall || null} color={COLORS.red} currentPrice={data.price} />
               <LevelRow label="GEX Flip" value={data.levels?.gexFlip || null} color="#a855f7" currentPrice={data.price} />
               {data.levels?.maxPain && <LevelRow label="Max Pain" value={data.levels.maxPain} color="#ff9800" currentPrice={data.price} />}
-              {data.levels?.vwap && <LevelRow label="VWAP" value={data.levels.vwap} color={COLORS.cyan} currentPrice={data.price} />}
             </div>
             <GexContext price={data.price} gexFlip={data.levels?.gexFlip || null} />
-
-            {/* ── Camarilla Pivot Levels ── */}
-            {(data.levels?.r3 || data.levels?.s3) && (
-              <div className="mt-3 pt-2 border-t" style={{ borderColor: 'rgba(42,46,57,0.4)' }}>
-                <div className="text-[9px] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'rgba(209,212,220,0.35)' }}>
-                  Camarilla Pivots
-                </div>
-                <div className="space-y-1">
-                  {data.levels?.r4 && <LevelRow label="R4" value={data.levels.r4} color="#00bcd4" currentPrice={data.price} />}
-                  {data.levels?.r3 && <LevelRow label="R3" value={data.levels.r3} color="#00bcd4" currentPrice={data.price} />}
-                  {data.levels?.s3 && <LevelRow label="S3" value={data.levels.s3} color="#ff7043" currentPrice={data.price} />}
-                  {data.levels?.s4 && <LevelRow label="S4" value={data.levels.s4} color="#ff7043" currentPrice={data.price} />}
-                </div>
-              </div>
-            )}
           </div>
 
+          {/* ── Camarilla Pivot Levels ── */}
+          {(data.levels?.r3 || data.levels?.s3) && (
+            <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
+              <div className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: 'rgba(209,212,220,0.5)' }}>
+                Camarilla Pivots
+              </div>
+              <div className="space-y-1">
+                {data.levels?.r4 && <LevelRow label="R4" value={data.levels.r4} color="#00bcd4" currentPrice={data.price} />}
+                {data.levels?.r3 && <LevelRow label="R3" value={data.levels.r3} color="#00bcd4" currentPrice={data.price} />}
+                {data.levels?.s3 && <LevelRow label="S3" value={data.levels.s3} color="#ff7043" currentPrice={data.price} />}
+                {data.levels?.s4 && <LevelRow label="S4" value={data.levels.s4} color="#ff7043" currentPrice={data.price} />}
+              </div>
+            </div>
+          )}
+
+          {/* ── AI SIGNAL ENGINE (confluence) ── */}
           <div className="flex-1 overflow-y-auto p-3">
             <ConfluenceIndicator
               flowStats={data.flow?.stats}
@@ -363,6 +387,7 @@ function AskPageContent() {
               volumePressure={volumePressure || 0}
               priceVsGexFlip={data.price > (data.levels?.gexFlip || 0) ? 'above' : 'below'}
               priceChange={data.changePercent}
+              marketSession={data.marketSession}
             />
           </div>
         </aside>
@@ -454,7 +479,40 @@ function AskPageContent() {
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             <div className="p-3 space-y-3 max-w-[1200px] mx-auto">
 
-              {/* ★ YODHA ANALYSIS — THE CENTERPIECE ★ */}
+              {/* ★ CHART FIRST — The centerpiece, no scrolling needed ★ */}
+              <div className="h-[580px] rounded overflow-hidden" style={{ border: '1px solid rgba(42,46,57,0.5)' }}>
+                <YodhaChart
+                  ticker={selectedTicker}
+                  timeframe={timeframe}
+                  levels={data.levels}
+                  price={data.price}
+                  changePercent={data.changePercent}
+                  marketSession={data.marketSession}
+                  prevDayHLC={data.levels?.prevHigh && data.levels?.prevLow && data.levels?.prevClose ? {
+                    h: data.levels.prevHigh,
+                    l: data.levels.prevLow,
+                    c: data.levels.prevClose,
+                  } : undefined}
+                  todayOHL={todayOHL}
+                />
+              </div>
+
+              {/* ★ ASK YODHA — CHAT INPUT (right after chart) ★ */}
+              <AskYodhaChat
+                ticker={selectedTicker}
+                price={data.price}
+                levels={data.levels}
+                marketSession={data.marketSession}
+                changePercent={data.changePercent}
+                flowStats={data.flow?.stats || null}
+                darkPoolStats={data.darkpool?.stats || null}
+                newsItems={data.news.items}
+                relativeStrength={data.relativeStrength}
+                mlPrediction={mlResult.prediction}
+                volumePressure={volumePressure}
+              />
+
+              {/* ★ YODHA ANALYSIS — Below chart ★ */}
               <YodhaAnalysis
                 ticker={selectedTicker}
                 price={data.price}
@@ -474,38 +532,6 @@ function AskPageContent() {
                 confidenceHistory={mlResult.confidenceHistory}
               />
 
-              {/* ★ ASK YODHA — CHAT INPUT ★ */}
-              <AskYodhaChat
-                ticker={selectedTicker}
-                price={data.price}
-                levels={data.levels}
-                marketSession={data.marketSession}
-                changePercent={data.changePercent}
-                flowStats={data.flow?.stats || null}
-                darkPoolStats={data.darkpool?.stats || null}
-                newsItems={data.news.items}
-                relativeStrength={data.relativeStrength}
-                mlPrediction={mlResult.prediction}
-                volumePressure={volumePressure}
-              />
-
-              {/* ★ YODHA CHART — TV Lightweight Charts ★ */}
-              <div className="h-[580px] rounded overflow-hidden" style={{ border: '1px solid rgba(42,46,57,0.5)' }}>
-                <YodhaChart
-                  ticker={selectedTicker}
-                  timeframe={timeframe}
-                  levels={data.levels}
-                  price={data.price}
-                  changePercent={data.changePercent}
-                  marketSession={data.marketSession}
-                  prevDayHLC={data.levels?.prevHigh && data.levels?.prevLow && data.levels?.prevClose ? {
-                    h: data.levels.prevHigh,
-                    l: data.levels.prevLow,
-                    c: data.levels.prevClose,
-                  } : undefined}
-                />
-              </div>
-
               {/* DETAILED DATA PANELS (collapsible) */}
               <div className="flex items-center justify-end mb-1">
                 <button
@@ -517,6 +543,8 @@ function AskPageContent() {
                   {allPanelsOpen ? 'Collapse All' : 'Expand All'}
                 </button>
               </div>
+
+              {/* Row 1: Options Flow + Gamma */}
               <div className="grid grid-cols-2 gap-3">
                 <CollapsiblePanel title="Options Flow" height="420px" icon={Sparkles} subtitle={ps.flow.text} subtitleColor={ps.flow.color} forceOpen={allPanelsOpen}>
                   <OptionsFlowPanel
@@ -539,6 +567,7 @@ function AskPageContent() {
                 </CollapsiblePanel>
               </div>
 
+              {/* Row 2: Volume + Dark Pool */}
               <div className="grid grid-cols-2 gap-3">
                 <CollapsiblePanel title="Volume Pressure" height="380px" icon={BarChart3} subtitle={ps.volume.text} subtitleColor={ps.volume.color} forceOpen={allPanelsOpen}>
                   <VolumePressurePanel ticker={selectedTicker} timeframeRange={timeframeRange} />
@@ -557,10 +586,24 @@ function AskPageContent() {
                 </CollapsiblePanel>
               </div>
 
+              {/* Row 3: RS (hide for index tickers) + News */}
               <div className="grid grid-cols-2 gap-3">
-                <CollapsiblePanel title="Relative Strength" height="380px" icon={Activity} subtitle={ps.rs.text} subtitleColor={ps.rs.color} forceOpen={allPanelsOpen}>
-                  <RelativeStrengthPanel ticker={selectedTicker} timeframeRange={timeframeRange} />
-                </CollapsiblePanel>
+                {!isIndex ? (
+                  <CollapsiblePanel title="Relative Strength" height="380px" icon={Activity} subtitle={ps.rs.text} subtitleColor={ps.rs.color} forceOpen={allPanelsOpen}>
+                    <RelativeStrengthPanel ticker={selectedTicker} timeframeRange={timeframeRange} />
+                  </CollapsiblePanel>
+                ) : (
+                  <CollapsiblePanel title="Relative Strength" height="380px" icon={Activity} subtitle="Index — comparing sectors" subtitleColor="#555" forceOpen={allPanelsOpen} defaultOpen={false}>
+                    <div className="h-full flex flex-col items-center justify-center text-gray-500 px-6 text-center">
+                      <div className="text-2xl mb-2">📊</div>
+                      <div className="text-sm font-semibold mb-1">Index Ticker</div>
+                      <div className="text-xs text-gray-600">
+                        Relative strength vs self isn&apos;t meaningful for {selectedTicker}. 
+                        Sector rotation view coming soon.
+                      </div>
+                    </div>
+                  </CollapsiblePanel>
+                )}
                 <CollapsiblePanel title="News Sentiment" height="380px" icon={Newspaper} subtitle={ps.news.text} subtitleColor={ps.news.color} forceOpen={allPanelsOpen}>
                   <NewsSentimentPanel
                     ticker={selectedTicker}
