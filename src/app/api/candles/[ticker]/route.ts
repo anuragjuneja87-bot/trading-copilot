@@ -28,6 +28,19 @@ function subtractDays(dateStr: string, days: number): string {
   return d.toISOString().split('T')[0];
 }
 
+/** Classify a bar's session from its timestamp */
+function getBarSession(timestampMs: number): 'pre' | 'rth' | 'post' {
+  const d = new Date(timestampMs);
+  const etStr = d.toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const et = new Date(etStr);
+  const mins = et.getHours() * 60 + et.getMinutes();
+  
+  if (mins >= 570 && mins < 960) return 'rth';   // 9:30 - 16:00
+  if (mins >= 240 && mins < 570) return 'pre';    // 4:00 - 9:30
+  if (mins >= 960 && mins < 1200) return 'post';  // 16:00 - 20:00
+  return 'pre'; // overnight → treat as pre
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ ticker: string }> }
@@ -45,7 +58,7 @@ export async function GET(
   const today = getTodayET();
   const fromDate = subtractDays(today, tfCfg.daysBack);
   const toDate = today;
-  const cacheKey = `candles:${ticker}:${today}:${tf}`;
+  const cacheKey = `candles:${ticker}:${today}:${tf}:v2`; // v2 cache key — includes extended hours
 
   // ── Redis cache check ──
   const cached = await redisGet<any>(cacheKey);
@@ -76,40 +89,50 @@ export async function GET(
       return NextResponse.json({ ...cached, source: 'redis-fallback' });
     }
 
-    // For intraday (< 1d), filter to regular hours 9:30-16:00 ET
+    // For intraday: include pre-market (4:00-9:30) + regular (9:30-16:00) + after-hours (16:00-20:00)
+    // Filter out overnight bars (20:00-4:00)
     const isIntraday = ['1m', '5m', '15m', '30m', '1h', '4h'].includes(tf);
     const bars = isIntraday ? rawBars.filter((bar: any) => {
       const d = new Date(bar.t);
       const etStr = d.toLocaleString('en-US', { timeZone: 'America/New_York' });
       const et = new Date(etStr);
       const mins = et.getHours() * 60 + et.getMinutes();
-      return mins >= 570 && mins < 960; // 9:30 - 16:00
+      // Include 4:00 AM - 8:00 PM ET (pre-market + regular + after-hours)
+      return mins >= 240 && mins < 1200;
     }) : rawBars;
 
-    // Compute running VWAP (resets daily for intraday)
+    // Compute running VWAP (resets daily for intraday, only from RTH bars)
     let cumVol = 0, cumPV = 0, lastDay = '';
     const processed = bars.map((bar: any, i: number) => {
+      const session = isIntraday ? getBarSession(bar.t) : 'rth';
+      
       // Reset VWAP at day boundary for intraday
       if (isIntraday) {
         const dayStr = new Date(bar.t).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
         if (dayStr !== lastDay) { cumVol = 0; cumPV = 0; lastDay = dayStr; }
       }
+      
+      // Only accumulate VWAP from RTH bars (pre/post volume shouldn't distort VWAP)
       const typical = (bar.h + bar.l + bar.c) / 3;
-      cumVol += bar.v;
-      cumPV += typical * bar.v;
+      if (session === 'rth') {
+        cumVol += bar.v;
+        cumPV += typical * bar.v;
+      }
       const vwap = cumVol > 0 ? cumPV / cumVol : bar.c;
+      
       const { bp, brp } = computeBarPressure({ bar, i, bars, vwap });
-      const color = pressureToColor(bp, brp);
+      
       return {
         t: Math.floor(bar.t / 1000),
         o: bar.o, h: bar.h, l: bar.l, c: bar.c,
         v: bar.v,
         vw: Math.round(vwap * 100) / 100,
-        bp, brp, color,
+        bp, brp,
+        s: session, // 'pre' | 'rth' | 'post'
       };
     });
 
-    // Ensure strictly ascending time (lightweight-charts requirement): dedupe by t, keep last bar per time
+    // Ensure strictly ascending time: dedupe by t, keep last bar per time
     type BarItem = (typeof processed)[number];
     const seen = new Map<number, BarItem>();
     for (const b of processed) {

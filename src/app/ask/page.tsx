@@ -364,17 +364,8 @@ function AskPageContent() {
             <GexContext price={data.price} gexFlip={data.levels?.gexFlip || null} />
           </div>
 
-          {/* ── AI SIGNAL ENGINE (moved up, right after gamma) ── */}
-          <div className="flex-1 overflow-y-auto p-3">
-            <ConfluenceIndicator
-              flowStats={data.flow?.stats}
-              darkPoolStats={data.darkpool?.stats}
-              volumePressure={volumePressure || 0}
-              priceVsGexFlip={data.price > (data.levels?.gexFlip || 0) ? 'above' : 'below'}
-              priceChange={data.changePercent}
-              marketSession={data.marketSession}
-            />
-          </div>
+          {/* Sidebar spacer */}
+          <div className="flex-1" />
         </aside>
 
         {/* ── MAIN CONTENT ───────────────────────────────── */}
@@ -463,6 +454,16 @@ function AskPageContent() {
           {/* ── SCROLLABLE CONTENT ───────────────────────── */}
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             <div className="p-3 space-y-3 max-w-[1200px] mx-auto">
+
+              {/* ★ TRAFFIC LIGHT BAR — Signal overview at a glance ★ */}
+              <ConfluenceIndicator
+                flowStats={data.flow?.stats}
+                darkPoolStats={data.darkpool?.stats}
+                volumePressure={volumePressure || 0}
+                priceVsGexFlip={data.price > (data.levels?.gexFlip || 0) ? 'above' : 'below'}
+                priceChange={data.changePercent}
+                marketSession={data.marketSession}
+              />
 
               {/* ★ CHART FIRST — The centerpiece, no scrolling needed ★ */}
               <div className="h-[580px] rounded overflow-hidden" style={{ border: '1px solid rgba(42,46,57,0.5)' }}>
