@@ -363,6 +363,88 @@ interface AskYodhaChatProps {
   levels: YodhaAnalysisProps['levels'];
   marketSession: string;
   changePercent?: number;
+  flowStats?: YodhaAnalysisProps['flowStats'];
+  darkPoolStats?: YodhaAnalysisProps['darkPoolStats'];
+  newsItems?: any[];
+  relativeStrength?: YodhaAnalysisProps['relativeStrength'];
+  mlPrediction?: MLPrediction | null;
+  volumePressure?: number;
+}
+
+/** Build a comprehensive context string from all war room data */
+function buildWarRoomContext(props: AskYodhaChatProps): string {
+  const {
+    ticker, price, levels, marketSession, changePercent,
+    flowStats, darkPoolStats, newsItems, relativeStrength,
+    mlPrediction, volumePressure,
+  } = props;
+
+  const lines: string[] = [];
+
+  // Price & Session
+  lines.push(`TICKER: ${ticker} | Price: $${price?.toFixed(2)} | Change: ${changePercent !== undefined ? `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%` : 'N/A'} | Session: ${marketSession}`);
+
+  // Key Levels
+  const lvl = levels;
+  const levelParts: string[] = [];
+  if (lvl.callWall) levelParts.push(`Call Wall: $${lvl.callWall.toFixed(2)} (${((lvl.callWall - price) / price * 100).toFixed(1)}% away)`);
+  if (lvl.putWall) levelParts.push(`Put Wall: $${lvl.putWall.toFixed(2)} (${((lvl.putWall - price) / price * 100).toFixed(1)}% away)`);
+  if (lvl.gexFlip) levelParts.push(`GEX Flip: $${lvl.gexFlip.toFixed(2)} (price ${price > lvl.gexFlip ? 'ABOVE' : 'BELOW'} → gamma is ${price > lvl.gexFlip ? 'positive/stabilizing' : 'negative/volatile'})`);
+  if (lvl.maxPain) levelParts.push(`Max Pain: $${lvl.maxPain.toFixed(2)}`);
+  if (lvl.vwap) levelParts.push(`VWAP: $${lvl.vwap.toFixed(2)} (price ${price > lvl.vwap ? 'above' : 'below'})`);
+  if (levelParts.length) lines.push(`GAMMA & LEVELS: ${levelParts.join(' | ')}`);
+
+  // Options Flow
+  if (flowStats) {
+    const flowParts: string[] = [];
+    if (flowStats.callRatio !== undefined) flowParts.push(`Call ratio: ${(flowStats.callRatio * 100).toFixed(0)}%`);
+    if (flowStats.netDeltaAdjustedFlow !== undefined) {
+      const ndf = flowStats.netDeltaAdjustedFlow;
+      flowParts.push(`Net delta-adjusted flow: ${ndf >= 0 ? '+' : ''}$${(ndf / 1e6).toFixed(1)}M (${ndf > 0 ? 'bullish' : 'bearish'})`);
+    }
+    if (flowStats.sweepRatio !== undefined) flowParts.push(`Sweep ratio: ${(flowStats.sweepRatio * 100).toFixed(0)}%`);
+    if (flowStats.unusualCount !== undefined) flowParts.push(`Unusual trades: ${flowStats.unusualCount}`);
+    if (flowStats.totalCallPremium !== undefined && flowStats.totalPutPremium !== undefined) {
+      flowParts.push(`Call premium: $${(flowStats.totalCallPremium / 1e6).toFixed(1)}M | Put premium: $${(flowStats.totalPutPremium / 1e6).toFixed(1)}M`);
+    }
+    if (flowParts.length) lines.push(`OPTIONS FLOW: ${flowParts.join(' | ')}`);
+  }
+
+  // Dark Pool
+  if (darkPoolStats) {
+    const dpParts: string[] = [];
+    if (darkPoolStats.bullishPct !== undefined) dpParts.push(`Bullish: ${darkPoolStats.bullishPct.toFixed(0)}%`);
+    if (darkPoolStats.bearishPct !== undefined) dpParts.push(`Bearish: ${darkPoolStats.bearishPct.toFixed(0)}%`);
+    if (darkPoolStats.printCount !== undefined) dpParts.push(`Prints: ${darkPoolStats.printCount}`);
+    if (darkPoolStats.regime) dpParts.push(`Regime: ${darkPoolStats.regime}`);
+    if (dpParts.length) lines.push(`DARK POOL: ${dpParts.join(' | ')}`);
+  }
+
+  // Relative Strength
+  if (relativeStrength) {
+    lines.push(`RELATIVE STRENGTH: ${ticker} ${relativeStrength.tickerChange >= 0 ? '+' : ''}${relativeStrength.tickerChange.toFixed(2)}% vs SPY ${relativeStrength.spyChange >= 0 ? '+' : ''}${relativeStrength.spyChange.toFixed(2)}% → RS score: ${relativeStrength.rsVsSpy.toFixed(2)} (${relativeStrength.regime})`);
+  }
+
+  // ML Prediction
+  if (mlPrediction) {
+    lines.push(`ML MODEL: Move probability: ${(mlPrediction.move_probability * 100).toFixed(0)}% | Direction: ${mlPrediction.direction} (${(mlPrediction.direction_confidence * 100).toFixed(0)}% confidence) | Signal: ${mlPrediction.signal_strength}`);
+  }
+
+  // Volume Pressure
+  if (volumePressure !== undefined) {
+    const vpLabel = volumePressure > 60 ? 'heavy buying' : volumePressure < 40 ? 'heavy selling' : 'neutral';
+    lines.push(`VOLUME PRESSURE: ${volumePressure.toFixed(0)}% buy-side (${vpLabel})`);
+  }
+
+  // News Sentiment
+  if (newsItems && newsItems.length > 0) {
+    const sentiments = newsItems.slice(0, 5).map((n: any) =>
+      `"${(n.title || '').slice(0, 60)}${(n.title || '').length > 60 ? '...' : ''}" [${n.sentiment || 'neutral'}]`
+    );
+    lines.push(`NEWS (last ${sentiments.length}): ${sentiments.join(' | ')}`);
+  }
+
+  return lines.join('\n');
 }
 
 /* Animated glowing Yodha icon */
@@ -465,7 +547,8 @@ function getContextSuggestions(
   ];
 }
 
-export function AskYodhaChat({ ticker, price, levels, marketSession, changePercent }: AskYodhaChatProps) {
+export function AskYodhaChat(props: AskYodhaChatProps) {
+  const { ticker, price, levels, marketSession, changePercent } = props;
   const [query, setQuery] = useState('');
   const [answer, setAnswer] = useState('');
   const [loading, setLoading] = useState(false);
@@ -486,11 +569,12 @@ export function AskYodhaChat({ ticker, price, levels, marketSession, changePerce
     setLoading(true);
     setAnswer('');
     try {
+      const warRoomContext = buildWarRoomContext(props);
       const res = await fetch('/api/ai/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          question: `[Context: ${ticker} at $${price?.toFixed(2)}, session=${marketSession}, callWall=${levels.callWall}, putWall=${levels.putWall}, gexFlip=${levels.gexFlip}] ${question}`,
+          question: `[WAR ROOM DATA]\n${warRoomContext}\n\n[QUESTION]\n${question}`,
         }),
       });
       const data = await res.json();
@@ -505,7 +589,7 @@ export function AskYodhaChat({ ticker, price, levels, marketSession, changePerce
       setLoading(false);
       setQuery('');
     }
-  }, [query, ticker, price, levels, marketSession]);
+  }, [query, props]);
 
   const borderColor = focused || loading ? COLORS.cyan : 'rgba(0,229,255,0.15)';
 

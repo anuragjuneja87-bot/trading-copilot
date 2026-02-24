@@ -342,6 +342,12 @@ function AskPageContent() {
                 levels={data.levels}
                 marketSession={data.marketSession}
                 changePercent={data.changePercent}
+                flowStats={data.flow?.stats || null}
+                darkPoolStats={data.darkpool?.stats || null}
+                newsItems={data.news.items}
+                relativeStrength={data.relativeStrength}
+                mlPrediction={mlResult.prediction}
+                volumePressure={volumePressure}
               />
 
               <div className="h-4" />
