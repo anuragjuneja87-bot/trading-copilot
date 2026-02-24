@@ -370,17 +370,23 @@ function AskPageContent() {
                 <button
                   key={ticker}
                   onClick={() => handleSelectTicker(ticker)}
-                  className="relative px-2.5 py-1 rounded text-xs font-bold transition-all"
+                  className="relative px-3 py-1 rounded text-sm font-bold transition-all"
                   style={{
                     background: ticker === selectedTicker ? 'rgba(0,229,255,0.15)' : 'transparent',
                     border: ticker === selectedTicker ? '1px solid rgba(0,229,255,0.3)' : '1px solid transparent',
-                    color: ticker === selectedTicker ? '#00e5ff' : '#666',
+                    color: ticker === selectedTicker ? '#00e5ff' : 'rgba(255,255,255,0.6)',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (ticker !== selectedTicker) e.currentTarget.style.color = '#fff';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (ticker !== selectedTicker) e.currentTarget.style.color = 'rgba(255,255,255,0.6)';
                   }}
                 >
                   {ticker}
                 </button>
               ))}
-              {watchlist.length > 5 && <span className="text-[10px] text-gray-500">+{watchlist.length - 5}</span>}
+              {watchlist.length > 5 && <span className="text-xs text-gray-400 font-bold">+{watchlist.length - 5}</span>}
 
               <SymbolSearch onSelect={handleSelectTicker} />
               <div className="flex-1" />

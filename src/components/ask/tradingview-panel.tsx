@@ -31,17 +31,22 @@ function getTVSymbol(ticker: string): string {
 
   const upper = ticker.toUpperCase();
 
-  // Index ETFs that TradingView resolves better with AMEX prefix
+  // NASDAQ-listed ETFs
+  const nasdaqETFs = new Set([
+    'QQQ', 'TQQQ', 'SQQQ', 'IBIT', 'GBTC',
+  ]);
+
+  if (nasdaqETFs.has(upper)) return `NASDAQ:${upper}`;
+
+  // AMEX/ARCA-listed ETFs
   const amexETFs = new Set([
-    'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'TLT',
-    'VTI', 'VOO', 'VXX', 'UVXY', 'SQQQ', 'TQQQ', 'ARKK',
-    'IBIT', 'GBTC',
+    'SPY', 'IWM', 'DIA', 'GLD', 'SLV', 'TLT',
+    'VTI', 'VOO', 'VXX', 'UVXY', 'ARKK',
   ]);
 
   if (amexETFs.has(upper)) return `AMEX:${upper}`;
 
-  // Let TradingView auto-resolve everything else — it handles
-  // NASDAQ, NYSE, and other US exchanges correctly
+  // Let TradingView auto-resolve everything else
   return upper;
 }
 
