@@ -61,18 +61,18 @@ function CollapsiblePanel({
     >
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/[0.02] transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors"
       >
         <div className="flex-1 min-w-0 text-left">
           <div className="flex items-center gap-2">
-            {Icon && <Icon className="w-3 h-3 flex-shrink-0" style={{ color: subtitle ? dotColor : '#555' }} />}
-            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{title}</span>
+            {Icon && <Icon className="w-3.5 h-3.5 flex-shrink-0" style={{ color: subtitle ? dotColor : '#666' }} />}
+            <span className="text-xs font-bold text-gray-200 uppercase tracking-wider">{title}</span>
             {subtitle && (
               <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: dotColor, boxShadow: `0 0 4px ${dotColor}50` }} />
             )}
           </div>
           {subtitle && (
-            <p className="text-[10px] text-gray-500 mt-0.5 truncate leading-tight pl-5">{subtitle}</p>
+            <p className="text-[11px] mt-1 truncate leading-tight pl-[22px]" style={{ color: `${dotColor}cc` }}>{subtitle}</p>
           )}
         </div>
         {isOpen
@@ -99,8 +99,8 @@ interface PanelSummary {
 }
 
 function buildFlowSummary(flow: any, session: string): PanelSummary {
-  if (session !== 'open' || !flow?.tradeCount) {
-    return { text: null, color: '#555' };
+  if (!flow?.tradeCount) {
+    return { text: session !== 'open' ? 'Market closed · No session data' : null, color: '#555' };
   }
   const callPct = flow.callRatio ? (flow.callRatio * 100).toFixed(0) : '—';
   const sweeps = flow.sweepRatio ? (flow.sweepRatio * 100).toFixed(0) : '0';
@@ -115,13 +115,14 @@ function buildFlowSummary(flow: any, session: string): PanelSummary {
   if (parseInt(sweeps) > 5) parts.push(`${sweeps}% sweeps`);
   if (unusual > 0) parts.push(`${unusual} unusual`);
   if (netStr) parts.push(netStr);
+  if (session !== 'open') parts.unshift('Last session');
 
   return { text: parts.join(' · '), color };
 }
 
 function buildDarkPoolSummary(dp: any, session: string): PanelSummary {
-  if (session !== 'open' || !dp?.printCount) {
-    return { text: null, color: '#555' };
+  if (!dp?.printCount) {
+    return { text: session !== 'open' ? 'Market closed · No session data' : null, color: '#555' };
   }
   const bullPct = dp.bullishPct?.toFixed(0) || '—';
   const prints = dp.printCount;
@@ -132,7 +133,9 @@ function buildDarkPoolSummary(dp: any, session: string): PanelSummary {
   const bias = (dp.bullishPct || 50) > 55 ? 'bullish' : (dp.bullishPct || 50) < 45 ? 'bearish' : 'neutral';
   const color = bias === 'bullish' ? COLORS.green : bias === 'bearish' ? COLORS.red : '#ffc107';
 
-  const parts = [`${prints} prints`, `${bullPct}% bullish`];
+  const parts: string[] = [];
+  if (session !== 'open') parts.push('Last session');
+  parts.push(`${prints} prints`, `${bullPct}% bullish`);
   if (val) parts.push(val);
 
   return { text: parts.join(' · '), color };
@@ -165,10 +168,11 @@ function buildGammaSummary(levels: any, price: number): PanelSummary {
 function buildVolumeSummary(vp: number | undefined): PanelSummary {
   if (vp === undefined) return { text: null, color: '#555' };
 
-  const label = vp > 60 ? 'Buying pressure' : vp < 40 ? 'Selling pressure' : 'Balanced';
-  const color = vp > 60 ? COLORS.green : vp < 40 ? COLORS.red : '#ffc107';
+  const clamped = Math.max(0, Math.min(100, vp));
+  const label = clamped > 60 ? 'Buying pressure' : clamped < 40 ? 'Selling pressure' : 'Balanced';
+  const color = clamped > 60 ? COLORS.green : clamped < 40 ? COLORS.red : '#ffc107';
 
-  return { text: `${vp.toFixed(0)}% buy-side · ${label}`, color };
+  return { text: `${clamped.toFixed(0)}% buy-side · ${label}`, color };
 }
 
 function buildRSSummary(rs: any, ticker: string): PanelSummary {
