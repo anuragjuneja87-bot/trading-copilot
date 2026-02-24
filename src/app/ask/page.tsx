@@ -475,7 +475,7 @@ function AskPageContent() {
               />
 
               {/* ★ YODHA CHART — TV Lightweight Charts ★ */}
-              <div className="h-[440px] rounded overflow-hidden" style={{ border: '1px solid rgba(42,46,57,0.5)' }}>
+              <div className="h-[540px] rounded overflow-hidden" style={{ border: '1px solid rgba(42,46,57,0.5)' }}>
                 <YodhaChart
                   ticker={selectedTicker}
                   timeframe={timeframe}
