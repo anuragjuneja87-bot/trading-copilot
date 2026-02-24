@@ -5,8 +5,9 @@
  * Also returns composite score (0-100) for the gauge.
  * 
  * Each component is scored 0-100 where 50=neutral.
- *   Bull contribution = max(0, score - 50) * 2  → maps [50-100] to [0-100]
- *   Bear contribution = max(0, 50 - score) * 2  → maps [50-0]   to [0-100]
+ *   Bull contribution = clamp(max(0, score - 50) * 3)  → maps [50-100] to [0-100] (amplified)
+ *   Bear contribution = clamp(max(0, 50 - score) * 3)  → maps [50-0]   to [0-100] (amplified)
+ *   Final pressure = max(componentPressure, scorePressure) for reliable indicator values
  * 
  * Dynamic amplification on tick-sensitive components (VWAP, momentum)
  * ensures the chart moves with price action, not just cumulative stats.
@@ -65,8 +66,8 @@ export function computeBiasScore(inputs: BiasInputs): BiasResult {
     components.push({
       name: 'Options Flow', score: s, weight: 0.25,
       rawValue: `${inputs.callRatio.toFixed(0)}% calls`,
-      bullContrib: Math.max(0, s - 50) * 2,
-      bearContrib: Math.max(0, 50 - s) * 2,
+      bullContrib: clamp(Math.max(0, s - 50) * 3),
+      bearContrib: clamp(Math.max(0, 50 - s) * 3),
     });
   }
 
@@ -76,8 +77,8 @@ export function computeBiasScore(inputs: BiasInputs): BiasResult {
     components.push({
       name: 'Dark Pool', score: s, weight: 0.15,
       rawValue: `${inputs.dpBullishPct.toFixed(0)}% bullish`,
-      bullContrib: Math.max(0, s - 50) * 2,
-      bearContrib: Math.max(0, 50 - s) * 2,
+      bullContrib: clamp(Math.max(0, s - 50) * 3),
+      bearContrib: clamp(Math.max(0, 50 - s) * 3),
     });
   }
 
@@ -89,8 +90,8 @@ export function computeBiasScore(inputs: BiasInputs): BiasResult {
     components.push({
       name: 'Price vs VWAP', score: vwapScore, weight: 0.25,
       rawValue: `${vwapDelta >= 0 ? '+' : ''}${vwapDelta.toFixed(3)}%`,
-      bullContrib: Math.max(0, vwapScore - 50) * 2,
-      bearContrib: Math.max(0, 50 - vwapScore) * 2,
+      bullContrib: clamp(Math.max(0, vwapScore - 50) * 3),
+      bearContrib: clamp(Math.max(0, 50 - vwapScore) * 3),
     });
   }
 
@@ -100,8 +101,8 @@ export function computeBiasScore(inputs: BiasInputs): BiasResult {
     components.push({
       name: 'Volume', score: vpScore, weight: 0.15,
       rawValue: `${inputs.volumePressure >= 0 ? '+' : ''}${inputs.volumePressure.toFixed(0)}%`,
-      bullContrib: Math.max(0, vpScore - 50) * 2,
-      bearContrib: Math.max(0, 50 - vpScore) * 2,
+      bullContrib: clamp(Math.max(0, vpScore - 50) * 3),
+      bearContrib: clamp(Math.max(0, 50 - vpScore) * 3),
     });
   }
 
@@ -111,8 +112,8 @@ export function computeBiasScore(inputs: BiasInputs): BiasResult {
     components.push({
       name: 'Momentum', score: momScore, weight: 0.15,
       rawValue: `${inputs.changePercent >= 0 ? '+' : ''}${inputs.changePercent.toFixed(2)}%`,
-      bullContrib: Math.max(0, momScore - 50) * 2,
-      bearContrib: Math.max(0, 50 - momScore) * 2,
+      bullContrib: clamp(Math.max(0, momScore - 50) * 3),
+      bearContrib: clamp(Math.max(0, 50 - momScore) * 3),
     });
   }
 
@@ -122,8 +123,8 @@ export function computeBiasScore(inputs: BiasInputs): BiasResult {
     components.push({
       name: 'Rel Strength', score: rsScore, weight: 0.05,
       rawValue: `${inputs.rsVsSpy >= 0 ? '+' : ''}${inputs.rsVsSpy.toFixed(2)}`,
-      bullContrib: Math.max(0, rsScore - 50) * 2,
-      bearContrib: Math.max(0, 50 - rsScore) * 2,
+      bullContrib: clamp(Math.max(0, rsScore - 50) * 3),
+      bearContrib: clamp(Math.max(0, 50 - rsScore) * 3),
     });
   }
 
@@ -138,13 +139,22 @@ export function computeBiasScore(inputs: BiasInputs): BiasResult {
     components.reduce((sum, c) => sum + c.score * (c.weight / totalWeight), 0)
   );
 
-  const bullPressure = Math.round(
+  // Component-level pressure (per-signal detail)
+  const componentBull = Math.round(
     components.reduce((sum, c) => sum + c.bullContrib * (c.weight / totalWeight), 0)
   );
-
-  const bearPressure = Math.round(
+  const componentBear = Math.round(
     components.reduce((sum, c) => sum + c.bearContrib * (c.weight / totalWeight), 0)
   );
+
+  // Score-based pressure (ensures the indicator reflects overall bias)
+  const scoreBull = clamp(Math.max(0, finalScore - 50) * 2);
+  const scoreBear = clamp(Math.max(0, 50 - finalScore) * 2);
+
+  // Use the higher of component vs score pressure — 
+  // so even if individual signals are moderate, a 76% composite shows strong bull
+  const bullPressure = clamp(Math.max(componentBull, scoreBull));
+  const bearPressure = clamp(Math.max(componentBear, scoreBear));
 
   const direction: 'BULLISH' | 'BEARISH' | 'NEUTRAL' =
     finalScore >= 60 ? 'BULLISH' : finalScore <= 40 ? 'BEARISH' : 'NEUTRAL';
