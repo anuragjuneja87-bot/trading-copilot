@@ -98,8 +98,6 @@ export function YodhaAnalysis({
   confidenceHistory,
 }: YodhaAnalysisProps) {
 
-  const [expandedSignal, setExpandedSignal] = useState<string | null>(null);
-
   // Build supporting signals
   const signals = useMemo(() => {
     const result: SupportingSignal[] = [];
@@ -411,48 +409,7 @@ export function YodhaAnalysis({
         </div>
       )}
 
-      {/* ── SUPPORTING SIGNALS (compact cards) ────────────── */}
-      <div className="px-4 pb-4 pt-1">
-        <div className="grid grid-cols-2 gap-2">
-          {signals.map((signal, i) => {
-            const key = signal.label;
-            const isOpen = expandedSignal === key;
-            const Icon = signal.icon;
-            const color = signal.bias === 'BULLISH' ? COLORS.green
-              : signal.bias === 'BEARISH' ? COLORS.red
-              : signal.bias === 'NEUTRAL' ? '#ffc107' : '#555';
-
-            return (
-              <button
-                key={i}
-                onClick={() => setExpandedSignal(isOpen ? null : key)}
-                className="text-left rounded-lg p-3 transition-all duration-200 hover:brightness-125"
-                style={{
-                  background: signal.bias === 'NO_DATA'
-                    ? 'rgba(255,255,255,0.02)'
-                    : `linear-gradient(135deg, ${color}08, ${color}04)`,
-                  border: `1px solid ${signal.bias === 'NO_DATA' ? 'rgba(255,255,255,0.06)' : `${color}20`}`,
-                }}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <Icon className="w-3.5 h-3.5" style={{ color: signal.bias === 'NO_DATA' ? 'rgba(255,255,255,0.25)' : color }} />
-                    <span className="text-[11px] font-bold text-white uppercase tracking-wider">{signal.label}</span>
-                  </div>
-                  <div className="w-2 h-2 rounded-full" style={{ background: color, opacity: signal.bias === 'NO_DATA' ? 0.3 : 1 }} />
-                </div>
-                {isOpen && signal.bias !== 'NO_DATA' ? (
-                  <p className="text-[11px] text-gray-200 leading-relaxed">{signal.summary}</p>
-                ) : (
-                  <span className="text-[11px] font-semibold" style={{ color: signal.bias === 'NO_DATA' ? 'rgba(255,255,255,0.3)' : color }}>
-                    {signal.bias === 'NO_DATA' ? 'Awaiting data' : signal.bias}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      {/* Supporting signal cards removed — data shown in collapsible panels below */}
     </div>
   );
 }

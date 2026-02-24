@@ -159,25 +159,46 @@ export function ConfluenceIndicator({
           </div>
         </div>
         <div className="text-[9px] pl-4" style={{ color: 'rgba(209,212,220,0.25)' }}>
-          {isClosed ? 'Showing last session signals' : 'Real-time ML model feeding candle colors'}
+          {isClosed ? 'Showing last session signals' : 'Pressure scoring drives candle colors'}
         </div>
       </div>
       
-      {/* ── Candle Color Preview ── */}
-      <div className="mx-4 mb-3 p-2 rounded-lg" style={{ background: `${candleColor}10`, border: `1px solid ${candleColor}20` }}>
-        <div className="flex items-center justify-center gap-3">
-          <div className="flex items-end gap-1">
-            {[0.6, 0.8, 1, 0.7, 0.9].map((h, i) => (
-              <div key={i} className="flex flex-col items-center">
-                <div style={{ width: 1, height: 4, background: candleColor, opacity: 0.5 }} />
-                <div style={{ width: 5, height: h * 16, background: candleColor, borderRadius: 1, opacity: 0.4 + (i * 0.15) }} />
-                <div style={{ width: 1, height: 3, background: candleColor, opacity: 0.5 }} />
-              </div>
-            ))}
+      {/* ── How Candle Colors Work (honest explainer) ── */}
+      <div className="mx-4 mb-3 p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(42,46,57,0.5)' }}>
+        <div className="flex items-center gap-2 mb-2">
+          <span style={{ fontSize: 11 }}>🧠</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'rgba(209,212,220,0.7)' }}>
+            Candle Colors = Pressure Score
+          </span>
+        </div>
+        <div className="text-[10px] leading-relaxed mb-2.5" style={{ color: 'rgba(209,212,220,0.4)' }}>
+          Unlike traditional charts, every candle color is computed by scoring real-time pressure signals:
+        </div>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1 mb-2.5">
+          {[
+            { icon: '📊', label: 'VWAP Position' },
+            { icon: '📈', label: 'Price Action' },
+            { icon: '🔊', label: 'Volume Spikes' },
+            { icon: '📉', label: 'Trend Momentum' },
+          ].map((item, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <span style={{ fontSize: 9 }}>{item.icon}</span>
+              <span className="text-[9px] font-medium" style={{ color: 'rgba(209,212,220,0.5)' }}>{item.label}</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-4 pt-2" style={{ borderTop: '1px solid rgba(42,46,57,0.4)' }}>
+          <div className="flex items-center gap-1.5">
+            <div style={{ width: 10, height: 10, borderRadius: 2, background: CANDLE_COLORS.strongBull }} />
+            <span className="text-[9px]" style={{ color: 'rgba(209,212,220,0.45)' }}>Bullish</span>
           </div>
-          <div className="text-center">
-            <div className="text-[11px] font-bold" style={{ color: candleColor }}>{candleLabel} Candles</div>
-            <div className="text-[8px]" style={{ color: 'rgba(209,212,220,0.35)' }}>Current AI reading</div>
+          <div className="flex items-center gap-1.5">
+            <div style={{ width: 10, height: 10, borderRadius: 2, background: CANDLE_COLORS.crossover }} />
+            <span className="text-[9px]" style={{ color: 'rgba(209,212,220,0.45)' }}>Crossover</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div style={{ width: 10, height: 10, borderRadius: 2, background: CANDLE_COLORS.strongBear }} />
+            <span className="text-[9px]" style={{ color: 'rgba(209,212,220,0.45)' }}>Bearish</span>
           </div>
         </div>
       </div>
@@ -229,8 +250,8 @@ export function ConfluenceIndicator({
       {/* ── Footer ── */}
       <div className="px-4 pb-3 pt-2 border-t" style={{ borderColor: 'rgba(42,46,57,0.4)' }}>
         <div className="text-[8px] leading-relaxed" style={{ color: 'rgba(209,212,220,0.25)' }}>
-          AI analyzes options flow, dark pool, volume, GEX &amp; price action in real-time. 
-          Candle colors on chart reflect this multi-signal analysis.
+          Candle colors score VWAP position, price action, volume spikes &amp; trend momentum in real-time. 
+          Signal confluence above shows the broader market picture from all 5 data sources.
         </div>
       </div>
     </div>

@@ -633,6 +633,14 @@ function YodhaChartInner({
             </div>
           </div>
 
+          {/* One-liner: what drives candle colors */}
+          <div style={{
+            background: 'rgba(19,23,34,0.7)', padding: '2px 10px', borderRadius: 3,
+            fontSize: 8, color: 'rgba(209,212,220,0.3)', letterSpacing: 0.3,
+          }}>
+            Candle colors scored from VWAP position, volume spikes, price action &amp; trend momentum — not traditional open/close coloring
+          </div>
+
           {/* Live pressure readout */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div

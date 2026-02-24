@@ -38,7 +38,7 @@ function CollapsiblePanel({
   subtitle,
   subtitleColor,
   icon: Icon,
-  defaultOpen = true,
+  defaultOpen = false,
   forceOpen,
   children,
   height = '400px',
@@ -364,22 +364,7 @@ function AskPageContent() {
             <GexContext price={data.price} gexFlip={data.levels?.gexFlip || null} />
           </div>
 
-          {/* ── Camarilla Pivot Levels ── */}
-          {(data.levels?.r3 || data.levels?.s3) && (
-            <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
-              <div className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: 'rgba(209,212,220,0.5)' }}>
-                Camarilla Pivots
-              </div>
-              <div className="space-y-1">
-                {data.levels?.r4 && <LevelRow label="R4" value={data.levels.r4} color="#00bcd4" currentPrice={data.price} />}
-                {data.levels?.r3 && <LevelRow label="R3" value={data.levels.r3} color="#00bcd4" currentPrice={data.price} />}
-                {data.levels?.s3 && <LevelRow label="S3" value={data.levels.s3} color="#ff7043" currentPrice={data.price} />}
-                {data.levels?.s4 && <LevelRow label="S4" value={data.levels.s4} color="#ff7043" currentPrice={data.price} />}
-              </div>
-            </div>
-          )}
-
-          {/* ── AI SIGNAL ENGINE (confluence) ── */}
+          {/* ── AI SIGNAL ENGINE (moved up, right after gamma) ── */}
           <div className="flex-1 overflow-y-auto p-3">
             <ConfluenceIndicator
               flowStats={data.flow?.stats}
@@ -532,15 +517,19 @@ function AskPageContent() {
                 confidenceHistory={mlResult.confidenceHistory}
               />
 
-              {/* DETAILED DATA PANELS (collapsible) */}
-              <div className="flex items-center justify-end mb-1">
+              {/* DETAILED DATA PANELS (collapsible, default collapsed) */}
+              <div className="flex items-center justify-start mb-1">
                 <button
                   onClick={() => setAllPanelsOpen(prev => prev === true ? false : true)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] transition-all hover:bg-white/5"
-                  style={{ color: allPanelsOpen ? COLORS.cyan : 'rgba(255,255,255,0.5)', border: `1px solid ${allPanelsOpen ? COLORS.cyan + '30' : 'rgba(255,255,255,0.08)'}` }}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white/5"
+                  style={{ 
+                    color: allPanelsOpen ? COLORS.cyan : 'rgba(255,255,255,0.7)', 
+                    border: `1px solid ${allPanelsOpen ? COLORS.cyan + '40' : 'rgba(255,255,255,0.15)'}`,
+                    background: allPanelsOpen ? `${COLORS.cyan}10` : 'rgba(255,255,255,0.03)',
+                  }}
                 >
-                  <Layers className="w-3 h-3" />
-                  {allPanelsOpen ? 'Collapse All' : 'Expand All'}
+                  <Layers className="w-4 h-4" />
+                  {allPanelsOpen ? 'Collapse All Panels' : 'Expand All Panels'}
                 </button>
               </div>
 
