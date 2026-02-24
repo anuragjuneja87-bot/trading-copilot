@@ -143,24 +143,45 @@ export function YodhaAnalysis({
     cleanOldTimelines();
   }, [ticker]);
 
-  // Accumulate timeline points during market hours
+  // Ref to always have latest values for the interval recorder
+  const latestValuesRef = useRef({
+    moveProbability, bias: thesis.bias, bullCount, bearCount, neutralCount,
+  });
+  useEffect(() => {
+    latestValuesRef.current = {
+      moveProbability, bias: thesis.bias, bullCount, bearCount, neutralCount,
+    };
+  }, [moveProbability, thesis.bias, bullCount, bearCount, neutralCount]);
+
+  // Record on every signal change
   useEffect(() => {
     if (marketSession !== 'open') return;
-    
     const point: TimelinePoint = {
       time: Date.now(),
       confidence: moveProbability,
       direction: thesis.bias,
-      bullCount: bullCount,
-      bearCount: bearCount,
-      neutralCount: neutralCount,
+      bullCount, bearCount, neutralCount,
     };
-    
-    setTimelineHistory(prev => {
-      const next = appendTimelinePoint(ticker, prev, point);
-      return next;
-    });
+    setTimelineHistory(prev => appendTimelinePoint(ticker, prev, point));
   }, [moveProbability, thesis.bias, marketSession, ticker, bullCount, bearCount, neutralCount]);
+
+  // ALSO record periodically (every 30s) even when signals are stable
+  useEffect(() => {
+    if (marketSession !== 'open') return;
+    const interval = setInterval(() => {
+      const v = latestValuesRef.current;
+      const point: TimelinePoint = {
+        time: Date.now(),
+        confidence: v.moveProbability,
+        direction: v.bias,
+        bullCount: v.bullCount,
+        bearCount: v.bearCount,
+        neutralCount: v.neutralCount,
+      };
+      setTimelineHistory(prev => appendTimelinePoint(ticker, prev, point));
+    }, 30000); // Every 30 seconds
+    return () => clearInterval(interval);
+  }, [marketSession, ticker]);
 
   const biasColor = thesis.bias === 'BULLISH' ? COLORS.green
     : thesis.bias === 'BEARISH' ? COLORS.red

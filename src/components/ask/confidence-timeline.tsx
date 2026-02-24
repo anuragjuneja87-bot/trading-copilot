@@ -129,27 +129,29 @@ export function ConfidenceTimeline({
 
   // Build ECharts option
   const option = useMemo(() => {
-    if (history.length < 2) return null;
+    if (history.length < 1) return null;
 
     const { marketOpen, marketClose } = getSessionBounds();
     const now = Date.now();
     
+    // If only 1 point, create a synthetic start point at market open
+    const effectiveHistory = history.length === 1
+      ? [{ ...history[0], time: Math.max(marketOpen, history[0].time - 60000) }, history[0]]
+      : history;
+    
     // X-axis range: market open to now (or market close)
-    const xMin = Math.min(history[0].time, marketOpen);
-    const xMax = marketSession === 'open' ? Math.max(now, history[history.length - 1].time) : marketClose;
+    const xMin = Math.min(effectiveHistory[0].time, marketOpen);
+    const xMax = marketSession === 'open' ? Math.max(now + 60000, effectiveHistory[effectiveHistory.length - 1].time) : marketClose;
     
     // Data: [time, confidence, directionCode] where 0=BEARISH, 1=NEUTRAL, 2=BULLISH
-    const lineData = history.map(h => [
+    const lineData = effectiveHistory.map(h => [
       h.time, 
       h.confidence, 
       h.direction === 'BULLISH' ? 2 : h.direction === 'BEARISH' ? 0 : 1,
     ]);
     
-    // Area fill data (for the shaded area under the line)
-    const areaData = history.map(h => [h.time, h.confidence]);
-    
     // Bias segments for colored background bands
-    const segments = buildBiasSegments(history);
+    const segments = buildBiasSegments(effectiveHistory);
     const markAreaData = segments.map(seg => {
       const color = seg.direction === 'BULLISH' ? COLORS.green
         : seg.direction === 'BEARISH' ? COLORS.red
@@ -173,7 +175,7 @@ export function ConfidenceTimeline({
     });
 
     // Detect flip points
-    const flips = detectFlips(history);
+    const flips = detectFlips(effectiveHistory);
     const flipMarkPoints = flips.map(flip => ({
       coord: [flip.time, flip.strength],
       symbol: flip.to === 'BULLISH' ? 'triangle' : 'pin',
@@ -204,7 +206,7 @@ export function ConfidenceTimeline({
     }));
     
     // Current value
-    const current = history[history.length - 1];
+    const current = effectiveHistory[effectiveHistory.length - 1];
     const currentColor = current.direction === 'BULLISH' ? COLORS.green
       : current.direction === 'BEARISH' ? COLORS.red
       : '#ffc107';
@@ -244,7 +246,7 @@ export function ConfidenceTimeline({
           if (!p || !p.data) return '';
           const time = formatET(new Date(p.data[0]));
           const val = p.data[0];
-          const match = history.find(h => Math.abs(h.time - val) < 30000);
+          const match = effectiveHistory.find(h => Math.abs(h.time - val) < 30000);
           const dir = match?.direction || 'NEUTRAL';
           const dirColor = dir === 'BULLISH' ? COLORS.green : dir === 'BEARISH' ? COLORS.red : '#ffc107';
           const bulls = match?.bullCount ?? '—';
@@ -417,7 +419,7 @@ export function ConfidenceTimeline({
     };
   }, [history, marketSession, ticker]);
 
-  if (history.length < 2 || !option) {
+  if (history.length < 1 || !option) {
     return (
       <div 
         className="flex flex-col items-center justify-center rounded-lg"
@@ -453,7 +455,7 @@ export function ConfidenceTimeline({
    ────────────────────────────────────────────────────────── */
 
 const STORAGE_PREFIX = 'yodha-timeline';
-const MIN_INTERVAL_MS = 15000; // Min 15s between points
+const MIN_INTERVAL_MS = 5000; // Min 5s between points
 
 function getStorageKey(ticker: string): string {
   const today = new Date().toISOString().slice(0, 10);
