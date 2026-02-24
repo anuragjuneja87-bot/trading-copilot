@@ -153,9 +153,9 @@ export function YodhaAnalysis({
     };
   }, [moveProbability, thesis.bias, bullCount, bearCount, neutralCount]);
 
-  // Record on every signal change
+  // Record on every signal change (skip 0-confidence initial render)
   useEffect(() => {
-    if (marketSession !== 'open') return;
+    if (marketSession !== 'open' || moveProbability === 0) return;
     const point: TimelinePoint = {
       time: Date.now(),
       confidence: moveProbability,
@@ -170,6 +170,7 @@ export function YodhaAnalysis({
     if (marketSession !== 'open') return;
     const interval = setInterval(() => {
       const v = latestValuesRef.current;
+      if (v.moveProbability === 0) return; // Skip if signals haven't loaded
       const point: TimelinePoint = {
         time: Date.now(),
         confidence: v.moveProbability,
@@ -179,7 +180,7 @@ export function YodhaAnalysis({
         neutralCount: v.neutralCount,
       };
       setTimelineHistory(prev => appendTimelinePoint(ticker, prev, point));
-    }, 30000); // Every 30 seconds
+    }, 30000);
     return () => clearInterval(interval);
   }, [marketSession, ticker]);
 

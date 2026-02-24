@@ -129,19 +129,24 @@ export function ConfidenceTimeline({
 
   // Build ECharts option
   const option = useMemo(() => {
-    if (history.length < 1) return null;
+    // Filter out invalid points (confidence=0 from before signals loaded)
+    const validHistory = history.filter(h => h.confidence > 0);
+    if (validHistory.length < 1) return null;
 
     const { marketOpen, marketClose } = getSessionBounds();
     const now = Date.now();
     
-    // If only 1 point, create a synthetic start point at market open
-    const effectiveHistory = history.length === 1
-      ? [{ ...history[0], time: Math.max(marketOpen, history[0].time - 60000) }, history[0]]
-      : history;
+    // If only 1 point, create a synthetic start 2min earlier so the line has length
+    const effectiveHistory = validHistory.length === 1
+      ? [{ ...validHistory[0], time: validHistory[0].time - 120000 }, validHistory[0]]
+      : validHistory;
     
-    // X-axis range: market open to now (or market close)
-    const xMin = Math.min(effectiveHistory[0].time, marketOpen);
-    const xMax = marketSession === 'open' ? Math.max(now + 60000, effectiveHistory[effectiveHistory.length - 1].time) : marketClose;
+    // X-axis: start from 5min before first data point, end at now + buffer
+    const dataStart = effectiveHistory[0].time;
+    const xMin = dataStart - 5 * 60000; // 5 min padding before first point
+    const xMax = marketSession === 'open' 
+      ? Math.max(now + 2 * 60000, effectiveHistory[effectiveHistory.length - 1].time + 60000) 
+      : marketClose;
     
     // Data: [time, confidence, directionCode] where 0=BEARISH, 1=NEUTRAL, 2=BULLISH
     const lineData = effectiveHistory.map(h => [
@@ -350,7 +355,7 @@ export function ConfidenceTimeline({
                   position: 'end',
                 },
               },
-              ...(marketSession === 'open' ? [{
+              ...(marketSession === 'open' && marketOpen >= xMin && marketOpen <= xMax ? [{
                 xAxis: marketOpen,
                 lineStyle: { color: 'rgba(0,229,255,0.12)', type: 'solid' as const, width: 1 },
                 label: {
@@ -468,7 +473,8 @@ export function loadTimelineHistory(ticker: string): TimelinePoint[] {
     const raw = localStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    // Filter out invalid 0-confidence points from before signals loaded
+    return Array.isArray(parsed) ? parsed.filter((p: any) => p.confidence > 0) : [];
   } catch {
     return [];
   }
