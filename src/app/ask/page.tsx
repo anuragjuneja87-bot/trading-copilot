@@ -6,7 +6,7 @@ import { useWatchlistStore } from '@/stores';
 import { useWarRoomData } from '@/hooks/use-war-room-data';
 import { useMLPrediction } from '@/hooks/use-ml-prediction';
 import { COLORS } from '@/lib/echarts-theme';
-import { RefreshCw, Search, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, Search, ChevronDown, ChevronRight, Sparkles, Building2, BarChart3, Activity, Newspaper, Target } from 'lucide-react';
 import { YodhaLogo, YodhaWordmark } from '@/components/brand/yodha-logo';
 
 // Components
@@ -36,16 +36,23 @@ import { MarketClock } from '@/components/war-room/market-clock';
 
 function CollapsiblePanel({
   title,
+  subtitle,
+  subtitleColor,
+  icon: Icon,
   defaultOpen = false,
   children,
   height = '400px',
 }: {
   title: string;
+  subtitle?: string | null;
+  subtitleColor?: string;
+  icon?: any;
   defaultOpen?: boolean;
   children: React.ReactNode;
   height?: string;
 }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const dotColor = subtitleColor || '#555';
 
   return (
     <div
@@ -56,10 +63,21 @@ function CollapsiblePanel({
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/[0.02] transition-colors"
       >
-        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{title}</span>
+        <div className="flex-1 min-w-0 text-left">
+          <div className="flex items-center gap-2">
+            {Icon && <Icon className="w-3 h-3 flex-shrink-0" style={{ color: subtitle ? dotColor : '#555' }} />}
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{title}</span>
+            {subtitle && (
+              <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: dotColor, boxShadow: `0 0 4px ${dotColor}50` }} />
+            )}
+          </div>
+          {subtitle && (
+            <p className="text-[10px] text-gray-500 mt-0.5 truncate leading-tight pl-5">{subtitle}</p>
+          )}
+        </div>
         {isOpen
-          ? <ChevronDown className="w-4 h-4 text-gray-500" />
-          : <ChevronRight className="w-4 h-4 text-gray-500" />
+          ? <ChevronDown className="w-4 h-4 text-gray-500 flex-shrink-0" />
+          : <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
         }
       </button>
       {isOpen && (
@@ -69,6 +87,129 @@ function CollapsiblePanel({
       )}
     </div>
   );
+}
+
+/* ──────────────────────────────────────────────────────────
+   PANEL HEADER SUMMARIES (rule-based, zero API cost)
+   ────────────────────────────────────────────────────────── */
+
+interface PanelSummary {
+  text: string | null;
+  color: string;
+}
+
+function buildFlowSummary(flow: any, session: string): PanelSummary {
+  if (session !== 'open' || !flow?.tradeCount) {
+    return { text: null, color: '#555' };
+  }
+  const callPct = flow.callRatio ? (flow.callRatio * 100).toFixed(0) : '—';
+  const sweeps = flow.sweepRatio ? (flow.sweepRatio * 100).toFixed(0) : '0';
+  const unusual = flow.unusualCount || 0;
+  const netDelta = flow.netDeltaAdjustedFlow;
+  const netStr = netDelta ? `${netDelta > 0 ? '+' : ''}$${(netDelta / 1e6).toFixed(1)}M delta` : '';
+
+  const bias = (flow.callRatio || 0) >= 0.6 ? 'bullish' : (flow.putRatio || 0) >= 0.6 ? 'bearish' : 'mixed';
+  const color = bias === 'bullish' ? COLORS.green : bias === 'bearish' ? COLORS.red : '#ffc107';
+
+  const parts = [`${callPct}% calls`];
+  if (parseInt(sweeps) > 5) parts.push(`${sweeps}% sweeps`);
+  if (unusual > 0) parts.push(`${unusual} unusual`);
+  if (netStr) parts.push(netStr);
+
+  return { text: parts.join(' · '), color };
+}
+
+function buildDarkPoolSummary(dp: any, session: string): PanelSummary {
+  if (session !== 'open' || !dp?.printCount) {
+    return { text: null, color: '#555' };
+  }
+  const bullPct = dp.bullishPct?.toFixed(0) || '—';
+  const prints = dp.printCount;
+  const val = dp.totalValue
+    ? dp.totalValue >= 1e6 ? `$${(dp.totalValue / 1e6).toFixed(1)}M` : `$${(dp.totalValue / 1e3).toFixed(0)}K`
+    : '';
+
+  const bias = (dp.bullishPct || 50) > 55 ? 'bullish' : (dp.bullishPct || 50) < 45 ? 'bearish' : 'neutral';
+  const color = bias === 'bullish' ? COLORS.green : bias === 'bearish' ? COLORS.red : '#ffc107';
+
+  const parts = [`${prints} prints`, `${bullPct}% bullish`];
+  if (val) parts.push(val);
+
+  return { text: parts.join(' · '), color };
+}
+
+function buildGammaSummary(levels: any, price: number): PanelSummary {
+  if (!levels?.callWall && !levels?.gexFlip) {
+    return { text: null, color: '#555' };
+  }
+  const parts: string[] = [];
+
+  if (levels.gexFlip && price) {
+    const above = price > levels.gexFlip;
+    parts.push(`${above ? 'Above' : 'Below'} GEX flip ($${levels.gexFlip.toFixed(0)})`);
+  }
+  if (levels.callWall && price) {
+    const dist = ((levels.callWall - price) / price * 100).toFixed(1);
+    parts.push(`Call wall ${dist}% away`);
+  }
+  if (levels.vwap && price) {
+    parts.push(`${price > levels.vwap ? 'Above' : 'Below'} VWAP`);
+  }
+
+  const aboveFlip = levels.gexFlip && price > levels.gexFlip;
+  const color = aboveFlip ? COLORS.green : aboveFlip === false ? COLORS.red : '#ffc107';
+
+  return { text: parts.join(' · '), color };
+}
+
+function buildVolumeSummary(vp: number | undefined): PanelSummary {
+  if (vp === undefined) return { text: null, color: '#555' };
+
+  const label = vp > 60 ? 'Buying pressure' : vp < 40 ? 'Selling pressure' : 'Balanced';
+  const color = vp > 60 ? COLORS.green : vp < 40 ? COLORS.red : '#ffc107';
+
+  return { text: `${vp.toFixed(0)}% buy-side · ${label}`, color };
+}
+
+function buildRSSummary(rs: any, ticker: string): PanelSummary {
+  if (!rs) return { text: null, color: '#555' };
+
+  const { rsVsSpy, regime, tickerChange, spyChange } = rs;
+  const bias = regime === 'STRONG_OUTPERFORM' || regime === 'OUTPERFORM' ? 'bullish'
+    : regime === 'STRONG_UNDERPERFORM' || regime === 'UNDERPERFORM' ? 'bearish'
+    : 'neutral';
+  const color = bias === 'bullish' ? COLORS.green : bias === 'bearish' ? COLORS.red : '#ffc107';
+
+  return {
+    text: `${ticker} ${tickerChange >= 0 ? '+' : ''}${tickerChange.toFixed(2)}% vs SPY ${spyChange >= 0 ? '+' : ''}${spyChange.toFixed(2)}% · RS ${rsVsSpy >= 0 ? '+' : ''}${rsVsSpy.toFixed(2)}`,
+    color,
+  };
+}
+
+function buildNewsSummary(news: any[], ticker: string): PanelSummary {
+  if (!news || news.length === 0) return { text: null, color: '#555' };
+
+  const tickerSpecific = news.filter((n: any) =>
+    (n.title || n.headline || '').toLowerCase().includes(ticker.toLowerCase())
+  ).length;
+
+  const positiveWords = ['surge', 'rally', 'gain', 'beat', 'upgrade', 'bull', 'growth', 'record', 'soar', 'jump'];
+  const negativeWords = ['drop', 'fall', 'crash', 'miss', 'downgrade', 'bear', 'cut', 'decline', 'plunge', 'weak'];
+  let pos = 0, neg = 0;
+  news.forEach((item: any) => {
+    const title = (item.title || item.headline || '').toLowerCase();
+    positiveWords.forEach(w => { if (title.includes(w)) pos++; });
+    negativeWords.forEach(w => { if (title.includes(w)) neg++; });
+  });
+
+  const bias = pos > neg + 1 ? 'bullish' : neg > pos + 1 ? 'bearish' : 'neutral';
+  const color = bias === 'bullish' ? COLORS.green : bias === 'bearish' ? COLORS.red : '#ffc107';
+
+  const parts = [`${news.length} headlines`];
+  if (tickerSpecific > 0) parts.push(`${tickerSpecific} ${ticker}-specific`);
+  parts.push(bias === 'bullish' ? 'Positive lean' : bias === 'bearish' ? 'Negative lean' : 'Mixed sentiment');
+
+  return { text: parts.join(' · '), color };
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -128,6 +269,16 @@ function AskPageContent() {
   }, [selectedTicker]);
 
   const dataAgeSeconds = data.lastUpdate ? Math.floor((Date.now() - data.lastUpdate.getTime()) / 1000) : 0;
+
+  // Panel header summaries (rule-based, zero API cost)
+  const ps = useMemo(() => ({
+    flow: buildFlowSummary(data.flow?.stats, data.marketSession),
+    darkPool: buildDarkPoolSummary(data.darkpool?.stats, data.marketSession),
+    gamma: buildGammaSummary(data.levels, data.price),
+    volume: buildVolumeSummary(volumePressure),
+    rs: buildRSSummary(data.relativeStrength, selectedTicker || ''),
+    news: buildNewsSummary(data.news.items, selectedTicker || ''),
+  }), [data.flow?.stats, data.darkpool?.stats, data.levels, data.price, data.marketSession, volumePressure, data.relativeStrength, data.news.items, selectedTicker]);
 
   const handleSelectTicker = (ticker: string) => {
     setTimeframe(DEFAULT_TIMEFRAME);
@@ -283,7 +434,7 @@ function AskPageContent() {
 
               {/* DETAILED DATA PANELS (collapsible) */}
               <div className="grid grid-cols-2 gap-3">
-                <CollapsiblePanel title="Options Flow" height="420px">
+                <CollapsiblePanel title="Options Flow" height="420px" icon={Sparkles} subtitle={ps.flow.text} subtitleColor={ps.flow.color}>
                   <OptionsFlowPanel
                     stats={data.flow?.stats || null}
                     trades={data.flow?.trades || []}
@@ -295,7 +446,7 @@ function AskPageContent() {
                     vwap={data.levels?.vwap || null}
                   />
                 </CollapsiblePanel>
-                <CollapsiblePanel title="Gamma & Key Levels" height="420px">
+                <CollapsiblePanel title="Gamma & Key Levels" height="420px" icon={Target} subtitle={ps.gamma.text} subtitleColor={ps.gamma.color}>
                   <GammaLevelsPanel
                     ticker={selectedTicker}
                     gexByStrike={data.flow?.stats?.gexByStrike || []}
@@ -305,10 +456,10 @@ function AskPageContent() {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <CollapsiblePanel title="Volume Pressure" height="380px">
+                <CollapsiblePanel title="Volume Pressure" height="380px" icon={BarChart3} subtitle={ps.volume.text} subtitleColor={ps.volume.color}>
                   <VolumePressurePanel ticker={selectedTicker} timeframeRange={timeframeRange} />
                 </CollapsiblePanel>
-                <CollapsiblePanel title="Dark Pool Activity" height="380px">
+                <CollapsiblePanel title="Dark Pool Activity" height="380px" icon={Building2} subtitle={ps.darkPool.text} subtitleColor={ps.darkPool.color}>
                   <DarkPoolPanel
                     prints={data.darkpool?.prints || []}
                     stats={data.darkpool?.stats || null}
@@ -323,10 +474,10 @@ function AskPageContent() {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <CollapsiblePanel title="Relative Strength" height="380px">
+                <CollapsiblePanel title="Relative Strength" height="380px" icon={Activity} subtitle={ps.rs.text} subtitleColor={ps.rs.color}>
                   <RelativeStrengthPanel ticker={selectedTicker} timeframeRange={timeframeRange} />
                 </CollapsiblePanel>
-                <CollapsiblePanel title="News Sentiment" height="380px">
+                <CollapsiblePanel title="News Sentiment" height="380px" icon={Newspaper} subtitle={ps.news.text} subtitleColor={ps.news.color}>
                   <NewsSentimentPanel
                     ticker={selectedTicker}
                     items={data.news.items}
