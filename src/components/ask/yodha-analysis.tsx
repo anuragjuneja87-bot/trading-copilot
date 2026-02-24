@@ -95,16 +95,7 @@ export function YodhaAnalysis({
   confidenceHistory,
 }: YodhaAnalysisProps) {
 
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
-
-  const toggleSection = (key: string) => {
-    setExpandedSections(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
+  const [expandedSignal, setExpandedSignal] = useState<string | null>(null);
 
   // Build supporting signals
   const signals = useMemo(() => {
@@ -125,152 +116,165 @@ export function YodhaAnalysis({
   const moveProbability = mlPrediction ? mlPrediction.move_probability * 100 : 0;
   const hasMLSignal = mlPrediction?.has_signal ?? false;
   const mlDirection = mlPrediction?.direction ?? 'NEUTRAL';
-  const mlStrength = mlPrediction?.signal_strength ?? 'NONE';
 
   const biasColor = thesis.bias === 'BULLISH' ? COLORS.green
     : thesis.bias === 'BEARISH' ? COLORS.red
     : '#ffc107';
 
-  const biasGradient = thesis.bias === 'BULLISH'
-    ? `linear-gradient(90deg, ${COLORS.green}00 0%, ${COLORS.green}40 ${Math.min(moveProbability, 100)}%, ${COLORS.green}00 100%)`
-    : thesis.bias === 'BEARISH'
-    ? `linear-gradient(90deg, ${COLORS.red}00 0%, ${COLORS.red}40 ${Math.min(moveProbability, 100)}%, ${COLORS.red}00 100%)`
-    : `linear-gradient(90deg, #ffc10700 0%, #ffc10740 ${Math.min(moveProbability, 100)}%, #ffc10700 100%)`;
+  // Signal counts for the confluence bar
+  const activeSignals = signals.filter(s => s.bias !== 'NO_DATA');
+  const bullCount = activeSignals.filter(s => s.bias === 'BULLISH').length;
+  const bearCount = activeSignals.filter(s => s.bias === 'BEARISH').length;
+  const neutralCount = activeSignals.filter(s => s.bias === 'NEUTRAL').length;
+  const noDataCount = signals.filter(s => s.bias === 'NO_DATA').length;
 
   return (
     <div
-      className="rounded-xl overflow-hidden"
-      style={{ background: COLORS.cardBg, border: `1px solid ${COLORS.cardBorder}` }}
+      className="rounded-xl overflow-hidden relative"
+      style={{
+        background: `linear-gradient(180deg, rgba(0,229,255,0.03) 0%, ${COLORS.cardBg} 30%)`,
+        border: `1px solid ${COLORS.cardBorder}`,
+      }}
     >
       {/* ── HEADER ───────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
+      <div className="flex items-center justify-between px-5 py-3">
         <div className="flex items-center gap-2.5">
           <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ background: `${COLORS.cyan}20` }}
+            className="w-8 h-8 rounded-lg flex items-center justify-center relative"
+            style={{
+              background: `linear-gradient(135deg, ${COLORS.cyan}20, ${COLORS.purple}15)`,
+              border: `1px solid ${COLORS.cyan}30`,
+              boxShadow: `0 0 12px ${COLORS.cyan}15`,
+            }}
           >
             <Shield className="w-4 h-4" style={{ color: COLORS.cyan }} />
           </div>
-          <span className="text-sm font-black text-white uppercase tracking-wider" style={{ fontFamily: "'Oxanium', monospace" }}>
-            Yodha Analysis
-          </span>
-          <span className="text-xs text-gray-500">{ticker}</span>
+          <div>
+            <span className="text-sm font-black text-white uppercase tracking-wider" style={{ fontFamily: "'Oxanium', monospace" }}>
+              Yodha
+            </span>
+            <span className="text-xs text-gray-500 ml-2">{ticker}</span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          {mlMeta && (
-            <span className="text-[10px] text-gray-600 font-mono">
-              {mlMeta.completeness} · {mlMeta.latencyMs}ms
-            </span>
+          {mlLoading && (
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: COLORS.cyan }} />
+              <span className="text-[10px] text-gray-500">Analyzing</span>
+            </div>
           )}
-          {mlRefresh && (
+          {mlRefresh && !mlLoading && (
             <button
               onClick={mlRefresh}
-              disabled={mlLoading}
-              className="p-1 rounded hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
+              className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
               title="Refresh analysis"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${mlLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
       </div>
 
-      {/* ── CONFIDENCE METER ─────────────────────────────── */}
-      <div className="px-5 py-4 border-b" style={{ borderColor: COLORS.cardBorder }}>
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Confidence</span>
-            {hasMLSignal && (
-              <span
-                className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                style={{ background: `${biasColor}20`, color: biasColor }}
-              >
-                {mlDirection} · {mlStrength}
-              </span>
-            )}
-          </div>
-          <span className="text-sm font-mono font-bold" style={{ color: biasColor }}>
-            {moveProbability.toFixed(0)}%
-          </span>
-        </div>
-        {/* Bar */}
-        <div className="relative h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
-          <div
-            className="absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out"
-            style={{
-              width: `${Math.min(moveProbability, 100)}%`,
-              background: moveProbability >= 80
-                ? `linear-gradient(90deg, ${biasColor}90, ${biasColor})`
-                : moveProbability >= 60
-                ? `linear-gradient(90deg, ${biasColor}60, ${biasColor}90)`
-                : `linear-gradient(90deg, ${biasColor}30, ${biasColor}60)`,
-            }}
-          />
-          {/* 80% threshold marker */}
-          <div
-            className="absolute top-0 bottom-0 w-px"
-            style={{ left: '80%', background: 'rgba(255,255,255,0.2)' }}
-          />
-        </div>
-        <div className="flex items-center justify-between mt-1">
-          <span className="text-[10px] text-gray-600">Low</span>
-          <span className="text-[10px] text-gray-600">80% threshold</span>
-          <span className="text-[10px] text-gray-600">High</span>
-        </div>
-        {/* Confidence history sparkline */}
-        {confidenceHistory && confidenceHistory.length >= 2 && (
-          <div className="mt-3 mb-1 w-full">
-            <ConfidenceSparkline
-              history={confidenceHistory}
-              height={48}
-              threshold={80}
+      {/* ── CONFIDENCE GAUGE + SPARKLINE ───────────────── */}
+      <div className="px-5 pb-4">
+        <div className="flex items-start gap-5">
+          {/* Radial Gauge */}
+          <div className="flex-shrink-0">
+            <ConfidenceGauge
+              value={moveProbability}
+              color={biasColor}
+              direction={mlDirection}
+              hasSignal={hasMLSignal}
             />
           </div>
-        )}
-        {/* One-liner */}
-        <p className="text-xs text-gray-400 mt-2">
-          {thesis.oneLiner}
-        </p>
-        {mlLoading && !mlPrediction && (
-          <div className="flex items-center gap-2 mt-2">
-            <Loader2 className="w-3 h-3 animate-spin text-gray-500" />
-            <span className="text-[10px] text-gray-500">ML model analyzing...</span>
+
+          {/* Right side: sparkline + one-liner */}
+          <div className="flex-1 min-w-0 pt-1">
+            {/* Sparkline */}
+            {confidenceHistory && confidenceHistory.length >= 2 ? (
+              <div className="w-full mb-2">
+                <ConfidenceSparkline
+                  history={confidenceHistory}
+                  height={52}
+                  threshold={80}
+                />
+              </div>
+            ) : (
+              <div className="h-[52px] flex items-center justify-center rounded-lg mb-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                <span className="text-[10px] text-gray-600">Confidence history builds during session</span>
+              </div>
+            )}
+
+            {/* One-liner */}
+            <p className="text-xs text-gray-400 leading-relaxed">
+              {thesis.oneLiner}
+            </p>
+
+            {mlError && !mlPrediction && (
+              <p className="text-[10px] text-amber-500/70 mt-1">{mlError}</p>
+            )}
           </div>
-        )}
-        {mlError && !mlPrediction && (
-          <p className="text-[10px] text-amber-500/70 mt-2">{mlError}</p>
-        )}
+        </div>
+      </div>
+
+      {/* ── SIGNAL CONFLUENCE BAR ──────────────────────── */}
+      <div className="px-5 pb-3">
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1">
+            {signals.map((sig, i) => {
+              const dotColor = sig.bias === 'BULLISH' ? COLORS.green
+                : sig.bias === 'BEARISH' ? COLORS.red
+                : sig.bias === 'NEUTRAL' ? '#ffc107' : '#333';
+              return (
+                <div
+                  key={i}
+                  className="w-2.5 h-2.5 rounded-full transition-all"
+                  style={{
+                    background: dotColor,
+                    boxShadow: sig.bias !== 'NO_DATA' ? `0 0 6px ${dotColor}50` : 'none',
+                    opacity: sig.bias === 'NO_DATA' ? 0.3 : 1,
+                  }}
+                  title={`${sig.label}: ${sig.bias}`}
+                />
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-1.5 text-[10px]">
+            {bullCount > 0 && <span style={{ color: COLORS.green }}>{bullCount} bull</span>}
+            {bearCount > 0 && <span style={{ color: COLORS.red }}>{bearCount} bear</span>}
+            {neutralCount > 0 && <span style={{ color: '#ffc107' }}>{neutralCount} neutral</span>}
+            {noDataCount > 0 && <span className="text-gray-600">{noDataCount} pending</span>}
+          </div>
+          <div className="flex-1" />
+          <span
+            className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+            style={{ background: `${biasColor}15`, color: biasColor, border: `1px solid ${biasColor}25` }}
+          >
+            {thesis.bias === 'BULLISH' ? '▲ BULLISH' : thesis.bias === 'BEARISH' ? '▼ BEARISH' : '◆ NEUTRAL'}
+          </span>
+        </div>
       </div>
 
       {/* ── THESIS ────────────────────────────────────────── */}
       <div
-        className="px-5 py-4 border-b"
+        className="mx-4 mb-3 rounded-lg px-4 py-3.5 relative overflow-hidden"
         style={{
-          borderColor: COLORS.cardBorder,
-          background: `${biasColor}08`,
+          background: `linear-gradient(135deg, ${biasColor}08, ${biasColor}04)`,
+          border: `1px solid ${biasColor}18`,
         }}
       >
-        <div className="flex items-center gap-2 mb-2">
-          <Target className="w-4 h-4" style={{ color: biasColor }} />
-          <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">Thesis</span>
-          <div
-            className="px-2 py-0.5 rounded-full text-[10px] font-bold"
-            style={{ background: `${biasColor}20`, color: biasColor }}
-          >
-            {thesis.bias}
-          </div>
-        </div>
-        <p className="text-sm text-gray-200 leading-relaxed">{thesis.body}</p>
+        {/* Subtle gradient accent on left edge */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-lg"
+          style={{ background: `linear-gradient(180deg, ${biasColor}80, ${biasColor}20)` }}
+        />
+        <p className="text-sm text-gray-200 leading-relaxed pl-2">{thesis.body}</p>
       </div>
 
       {/* ── SETUP (entry/targets/stop) ────────────────────── */}
       {thesis.setup && (thesis.setup.entry || thesis.setup.targets.length > 0 || thesis.setup.stop) && (
-        <div className="px-5 py-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
-          <div className="flex items-center gap-2 mb-2">
-            <Zap className="w-3.5 h-3.5" style={{ color: COLORS.cyan }} />
-            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Setup</span>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="px-5 pb-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {thesis.setup.entry && (
               <SetupLevel label="Entry" value={thesis.setup.entry} color={COLORS.cyan} />
             )}
@@ -286,71 +290,165 @@ export function YodhaAnalysis({
 
       {/* ── RISK ──────────────────────────────────────────── */}
       {thesis.risk && (
-        <div className="px-5 py-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
-          <div className="flex items-center gap-2 mb-1">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Risk</span>
-          </div>
-          <p className="text-xs text-gray-400 leading-relaxed">{thesis.risk}</p>
+        <div className="mx-4 mb-3 px-3 py-2 rounded-lg flex items-start gap-2" style={{ background: 'rgba(255,82,82,0.05)', border: '1px solid rgba(255,82,82,0.1)' }}>
+          <AlertTriangle className="w-3 h-3 text-amber-500 mt-0.5 flex-shrink-0" />
+          <p className="text-[11px] text-gray-400 leading-relaxed">{thesis.risk}</p>
         </div>
       )}
 
-      {/* ── SUPPORTING DATA (collapsible) ─────────────────── */}
-      <div className="px-5 py-2 border-b" style={{ borderColor: COLORS.cardBorder }}>
-        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Supporting Data</span>
-      </div>
-      {signals.map((signal, i) => {
-        const key = signal.label;
-        const isOpen = expandedSections.has(key);
-        const Icon = signal.icon;
-        const color = signal.bias === 'BULLISH' ? COLORS.green
-          : signal.bias === 'BEARISH' ? COLORS.red
-          : signal.bias === 'NEUTRAL' ? '#ffc107' : '#555';
+      {/* ── SUPPORTING SIGNALS (compact cards) ────────────── */}
+      <div className="px-4 pb-4 pt-1">
+        <div className="grid grid-cols-2 gap-2">
+          {signals.map((signal, i) => {
+            const key = signal.label;
+            const isOpen = expandedSignal === key;
+            const Icon = signal.icon;
+            const color = signal.bias === 'BULLISH' ? COLORS.green
+              : signal.bias === 'BEARISH' ? COLORS.red
+              : signal.bias === 'NEUTRAL' ? '#ffc107' : '#444';
 
-        return (
-          <div key={i} className="border-b last:border-b-0" style={{ borderColor: COLORS.cardBorder }}>
-            <button
-              onClick={() => toggleSection(key)}
-              className="w-full flex items-center justify-between px-5 py-2.5 hover:bg-white/[0.02] transition-colors"
-            >
-              <div className="flex items-center gap-2.5">
-                <div
-                  className="w-6 h-6 rounded flex items-center justify-center"
-                  style={{ background: `${color}15` }}
-                >
-                  <Icon className="w-3 h-3" style={{ color }} />
+            return (
+              <button
+                key={i}
+                onClick={() => setExpandedSignal(isOpen ? null : key)}
+                className="text-left rounded-lg p-3 transition-all duration-200 hover:brightness-110"
+                style={{
+                  background: signal.bias === 'NO_DATA'
+                    ? 'rgba(255,255,255,0.015)'
+                    : `linear-gradient(135deg, ${color}06, ${color}03)`,
+                  border: `1px solid ${signal.bias === 'NO_DATA' ? 'rgba(255,255,255,0.04)' : `${color}15`}`,
+                }}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Icon className="w-3 h-3" style={{ color: signal.bias === 'NO_DATA' ? '#555' : color }} />
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{signal.label}</span>
+                  </div>
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: color, opacity: signal.bias === 'NO_DATA' ? 0.3 : 1 }} />
                 </div>
-                <span className="text-xs font-bold text-gray-300">{signal.label}</span>
-                <div className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
-                <span className="text-[10px] font-semibold" style={{ color }}>
-                  {signal.bias === 'NO_DATA' ? 'NO DATA' : signal.bias}
-                </span>
-              </div>
-              {isOpen
-                ? <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
-                : <ChevronRight className="w-3.5 h-3.5 text-gray-500" />
-              }
-            </button>
-            {isOpen && (
-              <div className="px-5 pb-3 pl-[52px]">
-                <p className="text-xs text-gray-400 leading-relaxed">{signal.summary}</p>
-                {signal.details.length > 0 && (
-                  <ul className="mt-1.5 space-y-0.5">
-                    {signal.details.map((d, j) => (
-                      <li key={j} className="text-[10px] text-gray-500 flex items-center gap-1.5">
-                        <span className="w-1 h-1 rounded-full bg-gray-600" />
-                        {d}
-                      </li>
-                    ))}
-                  </ul>
+                {isOpen && signal.bias !== 'NO_DATA' ? (
+                  <p className="text-[11px] text-gray-300 leading-relaxed">{signal.summary}</p>
+                ) : (
+                  <span className="text-[11px] font-medium" style={{ color: signal.bias === 'NO_DATA' ? '#555' : color }}>
+                    {signal.bias === 'NO_DATA' ? 'Awaiting data' : signal.bias}
+                  </span>
                 )}
-              </div>
-            )}
-          </div>
-        );
-      })}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
+}
+
+/* ──────────────────────────────────────────────────────────
+   CONFIDENCE RADIAL GAUGE
+   ────────────────────────────────────────────────────────── */
+
+function ConfidenceGauge({
+  value,
+  color,
+  direction,
+  hasSignal,
+}: {
+  value: number;
+  color: string;
+  direction: string;
+  hasSignal: boolean;
+}) {
+  const size = 100;
+  const strokeWidth = 6;
+  const radius = (size - strokeWidth * 2) / 2;
+  const circumference = radius * Math.PI * 1.5; // 270° arc
+  const cappedValue = Math.min(Math.max(value, 0), 100);
+  const offset = circumference - (cappedValue / 100) * circumference;
+
+  // Start at 135° (bottom-left), sweep 270° clockwise
+  const startAngle = 135;
+  const arcPath = describeArc(size / 2, size / 2, radius, startAngle, startAngle + 270);
+  const filledPath = describeArc(size / 2, size / 2, radius, startAngle, startAngle + (270 * cappedValue / 100));
+
+  // 80% threshold tick
+  const threshAngle = startAngle + (270 * 0.8);
+  const threshRad = (threshAngle * Math.PI) / 180;
+  const tx1 = size / 2 + (radius - 8) * Math.cos(threshRad);
+  const ty1 = size / 2 + (radius - 8) * Math.sin(threshRad);
+  const tx2 = size / 2 + (radius + 2) * Math.cos(threshRad);
+  const ty2 = size / 2 + (radius + 2) * Math.sin(threshRad);
+
+  return (
+    <div className="relative" style={{ width: size, height: size - 12 }}>
+      <svg width={size} height={size - 12} viewBox={`0 6 ${size} ${size - 12}`}>
+        {/* Glow filter */}
+        <defs>
+          <filter id="gaugeGlow">
+            <feGaussianBlur stdDeviation="3" result="glow" />
+            <feMerge>
+              <feMergeNode in="glow" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        {/* Background arc */}
+        <path
+          d={arcPath}
+          fill="none"
+          stroke="rgba(255,255,255,0.06)"
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+        />
+
+        {/* Filled arc */}
+        {cappedValue > 0 && (
+          <path
+            d={filledPath}
+            fill="none"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            style={{ filter: cappedValue >= 60 ? 'url(#gaugeGlow)' : undefined }}
+            opacity={cappedValue >= 80 ? 1 : cappedValue >= 40 ? 0.7 : 0.4}
+          />
+        )}
+
+        {/* 80% threshold tick */}
+        <line
+          x1={tx1} y1={ty1} x2={tx2} y2={ty2}
+          stroke="rgba(255,255,255,0.2)"
+          strokeWidth={1.5}
+        />
+      </svg>
+
+      {/* Center text */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ paddingTop: 4 }}>
+        <span
+          className="text-xl font-black font-mono leading-none"
+          style={{ color, fontFamily: "'Oxanium', monospace" }}
+        >
+          {cappedValue.toFixed(0)}%
+        </span>
+        {hasSignal && (
+          <span className="text-[9px] font-bold mt-0.5" style={{ color }}>
+            {direction}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** SVG arc path helper */
+function describeArc(cx: number, cy: number, r: number, startAngle: number, endAngle: number): string {
+  const startRad = (startAngle * Math.PI) / 180;
+  const endRad = (endAngle * Math.PI) / 180;
+  const x1 = cx + r * Math.cos(startRad);
+  const y1 = cy + r * Math.sin(startRad);
+  const x2 = cx + r * Math.cos(endRad);
+  const y2 = cy + r * Math.sin(endRad);
+  const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+  return `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}`;
 }
 
 /* ──────────────────────────────────────────────────────────
