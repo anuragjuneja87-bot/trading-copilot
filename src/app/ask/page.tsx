@@ -439,18 +439,6 @@ function AskPageContent() {
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             <div className="p-3 space-y-3 max-w-[1200px] mx-auto">
 
-              {/* ★ YODHA CHART — UNIFIED PRICE + PRESSURE ★ */}
-              <div className="h-[420px] rounded" style={{ border: '1px solid rgba(42,46,57,0.5)' }}>
-                <YodhaChart
-                  ticker={selectedTicker}
-                  timeframe={timeframe}
-                  levels={data.levels}
-                  price={data.price}
-                  changePercent={data.changePercent}
-                  marketSession={data.marketSession}
-                />
-              </div>
-
               {/* ★ YODHA ANALYSIS — THE CENTERPIECE ★ */}
               <YodhaAnalysis
                 ticker={selectedTicker}
@@ -485,6 +473,18 @@ function AskPageContent() {
                 mlPrediction={mlResult.prediction}
                 volumePressure={volumePressure}
               />
+
+              {/* ★ YODHA CHART — TV Lightweight Charts ★ */}
+              <div className="h-[440px] rounded overflow-hidden" style={{ border: '1px solid rgba(42,46,57,0.5)' }}>
+                <YodhaChart
+                  ticker={selectedTicker}
+                  timeframe={timeframe}
+                  levels={data.levels}
+                  price={data.price}
+                  changePercent={data.changePercent}
+                  marketSession={data.marketSession}
+                />
+              </div>
 
               {/* DETAILED DATA PANELS (collapsible) */}
               <div className="flex items-center justify-end mb-1">
