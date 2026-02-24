@@ -431,6 +431,21 @@ function AskPageContent() {
                 confidenceHistory={mlResult.confidenceHistory}
               />
 
+              {/* ★ ASK YODHA — CHAT INPUT ★ */}
+              <AskYodhaChat
+                ticker={selectedTicker}
+                price={data.price}
+                levels={data.levels}
+                marketSession={data.marketSession}
+                changePercent={data.changePercent}
+                flowStats={data.flow?.stats || null}
+                darkPoolStats={data.darkpool?.stats || null}
+                newsItems={data.news.items}
+                relativeStrength={data.relativeStrength}
+                mlPrediction={mlResult.prediction}
+                volumePressure={volumePressure}
+              />
+
               {/* CHART */}
               <div className="h-[400px]">
                 <TradingViewPanel ticker={selectedTicker} timeframe={timeframe} />
@@ -489,21 +504,6 @@ function AskPageContent() {
                   />
                 </CollapsiblePanel>
               </div>
-
-              {/* ★ ASK YODHA — CHAT INPUT ★ */}
-              <AskYodhaChat
-                ticker={selectedTicker}
-                price={data.price}
-                levels={data.levels}
-                marketSession={data.marketSession}
-                changePercent={data.changePercent}
-                flowStats={data.flow?.stats || null}
-                darkPoolStats={data.darkpool?.stats || null}
-                newsItems={data.news.items}
-                relativeStrength={data.relativeStrength}
-                mlPrediction={mlResult.prediction}
-                volumePressure={volumePressure}
-              />
 
               <div className="h-4" />
             </div>

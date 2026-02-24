@@ -758,19 +758,21 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
               onClick={() => { setQuery(s); handleAsk(s); }}
               className="group px-3 py-1.5 rounded-full text-[11px] transition-all duration-200"
               style={{
-                color: 'rgba(255,255,255,0.75)',
-                background: 'rgba(0,229,255,0.06)',
-                border: '1px solid rgba(0,229,255,0.12)',
+                color: 'rgba(255,255,255,0.85)',
+                background: 'rgba(0,229,255,0.08)',
+                border: `1px solid ${COLORS.cyan}30`,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = `${COLORS.cyan}40`;
-                e.currentTarget.style.color = 'rgba(255,255,255,0.95)';
-                e.currentTarget.style.background = `${COLORS.cyan}15`;
+                e.currentTarget.style.borderColor = COLORS.cyan;
+                e.currentTarget.style.color = '#fff';
+                e.currentTarget.style.background = `${COLORS.cyan}20`;
+                e.currentTarget.style.boxShadow = `0 0 10px ${COLORS.cyan}25`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(0,229,255,0.12)';
-                e.currentTarget.style.color = 'rgba(255,255,255,0.75)';
-                e.currentTarget.style.background = 'rgba(0,229,255,0.06)';
+                e.currentTarget.style.borderColor = `${COLORS.cyan}30`;
+                e.currentTarget.style.color = 'rgba(255,255,255,0.85)';
+                e.currentTarget.style.background = 'rgba(0,229,255,0.08)';
+                e.currentTarget.style.boxShadow = 'none';
               }}
             >
               {s}
