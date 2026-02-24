@@ -11,6 +11,7 @@ interface TradingViewPanelProps {
 
 function getInterval(timeframe: string): string {
   const map: Record<string, string> = {
+    '1m': '1',
     '5m': '5',
     '15m': '15',
     '30m': '30',
@@ -82,6 +83,7 @@ function TradingViewPanelComponent({ ticker, timeframe = '15m' }: TradingViewPan
       hide_side_toolbar: true,
       details: false,
       calendar: false,
+      extended_hours: true,
       support_host: 'https://www.tradingview.com',
       backgroundColor: 'rgba(0, 0, 0, 0)',
       gridColor: 'rgba(255, 255, 255, 0.05)',

@@ -172,14 +172,15 @@ function buildGammaSummary(levels: any, price: number): PanelSummary {
   return { text: parts.join(' · '), color };
 }
 
-function buildVolumeSummary(vp: number | undefined): PanelSummary {
+function buildVolumeSummary(vp: number | undefined, session?: string): PanelSummary {
   if (vp === undefined) return { text: null, color: '#555' };
 
   const clamped = Math.max(0, Math.min(100, vp));
   const label = clamped > 60 ? 'Buying pressure' : clamped < 40 ? 'Selling pressure' : 'Balanced';
   const color = clamped > 60 ? COLORS.green : clamped < 40 ? COLORS.red : '#ffc107';
+  const prefix = session !== 'open' ? 'Last session · ' : '';
 
-  return { text: `${clamped.toFixed(0)}% buy-side · ${label}`, color };
+  return { text: `${prefix}${clamped.toFixed(0)}% buy-side · ${label}`, color };
 }
 
 function buildRSSummary(rs: any, ticker: string): PanelSummary {
@@ -288,7 +289,7 @@ function AskPageContent() {
     flow: buildFlowSummary(data.flow?.stats, data.marketSession),
     darkPool: buildDarkPoolSummary(data.darkpool?.stats, data.marketSession),
     gamma: buildGammaSummary(data.levels, data.price),
-    volume: buildVolumeSummary(volumePressure),
+    volume: buildVolumeSummary(volumePressure, data.marketSession),
     rs: buildRSSummary(data.relativeStrength, selectedTicker || ''),
     news: buildNewsSummary(data.news.items, selectedTicker || ''),
   }), [data.flow?.stats, data.darkpool?.stats, data.levels, data.price, data.marketSession, volumePressure, data.relativeStrength, data.news.items, selectedTicker]);
