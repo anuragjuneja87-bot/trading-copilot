@@ -17,7 +17,7 @@ export type DataMode = 'delayed' | 'realtime';
 
 export const DATA_CONFIG = {
   delayed: {
-    wsUrl: 'wss://delayed.massive.com/stocks',
+    wsUrl: 'wss://delayed.polygon.io/stocks',
     restPollInterval: 15000,
     wsPollInterval: 1000,
     label: '15-min Delayed',
@@ -25,7 +25,7 @@ export const DATA_CONFIG = {
     description: 'Data is delayed by 15 minutes',
   },
   realtime: {
-    wsUrl: 'wss://socket.massive.com/stocks',
+    wsUrl: 'wss://socket.polygon.io/stocks',
     restPollInterval: 5000,
     wsPollInterval: 0,
     label: 'Real-time',

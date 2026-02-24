@@ -264,6 +264,11 @@ export function useWarRoomData(
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
 
+      // Cache-bust during market hours to ensure fresh data
+      const isLive = marketSession === 'open' || marketSession === 'pre-market';
+      const cacheBust = isLive ? `&_t=${Date.now()}` : '';
+      const cacheBustFirst = isLive ? `?_t=${Date.now()}` : '';
+
       const flowParams = new URLSearchParams({ tickers: ticker, limit: '200' });
       const dpParams = new URLSearchParams({ tickers: ticker, limit: '100' });
       
@@ -274,12 +279,14 @@ export function useWarRoomData(
         dpParams.set('timestampLte', timeframeParams.timestampLte.toString());
       }
       
+      const fetchOpts = { signal: controller.signal, cache: isLive ? 'no-store' as RequestCache : 'default' as RequestCache };
+
       const [flowRes, dpRes, newsRes, levelsRes, priceRes] = await Promise.all([
-        fetch(`/api/flow/options?${flowParams}`, { signal: controller.signal }),
-        fetch(`/api/darkpool?${dpParams}`, { signal: controller.signal }),
-        fetch(`/api/news?tickers=${ticker}&limit=10`, { signal: controller.signal }),
-        fetch(`/api/market/levels/${ticker}`, { signal: controller.signal }),
-        fetch(`/api/market/prices?tickers=${ticker}`, { signal: controller.signal }),
+        fetch(`/api/flow/options?${flowParams}${cacheBust}`, fetchOpts),
+        fetch(`/api/darkpool?${dpParams}${cacheBust}`, fetchOpts),
+        fetch(`/api/news?tickers=${ticker}&limit=10${cacheBust}`, fetchOpts),
+        fetch(`/api/market/levels/${ticker}${cacheBustFirst}`, fetchOpts),
+        fetch(`/api/market/prices?tickers=${ticker}${cacheBust}`, fetchOpts),
       ]);
 
       clearTimeout(timeout);
@@ -336,7 +343,7 @@ export function useWarRoomData(
       setIsLoading(false);
       fetchInProgress.current = false;
     }
-  }, [ticker, timeframeParams]);
+  }, [ticker, timeframeParams, marketSession]);
 
   // Initial fetch + polling (slower when market closed)
   useEffect(() => {

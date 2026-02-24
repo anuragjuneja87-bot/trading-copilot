@@ -58,8 +58,10 @@ export async function GET(request: NextRequest) {
     // Use Polygon batch snapshot endpoint
     const url = `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${tickers.join(',')}&apiKey=${POLYGON_API_KEY}`;
     
-    const response = await fetch(url, {
-      next: { revalidate: revalidateTime },
+    const response = await fetch(url, isMarketOpen ? {
+      cache: 'no-store',
+    } : {
+      next: { revalidate: 60 },
     });
 
     if (!response.ok) {
@@ -157,7 +159,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('[Market Prices API] Error:', error);
     return NextResponse.json(
-      { success: false, error: 'An error occurred' },
+      { success: false, error: "An error occurred" || 'Failed to fetch prices' },
       { status: 500 }
     );
   }
