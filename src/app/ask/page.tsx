@@ -339,6 +339,21 @@ function AskPageContent() {
               {data.levels?.vwap && <LevelRow label="VWAP" value={data.levels.vwap} color={COLORS.cyan} currentPrice={data.price} />}
             </div>
             <GexContext price={data.price} gexFlip={data.levels?.gexFlip || null} />
+
+            {/* ── Camarilla Pivot Levels ── */}
+            {(data.levels?.r3 || data.levels?.s3) && (
+              <div className="mt-3 pt-2 border-t" style={{ borderColor: 'rgba(42,46,57,0.4)' }}>
+                <div className="text-[9px] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'rgba(209,212,220,0.35)' }}>
+                  Camarilla Pivots
+                </div>
+                <div className="space-y-1">
+                  {data.levels?.r4 && <LevelRow label="R4" value={data.levels.r4} color="#00bcd4" currentPrice={data.price} />}
+                  {data.levels?.r3 && <LevelRow label="R3" value={data.levels.r3} color="#00bcd4" currentPrice={data.price} />}
+                  {data.levels?.s3 && <LevelRow label="S3" value={data.levels.s3} color="#ff7043" currentPrice={data.price} />}
+                  {data.levels?.s4 && <LevelRow label="S4" value={data.levels.s4} color="#ff7043" currentPrice={data.price} />}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto p-3">
@@ -483,6 +498,11 @@ function AskPageContent() {
                   price={data.price}
                   changePercent={data.changePercent}
                   marketSession={data.marketSession}
+                  prevDayHLC={data.levels?.prevHigh && data.levels?.prevLow && data.levels?.prevClose ? {
+                    h: data.levels.prevHigh,
+                    l: data.levels.prevLow,
+                    c: data.levels.prevClose,
+                  } : undefined}
                 />
               </div>
 

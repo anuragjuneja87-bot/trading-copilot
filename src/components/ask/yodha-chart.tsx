@@ -121,9 +121,21 @@ function YodhaChartInner({
   const [groupVis, setGroupVis] = useState({ vwap: true, walls: true, cam: true });
   const [loading, setLoading] = useState(true);
 
+  // ── Sync internal TF when parent timeframe prop changes ──
+  useEffect(() => {
+    // Map parent timeframe (1M, 5M, 15M, 30M, 1H, 4H, 1D, 1W) to our TF format
+    const mapped = timeframe?.toLowerCase().replace(/\s/g, '') || '5m';
+    const valid = TF_MAP[mapped] ? mapped : '5m';
+    if (valid !== activeTF) {
+      setActiveTF(valid);
+      setLoading(true);
+      fetchCandles(valid).then(() => setLoading(false));
+    }
+  }, [timeframe]);
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Compute Camarilla levels from prev day HLC ──
+  // ── Compute Camarilla levels from prev day HLC (or use levels from API) ──
   const camLevels = prevDayHLC ? (() => {
     const R = prevDayHLC.h - prevDayHLC.l;
     return {
@@ -132,7 +144,10 @@ function YodhaChartInner({
       s3: +(prevDayHLC.c - R * 1.1 / 4).toFixed(2),
       s4: +(prevDayHLC.c - R * 1.1 / 2).toFixed(2),
     };
-  })() : null;
+  })() : (levels as any)?.r3 ? {
+    r4: (levels as any).r4, r3: (levels as any).r3,
+    s3: (levels as any).s3, s4: (levels as any).s4,
+  } : null;
 
   // ── Fetch candle data ──
   const fetchCandles = useCallback(async (tf: string) => {
@@ -260,6 +275,8 @@ function YodhaChartInner({
 
     return () => {
       destroyed = true;
+      candleSeriesRef.current = null;
+      vwapSeriesRef.current = null;
       if (chartRef.current) {
         try { chartRef.current.remove(); } catch {}
         chartRef.current = null;
@@ -269,7 +286,7 @@ function YodhaChartInner({
 
   // ── Update chart data when bars change ──
   useEffect(() => {
-    if (!bars.length || !candleSeriesRef.current || !lcRef.current) return;
+    if (!bars.length || !chartRef.current || !candleSeriesRef.current || !lcRef.current) return;
 
     const cs = candleSeriesRef.current;
     const vwapSeries = vwapSeriesRef.current;
@@ -309,15 +326,14 @@ function YodhaChartInner({
       .map(([time, value]) => ({ time, value }));
 
     pressureMapRef.current = pressureMap;
-    cs.setData(candleData);
-    if (vwapSeries) vwapSeries.setData(vwapData);
-
-    // Draw levels
-    drawLevels();
-
-    // Fit content
-    if (chartRef.current) {
-      chartRef.current.timeScale().fitContent();
+    try {
+      cs.setData(candleData);
+      if (vwapSeries) vwapSeries.setData(vwapData);
+      drawLevels();
+      if (chartRef.current) chartRef.current.timeScale().fitContent();
+    } catch (e) {
+      // Chart/series may be disposed (e.g. ticker changed or unmount)
+      if (String(e).indexOf('disposed') === -1) console.error('[YodhaChart] setData:', e);
     }
   }, [bars, groupVis, levels, camLevels]);
 
@@ -488,24 +504,28 @@ function YodhaChartInner({
         }}>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8,
-            background: 'rgba(19,23,34,0.75)', padding: '3px 8px', borderRadius: 4,
-            border: '1px solid rgba(42,46,57,0.3)',
+            background: 'rgba(19,23,34,0.85)', padding: '4px 10px', borderRadius: 4,
+            border: '1px solid rgba(42,46,57,0.4)',
           }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#26a69a', animation: 'yodha-pulse 2s ease-in-out infinite', boxShadow: '0 0 4px rgba(38,166,154,0.5)' }} />
+            <span style={{ color: 'rgba(209,212,220,0.55)', fontSize: 8, letterSpacing: '0.5px', textTransform: 'uppercase' }}>AI Pressure Engine</span>
+            <div style={{ width: 1, height: 10, background: 'rgba(42,46,57,0.5)' }} />
             <div style={{ width: 10, height: 10, borderRadius: 2, background: '#26a69a' }} />
-            <span style={{ color: 'rgba(209,212,220,0.45)' }}>Bullish</span>
+            <span style={{ color: 'rgba(209,212,220,0.4)' }}>Bullish</span>
             <div style={{ width: 10, height: 10, borderRadius: 2, background: '#ff9800' }} />
-            <span style={{ color: 'rgba(209,212,220,0.45)' }}>Crossover</span>
+            <span style={{ color: 'rgba(209,212,220,0.4)' }}>Crossover</span>
             <div style={{ width: 10, height: 10, borderRadius: 2, background: '#ef5350' }} />
-            <span style={{ color: 'rgba(209,212,220,0.45)' }}>Bearish</span>
+            <span style={{ color: 'rgba(209,212,220,0.4)' }}>Bearish</span>
           </div>
           <div
             id="yodha-pressure-readout"
             style={{
-              background: 'rgba(19,23,34,0.75)', padding: '3px 8px', borderRadius: 4,
-              border: '1px solid rgba(42,46,57,0.3)', fontSize: 10,
+              background: 'rgba(19,23,34,0.85)', padding: '4px 10px', borderRadius: 4,
+              border: '1px solid rgba(42,46,57,0.4)', fontSize: 10,
             }}
           />
         </div>
+        <style>{`@keyframes yodha-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
 
         {/* Loading overlay */}
         {loading && (

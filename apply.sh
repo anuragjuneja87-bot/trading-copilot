@@ -1,35 +1,13 @@
-# 3. Create candle pressure module (starter — you'll evolve this)
-cat > src/lib/candle-pressure.ts << 'EOF'
-interface PressureInput { bar: any; i: number; bars: any[]; vwap: number; }
+# 1. Hook — Camarilla fields in levels (r3, r4, s3, s4, prevDayHLC)
+cp ~/Downloads/use-war-room-data.ts src/hooks/use-war-room-data.ts
 
-export function computeBarPressure(input: PressureInput): { bp: number; brp: number } {
-  const { bar, i, bars, vwap } = input;
-  let bp = 50, brp = 50;
-  if (bar.c > vwap) { bp += 10; brp -= 10; } else { bp -= 10; brp += 10; }
-  if (bar.c > bar.o) { bp += 8; brp -= 5; } else { bp -= 5; brp += 8; }
-  if (i > 5) {
-    const avgVol = bars.slice(Math.max(0, i - 5), i).reduce((s: number, b: any) => s + b.v, 0) / 5;
-    if (bar.v > avgVol * 1.5) { if (bar.c > bar.o) { bp += 12; } else { brp += 12; } }
-  }
-  if (i >= 3) {
-    const trend = bars[i].c - bars[i - 3].o;
-    if (trend > 0) { bp += Math.min(15, trend * 10); } else { brp += Math.min(15, Math.abs(trend) * 10); }
-  }
-  return { bp: Math.max(0, Math.min(100, bp)), brp: Math.max(0, Math.min(100, brp)) };
-}
+# 2. Chart — AI Pressure Engine branding + parent TF sync
+cp ~/Downloads/yodha-chart.tsx src/components/ask/yodha-chart.tsx
 
-export function pressureToColor(bp: number, brp: number): string {
-  const spread = bp - brp;
-  if (spread > 25) return '#26a69a';
-  if (spread > 8)  return '#1b8a7a';
-  if (spread > -8) return '#ff9800';
-  if (spread > -25) return '#c94442';
-  return '#ef5350';
-}
-EOF
+# 3. Signal Confluence → AI Signal Engine
+cp ~/Downloads/confluence-indicator.tsx src/components/war-room/confluence-indicator.tsx
 
-# 4. Update page.tsx — swap TradingView for YodhaChart
-cd src/app/ask
-sed -i '' "s|import { TradingViewPanel } from '@/components/ask/tradingview-panel';|import { YodhaChart } from '@/components/ask/yodha-chart';|" page.tsx
-sed -i '' 's|<div className="h-\[400px\]">|<div className="h-[580px]">|' page.tsx
-sed -i '' 's|<TradingViewPanel ticker={selectedTicker} timeframe={timeframe} />|<YodhaChart ticker={selectedTicker} timeframe={timeframe} price={data.price} changePercent={data.changePercent} marketSession={data.marketSession} levels={data.levels} />|' page.tsx
+# 4. Page — Camarilla in sidebar + prevDayHLC → chart
+cp ~/Downloads/page.tsx src/app/ask/page.tsx
+
+npm run dev
