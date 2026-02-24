@@ -180,21 +180,66 @@ export function YodhaAnalysis({
         <div className="flex items-start gap-5">
           {/* Radial Gauge */}
           <div className="flex-shrink-0 flex flex-col items-center">
-            <ConfidenceGauge
-              value={moveProbability}
-              color={biasColor}
-              direction={mlDirection}
-              hasSignal={hasMLSignal}
-            />
+            {marketSession === 'pre-market' ? (
+              <div
+                className="w-[100px] h-[100px] rounded-full flex flex-col items-center justify-center"
+                style={{
+                  background: `linear-gradient(135deg, ${biasColor}10, ${biasColor}05)`,
+                  border: `2px solid ${biasColor}30`,
+                }}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: biasColor }}>
+                  Pre-Mkt
+                </span>
+                <span className="text-lg font-black font-mono leading-tight" style={{ color: biasColor, fontFamily: "'Oxanium', monospace" }}>
+                  {changePercent >= 0 ? '+' : ''}{changePercent.toFixed(1)}%
+                </span>
+              </div>
+            ) : (
+              <ConfidenceGauge
+                value={moveProbability}
+                color={biasColor}
+                direction={mlDirection}
+                hasSignal={hasMLSignal}
+              />
+            )}
             <span className="text-[9px] font-bold uppercase tracking-widest mt-1" style={{ color: 'rgba(255,255,255,0.35)' }}>
-              Confidence
+              {marketSession === 'pre-market' ? 'Gap' : 'Confidence'}
             </span>
           </div>
 
           {/* Right side: sparkline + one-liner */}
           <div className="flex-1 min-w-0 pt-1">
-            {/* Sparkline */}
-            {confidenceHistory && confidenceHistory.length >= 2 ? (
+            {/* Sparkline / Pre-market levels */}
+            {marketSession === 'pre-market' ? (
+              <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 py-2 px-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                {levels.callWall && (
+                  <span className="text-[10px] font-mono font-bold" style={{ color: COLORS.green }}>
+                    CW ${levels.callWall.toFixed(0)}
+                  </span>
+                )}
+                {levels.putWall && (
+                  <span className="text-[10px] font-mono font-bold" style={{ color: COLORS.red }}>
+                    PW ${levels.putWall.toFixed(0)}
+                  </span>
+                )}
+                {levels.gexFlip && (
+                  <span className="text-[10px] font-mono font-bold" style={{ color: '#a855f7' }}>
+                    GEX ${levels.gexFlip.toFixed(0)}
+                  </span>
+                )}
+                {levels.vwap && (
+                  <span className="text-[10px] font-mono font-bold" style={{ color: COLORS.cyan }}>
+                    VWAP ${levels.vwap.toFixed(0)}
+                  </span>
+                )}
+                {levels.maxPain && (
+                  <span className="text-[10px] font-mono font-bold" style={{ color: '#ff9800' }}>
+                    MP ${levels.maxPain.toFixed(0)}
+                  </span>
+                )}
+              </div>
+            ) : confidenceHistory && confidenceHistory.length >= 2 ? (
               <div className="w-full mb-2">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>Intraday Trend</span>
@@ -604,11 +649,45 @@ function getContextSuggestions(
 
   // Session-aware suggestions
   if (session === 'pre-market' || session === 'premarket') {
+    const change = changePercent ?? 0;
+    const isGapUp = change > 0.5;
+    const isGapDown = change < -0.5;
+    const isBigGap = Math.abs(change) > 2;
+
+    if (isBigGap && isGapUp) {
+      return [
+        `Game plan for ${t}'s ${change.toFixed(1)}% gap up at open`,
+        `Should I buy the first pullback or wait on ${t}?`,
+        `Where does ${t} stall? Key resistance levels`,
+        `How does broad market weakness affect ${t}'s gap?`,
+      ];
+    } else if (isBigGap && isGapDown) {
+      return [
+        `Is ${t}'s gap down a buy-the-dip or more downside?`,
+        `Where is support for ${t} after this gap down?`,
+        `Game plan for first 5 min on ${t} at open`,
+        `Should I short ${t} here or wait for a bounce to fade?`,
+      ];
+    } else if (isGapUp) {
+      return [
+        `How should I trade ${t}'s pre-market strength?`,
+        `Key entry levels for ${t} at open`,
+        `Is ${t} showing relative strength vs the market?`,
+        `Fade or follow the ${t} gap today?`,
+      ];
+    } else if (isGapDown) {
+      return [
+        `Is ${t}'s dip a buying opportunity at open?`,
+        `Key support levels for ${t} today`,
+        `How weak is ${t} vs SPY pre-market?`,
+        `Risk/reward on shorting ${t} at open`,
+      ];
+    }
     return [
-      `How should I play the ${t} gap today?`,
-      `What does premarket flow say about ${t}?`,
-      `Key levels to watch for ${t} at open`,
-      `Is this a fade or follow for ${t}?`,
+      `What's the game plan for ${t} at open?`,
+      `Key levels to watch for ${t} today`,
+      `How is ${t} positioned vs the broader market?`,
+      `Should I wait for direction or have a plan ready?`,
     ];
   }
 
@@ -1041,13 +1120,129 @@ function buildUnifiedThesis(
   }
 
   if (session === 'pre-market') {
-    return {
-      bias: 'NEUTRAL',
-      oneLiner: `Pre-market · ${ticker} data loading`,
-      body: `Pre-market session for ${ticker}. Options flow and dark pool not yet active. Check news sentiment for early reads on today's direction.`,
-      setup: { entry: null, targets: [], stop: null },
-      risk: null,
-    };
+    // ── PRE-MARKET THESIS: Synthesize available signals ──
+    const activeSignals = signals.filter(s => s.bias !== 'NO_DATA');
+    const bullish = activeSignals.filter(s => s.bias === 'BULLISH').length;
+    const bearish = activeSignals.filter(s => s.bias === 'BEARISH').length;
+
+    // Determine gap direction and magnitude
+    const isGapUp = changePercent > 0.5;
+    const isGapDown = changePercent < -0.5;
+    const isBigGap = Math.abs(changePercent) > 2;
+    const gapDesc = isGapUp
+      ? `gapping up ${changePercent.toFixed(2)}%`
+      : isGapDown
+        ? `gapping down ${Math.abs(changePercent).toFixed(2)}%`
+        : `flat in pre-market (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`;
+
+    // Determine bias from available signals
+    let bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+    if (bullish >= 2 || (isGapUp && bullish >= 1)) bias = 'BULLISH';
+    else if (bearish >= 2 || (isGapDown && bearish >= 1)) bias = 'BEARISH';
+    else if (isGapUp) bias = 'BULLISH';
+    else if (isGapDown) bias = 'BEARISH';
+
+    // One-liner
+    const oneLiner = isGapUp
+      ? `Pre-market gap up · ${ticker} +${changePercent.toFixed(2)}% · Plan your entry`
+      : isGapDown
+        ? `Pre-market gap down · ${ticker} ${changePercent.toFixed(2)}% · Watch for levels`
+        : `Pre-market · ${ticker} near flat · Wait for open direction`;
+
+    // Build body
+    const bodyParts: string[] = [];
+
+    // Gap context
+    bodyParts.push(`${ticker} is ${gapDesc} in pre-market at $${price.toFixed(2)}.`);
+
+    // News catalyst
+    const newsSignal = signals.find(s => s.label === 'News Sentiment');
+    if (newsSignal && newsSignal.bias !== 'NO_DATA' && newsSignal.summary) {
+      bodyParts.push(newsSignal.summary);
+    }
+
+    // Relative strength context
+    const rsSignal = signals.find(s => s.label === 'Relative Strength');
+    if (rsSignal && rsSignal.bias !== 'NO_DATA' && rsSignal.bias !== 'NEUTRAL') {
+      bodyParts.push(rsSignal.summary);
+    }
+
+    // Key levels context — this is the planning value
+    if (levels.gexFlip && levels.callWall && levels.putWall) {
+      const aboveFlip = price > levels.gexFlip;
+      if (isGapUp) {
+        bodyParts.push(
+          `Key levels: GEX flip at $${levels.gexFlip.toFixed(0)}${aboveFlip ? ' (above — mean-reversion zone, moves may get capped)' : ' (below — trend zone, breakout could extend)'}. ` +
+          `Call wall resistance at $${levels.callWall.toFixed(0)}${levels.callWall - price < price * 0.02 ? ' — close to price, may cap upside' : ''}. ` +
+          `Put wall support at $${levels.putWall.toFixed(0)}.`
+        );
+      } else if (isGapDown) {
+        bodyParts.push(
+          `Key levels: GEX flip at $${levels.gexFlip.toFixed(0)}${!aboveFlip ? ' (below — trend zone, selling can accelerate)' : ' (above — may find support)'}. ` +
+          `Put wall support at $${levels.putWall.toFixed(0)}${price - levels.putWall < price * 0.02 ? ' — close to price, watch for bounce' : ''}. ` +
+          `Call wall overhead at $${levels.callWall.toFixed(0)}.`
+        );
+      } else {
+        bodyParts.push(
+          `Key levels: GEX flip $${levels.gexFlip.toFixed(0)}, call wall $${levels.callWall.toFixed(0)}, put wall $${levels.putWall.toFixed(0)}. Wait for open to establish direction.`
+        );
+      }
+    }
+
+    // Trading approaches
+    if (isBigGap && isGapUp) {
+      bodyParts.push(
+        `Approaches: (1) Wait for first pullback to VWAP${levels.vwap ? ` ($${levels.vwap.toFixed(0)})` : ''} or pre-market high retest. ` +
+        `(2) Fade the gap if price rejects at call wall${levels.callWall ? ` ($${levels.callWall.toFixed(0)})` : ''}. ` +
+        `(3) Wait 5-10 min for price to settle — let the first candle tell the story. Options flow and dark pool data activate at open.`
+      );
+    } else if (isBigGap && isGapDown) {
+      bodyParts.push(
+        `Approaches: (1) Watch for bounce at put wall${levels.putWall ? ` ($${levels.putWall.toFixed(0)})` : ''} or GEX flip. ` +
+        `(2) Short continuation if price breaks below pre-market low. ` +
+        `(3) Wait for first 5-10 min to assess selling pressure and volume. Flow and dark pool signals activate at open.`
+      );
+    } else if (isGapUp || isGapDown) {
+      bodyParts.push(
+        `Watch the first 5-10 min at open. Let volume and flow confirm direction before committing. Options flow and dark pool activate at 9:30.`
+      );
+    } else {
+      bodyParts.push(
+        `No significant gap — direction unclear. Wait for open to establish bias with options flow and dark pool confirmation.`
+      );
+    }
+
+    // Build setup
+    const setup: UnifiedThesis['setup'] = { entry: null, targets: [], stop: null };
+    if (bias === 'BULLISH') {
+      if (levels.vwap) setup.entry = `$${levels.vwap.toFixed(2)} (VWAP pullback)`;
+      else setup.entry = `$${(price * 0.995).toFixed(2)} (first pullback)`;
+      if (levels.callWall && levels.callWall > price) setup.targets.push(`$${levels.callWall.toFixed(2)} (call wall)`);
+      if (levels.gexFlip && levels.gexFlip > price) setup.targets.push(`$${levels.gexFlip.toFixed(2)} (GEX flip)`);
+      if (levels.putWall) setup.stop = `$${levels.putWall.toFixed(2)} (put wall)`;
+      else if (levels.gexFlip) setup.stop = `$${levels.gexFlip.toFixed(2)} (GEX flip)`;
+    } else if (bias === 'BEARISH') {
+      if (levels.vwap) setup.entry = `$${levels.vwap.toFixed(2)} (VWAP rejection)`;
+      else setup.entry = `$${(price * 1.005).toFixed(2)} (bounce to short)`;
+      if (levels.putWall && levels.putWall < price) setup.targets.push(`$${levels.putWall.toFixed(2)} (put wall)`);
+      if (levels.gexFlip && levels.gexFlip < price) setup.targets.push(`$${levels.gexFlip.toFixed(2)} (GEX flip)`);
+      if (levels.callWall) setup.stop = `$${levels.callWall.toFixed(2)} (call wall)`;
+    }
+
+    // Build risk
+    let risk: string | null = null;
+    if (isBigGap) {
+      risk = `Large gaps are volatile — first 5-10 min often fake out. Wait for flow/dark pool confirmation at open before sizing up. ` +
+        (bias === 'BULLISH' && levels.putWall
+          ? `Invalidated below $${levels.putWall.toFixed(2)} (put wall).`
+          : bias === 'BEARISH' && levels.callWall
+            ? `Invalidated above $${levels.callWall.toFixed(2)} (call wall).`
+            : `Watch for volume confirmation at open.`);
+    } else {
+      risk = `Pre-market data is thin — thesis refines at open with options flow and dark pool data. Avoid over-committing before 9:30.`;
+    }
+
+    return { bias, oneLiner, body: bodyParts.join(' '), setup, risk };
   }
 
   // Count signals
