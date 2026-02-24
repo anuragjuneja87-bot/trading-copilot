@@ -5,6 +5,25 @@ import { validateTickers, validateInt, safeError } from '@/lib/security';
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const DEFAULT_TICKERS = ['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA'];
 
+// Reliable ET time formatter (works on UTC-based servers like Vercel)
+function formatTimeET(timestampMs: number): string {
+  const d = new Date(timestampMs);
+  // Determine if Eastern Daylight Time is in effect
+  // EDT: 2nd Sunday of March to 1st Sunday of November
+  const year = d.getUTCFullYear();
+  const marchStart = new Date(Date.UTC(year, 2, 1));
+  const marchSecondSun = new Date(Date.UTC(year, 2, 8 + (7 - marchStart.getUTCDay()) % 7, 7)); // 2am ET = 7am UTC
+  const novStart = new Date(Date.UTC(year, 10, 1));
+  const novFirstSun = new Date(Date.UTC(year, 10, 1 + (7 - novStart.getUTCDay()) % 7, 6)); // 2am ET = 6am UTC
+  const isEDT = d.getTime() >= marchSecondSun.getTime() && d.getTime() < novFirstSun.getTime();
+  const etOffsetHours = isEDT ? -4 : -5;
+  const etMs = timestampMs + etOffsetHours * 3600000;
+  const et = new Date(etMs);
+  const hh = et.getUTCHours().toString().padStart(2, '0');
+  const mm = et.getUTCMinutes().toString().padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
 // Exchange ID to name mapping (common ones)
 const EXCHANGE_MAP: Record<number, string> = {
   300: 'NYSE',
@@ -937,7 +956,7 @@ function calculateEnhancedStats(trades: EnhancedOptionTrade[]): EnhancedFlowStat
   sortedTrades.forEach(t => {
     const bucket = Math.floor(t.timestampMs / bucketSize) * bucketSize;
     const existing = timeBuckets.get(bucket) || {
-      time: new Date(bucket).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' }),
+      time: formatTimeET(bucket),
       timeMs: bucket,
       callPremium: 0,
       putPremium: 0,

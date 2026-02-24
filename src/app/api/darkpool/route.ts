@@ -3,6 +3,20 @@ import type { DarkPoolPrint, DarkPoolStats, PriceLevel } from '@/types/darkpool'
 import { validateTicker, validateInt, safeError } from '@/lib/security';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+
+// Reliable ET time formatter for UTC-based servers
+function formatTimeET(timestampMs: number): string {
+  const d = new Date(timestampMs);
+  const year = d.getUTCFullYear();
+  const marchStart = new Date(Date.UTC(year, 2, 1));
+  const marchSecondSun = new Date(Date.UTC(year, 2, 8 + (7 - marchStart.getUTCDay()) % 7, 7));
+  const novStart = new Date(Date.UTC(year, 10, 1));
+  const novFirstSun = new Date(Date.UTC(year, 10, 1 + (7 - novStart.getUTCDay()) % 7, 6));
+  const isEDT = d.getTime() >= marchSecondSun.getTime() && d.getTime() < novFirstSun.getTime();
+  const etMs = timestampMs + (isEDT ? -4 : -5) * 3600000;
+  const et = new Date(etMs);
+  return `${et.getUTCHours().toString().padStart(2, '0')}:${et.getUTCMinutes().toString().padStart(2, '0')}`;
+}
 const POLYGON_BASE_URL = 'https://api.polygon.io';
 
 // Dark pool / off-exchange codes (TRF = Trade Reporting Facility)
@@ -174,7 +188,7 @@ function calculateDarkPoolStats(prints: DarkPoolPrint[]): DarkPoolStats {
   prints.forEach(p => {
     const bucket = Math.floor(p.timestampMs / bucketSize) * bucketSize;
     const existing = timeBuckets.get(bucket) || {
-      time: new Date(bucket).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' }),
+      time: formatTimeET(bucket),
       timeMs: bucket,
       bullishValue: 0,
       bearishValue: 0,

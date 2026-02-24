@@ -39,7 +39,7 @@ function CollapsiblePanel({
   subtitle,
   subtitleColor,
   icon: Icon,
-  defaultOpen = false,
+  defaultOpen = true,
   forceOpen,
   children,
   height = '400px',

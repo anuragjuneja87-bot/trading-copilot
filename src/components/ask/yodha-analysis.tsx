@@ -112,10 +112,46 @@ export function YodhaAnalysis({
     return buildUnifiedThesis(ticker, price, changePercent, signals, levels, marketSession, mlPrediction);
   }, [ticker, price, changePercent, signals, levels, marketSession, mlPrediction]);
 
-  // Move probability from ML
-  const moveProbability = mlPrediction ? mlPrediction.move_probability * 100 : 0;
+  // Move probability from ML — fall back to signal-based confidence
+  const mlConfidence = mlPrediction ? mlPrediction.move_probability * 100 : null;
   const hasMLSignal = mlPrediction?.has_signal ?? false;
   const mlDirection = mlPrediction?.direction ?? 'NEUTRAL';
+
+  // Rule-based signal strength when ML is unavailable
+  const signalStrength = useMemo(() => {
+    const active = signals.filter(s => s.bias !== 'NO_DATA');
+    const bull = active.filter(s => s.bias === 'BULLISH').length;
+    const bear = active.filter(s => s.bias === 'BEARISH').length;
+    const total = active.length;
+    if (total === 0) return 0;
+    const dominant = Math.max(bull, bear);
+    const alignment = dominant / total;
+    const coverage = Math.min(total / 4, 1);
+    return Math.round(alignment * coverage * 100);
+  }, [signals]);
+
+  const moveProbability = mlConfidence !== null ? mlConfidence : signalStrength;
+  const isMLBacked = mlConfidence !== null;
+
+  // Signal strength sparkline (accumulates when ML isn't providing data)
+  const signalHistoryRef = useRef<ConfidencePoint[]>([]);
+  useEffect(() => {
+    if (marketSession !== 'open') return;
+    if (isMLBacked) return; // ML is working, use its history
+    const point: ConfidencePoint = {
+      time: Date.now(),
+      confidence: signalStrength,
+      direction: thesis.bias,
+    };
+    signalHistoryRef.current = [...signalHistoryRef.current, point].slice(-500);
+  }, [signalStrength, thesis.bias, marketSession, isMLBacked]);
+
+  // Use ML confidence history if available, otherwise signal history
+  const effectiveHistory = (confidenceHistory && confidenceHistory.length >= 2)
+    ? confidenceHistory
+    : signalHistoryRef.current.length >= 2
+      ? signalHistoryRef.current
+      : [];
 
   const biasColor = thesis.bias === 'BULLISH' ? COLORS.green
     : thesis.bias === 'BEARISH' ? COLORS.red
@@ -199,12 +235,12 @@ export function YodhaAnalysis({
               <ConfidenceGauge
                 value={moveProbability}
                 color={biasColor}
-                direction={mlDirection}
-                hasSignal={hasMLSignal}
+                direction={isMLBacked ? mlDirection : thesis.bias}
+                hasSignal={isMLBacked ? hasMLSignal : moveProbability >= 50}
               />
             )}
             <span className="text-[9px] font-bold uppercase tracking-widest mt-1" style={{ color: 'rgba(255,255,255,0.35)' }}>
-              {marketSession === 'pre-market' ? 'Gap' : 'Confidence'}
+              {marketSession === 'pre-market' ? 'Gap' : isMLBacked ? 'ML Confidence' : 'Signal Strength'}
             </span>
           </div>
 
@@ -239,13 +275,15 @@ export function YodhaAnalysis({
                   </span>
                 )}
               </div>
-            ) : confidenceHistory && confidenceHistory.length >= 2 ? (
+            ) : effectiveHistory.length >= 2 ? (
               <div className="w-full mb-2">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>Intraday Trend</span>
+                  <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                    {isMLBacked ? 'Intraday Trend' : 'Signal Strength Trend'}
+                  </span>
                 </div>
                 <ConfidenceSparkline
-                  history={confidenceHistory}
+                  history={effectiveHistory}
                   height={48}
                   threshold={80}
                 />

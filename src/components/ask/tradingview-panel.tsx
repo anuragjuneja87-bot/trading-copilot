@@ -107,7 +107,10 @@ function TradingViewPanelComponent({ ticker, timeframe = '15m' }: TradingViewPan
         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">
           Chart
         </h3>
-        <span className="text-[10px] text-gray-500">TradingView</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-gray-500">TradingView</span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>~15m delayed</span>
+        </div>
       </div>
       <div 
         ref={containerRef} 
