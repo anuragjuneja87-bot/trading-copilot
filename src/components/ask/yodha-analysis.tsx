@@ -9,7 +9,7 @@ import {
   ChevronDown, ChevronRight, Send, Loader2, Shield,
   BarChart3, Zap, MessageSquare, RefreshCw
 } from 'lucide-react';
-import { ConfidenceSparkline } from './confidence-sparkline';
+import { ConfidenceTimeline, loadTimelineHistory, appendTimelinePoint, cleanOldTimelines, type TimelinePoint } from './confidence-timeline';
 import type { ConfidencePoint } from '@/hooks/use-ml-prediction';
 
 /* ──────────────────────────────────────────────────────────
@@ -133,25 +133,34 @@ export function YodhaAnalysis({
   const moveProbability = mlConfidence !== null ? mlConfidence : signalStrength;
   const isMLBacked = mlConfidence !== null;
 
-  // Signal strength sparkline (accumulates when ML isn't providing data)
-  const signalHistoryRef = useRef<ConfidencePoint[]>([]);
+  // ── Confidence Timeline: persistent history with localStorage ──
+  const [timelineHistory, setTimelineHistory] = useState<TimelinePoint[]>([]);
+  
+  // Load history from localStorage on mount / ticker change
+  useEffect(() => {
+    const saved = loadTimelineHistory(ticker);
+    setTimelineHistory(saved);
+    cleanOldTimelines();
+  }, [ticker]);
+
+  // Accumulate timeline points during market hours
   useEffect(() => {
     if (marketSession !== 'open') return;
-    if (isMLBacked) return; // ML is working, use its history
-    const point: ConfidencePoint = {
+    
+    const point: TimelinePoint = {
       time: Date.now(),
-      confidence: signalStrength,
+      confidence: moveProbability,
       direction: thesis.bias,
+      bullCount: bullCount,
+      bearCount: bearCount,
+      neutralCount: neutralCount,
     };
-    signalHistoryRef.current = [...signalHistoryRef.current, point].slice(-500);
-  }, [signalStrength, thesis.bias, marketSession, isMLBacked]);
-
-  // Use ML confidence history if available, otherwise signal history
-  const effectiveHistory = (confidenceHistory && confidenceHistory.length >= 2)
-    ? confidenceHistory
-    : signalHistoryRef.current.length >= 2
-      ? signalHistoryRef.current
-      : [];
+    
+    setTimelineHistory(prev => {
+      const next = appendTimelinePoint(ticker, prev, point);
+      return next;
+    });
+  }, [moveProbability, thesis.bias, marketSession, ticker, bullCount, bearCount, neutralCount]);
 
   const biasColor = thesis.bias === 'BULLISH' ? COLORS.green
     : thesis.bias === 'BEARISH' ? COLORS.red
@@ -211,137 +220,70 @@ export function YodhaAnalysis({
         </div>
       </div>
 
-      {/* ── CONFIDENCE GAUGE + SPARKLINE ───────────────── */}
-      <div className="px-5 pb-4">
-        <div className="flex items-start gap-5">
-          {/* Radial Gauge */}
+      {/* ── COMPACT HEADER: GAUGE + BIAS + SIGNAL DOTS ─── */}
+      <div className="px-5 pb-2">
+        <div className="flex items-center gap-4">
+          {/* Radial Gauge (compact) */}
           <div className="flex-shrink-0 flex flex-col items-center">
             {marketSession === 'pre-market' ? (
               <div
-                className="w-[100px] h-[100px] rounded-full flex flex-col items-center justify-center"
+                className="w-[80px] h-[80px] rounded-full flex flex-col items-center justify-center"
                 style={{
                   background: `linear-gradient(135deg, ${biasColor}10, ${biasColor}05)`,
                   border: `2px solid ${biasColor}30`,
                 }}
               >
-                <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: biasColor }}>
-                  Pre-Mkt
-                </span>
-                <span className="text-lg font-black font-mono leading-tight" style={{ color: biasColor, fontFamily: "'Oxanium', monospace" }}>
+                <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: biasColor }}>Pre-Mkt</span>
+                <span className="text-base font-black font-mono leading-tight" style={{ color: biasColor, fontFamily: "'Oxanium', monospace" }}>
                   {changePercent >= 0 ? '+' : ''}{changePercent.toFixed(1)}%
                 </span>
               </div>
             ) : (
-              <ConfidenceGauge
-                value={moveProbability}
-                color={biasColor}
-                direction={isMLBacked ? mlDirection : thesis.bias}
-                hasSignal={isMLBacked ? hasMLSignal : moveProbability >= 50}
-              />
+              <ConfidenceGauge value={moveProbability} color={biasColor} direction={isMLBacked ? mlDirection : thesis.bias} hasSignal={isMLBacked ? hasMLSignal : moveProbability >= 50} />
             )}
-            <span className="text-[9px] font-bold uppercase tracking-widest mt-1" style={{ color: 'rgba(255,255,255,0.35)' }}>
-              {marketSession === 'pre-market' ? 'Gap' : isMLBacked ? 'ML Confidence' : 'Signal Strength'}
+            <span className="text-[8px] font-bold uppercase tracking-widest mt-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+              {marketSession === 'pre-market' ? 'Gap' : isMLBacked ? 'ML' : 'Signals'}
             </span>
           </div>
-
-          {/* Right side: sparkline + one-liner */}
-          <div className="flex-1 min-w-0 pt-1">
-            {/* Sparkline / Pre-market levels */}
-            {marketSession === 'pre-market' ? (
-              <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 py-2 px-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
-                {levels.callWall && (
-                  <span className="text-[10px] font-mono font-bold" style={{ color: COLORS.green }}>
-                    CW ${levels.callWall.toFixed(0)}
-                  </span>
-                )}
-                {levels.putWall && (
-                  <span className="text-[10px] font-mono font-bold" style={{ color: COLORS.red }}>
-                    PW ${levels.putWall.toFixed(0)}
-                  </span>
-                )}
-                {levels.gexFlip && (
-                  <span className="text-[10px] font-mono font-bold" style={{ color: '#a855f7' }}>
-                    GEX ${levels.gexFlip.toFixed(0)}
-                  </span>
-                )}
-                {levels.vwap && (
-                  <span className="text-[10px] font-mono font-bold" style={{ color: COLORS.cyan }}>
-                    VWAP ${levels.vwap.toFixed(0)}
-                  </span>
-                )}
-                {levels.maxPain && (
-                  <span className="text-[10px] font-mono font-bold" style={{ color: '#ff9800' }}>
-                    MP ${levels.maxPain.toFixed(0)}
-                  </span>
-                )}
-              </div>
-            ) : effectiveHistory.length >= 2 ? (
-              <div className="w-full mb-2">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                    {isMLBacked ? 'Intraday Trend' : 'Signal Strength Trend'}
-                  </span>
-                </div>
-                <ConfidenceSparkline
-                  history={effectiveHistory}
-                  height={48}
-                  threshold={80}
-                />
-              </div>
-            ) : (
-              <div className="h-[56px] flex flex-col items-center justify-center rounded-lg mb-2" style={{ background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.06)' }}>
-                <BarChart3 className="w-4 h-4 mb-1" style={{ color: 'rgba(255,255,255,0.12)' }} />
-                <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>Intraday confidence chart appears at market open</span>
-              </div>
-            )}
-
-            {/* One-liner */}
-            <p className="text-xs text-gray-200 leading-relaxed">
-              {thesis.oneLiner}
-            </p>
-
+          {/* Middle: One-liner + levels */}
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-gray-200 leading-relaxed">{thesis.oneLiner}</p>
             {mlError && !mlPrediction && marketSession === 'open' && (
-              <p className="text-[9px] mt-1" style={{ color: 'rgba(255,255,255,0.2)' }}>ML offline — using signal-based analysis</p>
+              <p className="text-[9px] mt-0.5" style={{ color: 'rgba(255,255,255,0.2)' }}>ML offline — signal-based</p>
             )}
+            {(levels.callWall || levels.gexFlip || levels.vwap) && (
+              <div className="flex items-center gap-2 flex-wrap mt-1">
+                {levels.callWall && <span className="text-[9px] font-mono" style={{ color: COLORS.green + '80' }}>CW ${levels.callWall.toFixed(0)}</span>}
+                {levels.putWall && <span className="text-[9px] font-mono" style={{ color: COLORS.red + '80' }}>PW ${levels.putWall.toFixed(0)}</span>}
+                {levels.gexFlip && <span className="text-[9px] font-mono" style={{ color: '#a855f780' }}>GEX ${levels.gexFlip.toFixed(0)}</span>}
+                {levels.vwap && <span className="text-[9px] font-mono" style={{ color: COLORS.cyan + '80' }}>VWAP ${levels.vwap.toFixed(0)}</span>}
+              </div>
+            )}
+          </div>
+          {/* Right: Signal dots + bias badge */}
+          <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-md" style={{ background: `${biasColor}15`, color: biasColor, border: `1px solid ${biasColor}25` }}>
+              {thesis.bias === 'BULLISH' ? '▲ BULLISH' : thesis.bias === 'BEARISH' ? '▼ BEARISH' : '◆ NEUTRAL'}
+            </span>
+            <div className="flex gap-1">
+              {signals.map((sig, i) => {
+                const dc = sig.bias === 'BULLISH' ? COLORS.green : sig.bias === 'BEARISH' ? COLORS.red : sig.bias === 'NEUTRAL' ? '#ffc107' : '#333';
+                return <div key={i} className="w-3 h-3 rounded-full" style={{ background: dc, opacity: sig.bias === 'NO_DATA' ? 0.3 : 1 }} title={`${sig.label}: ${sig.bias}`} />;
+              })}
+            </div>
+            <span className="text-[8px]" style={{ color: 'rgba(255,255,255,0.3)' }}>{bullCount} bull · {bearCount} bear</span>
           </div>
         </div>
       </div>
 
-      {/* ── SIGNAL CONFLUENCE BAR ──────────────────────── */}
-      <div className="px-5 pb-3">
-        <div className="flex items-center gap-3">
-          <div className="flex gap-1">
-            {signals.map((sig, i) => {
-              const dotColor = sig.bias === 'BULLISH' ? COLORS.green
-                : sig.bias === 'BEARISH' ? COLORS.red
-                : sig.bias === 'NEUTRAL' ? '#ffc107' : '#333';
-              return (
-                <div
-                  key={i}
-                  className="w-2.5 h-2.5 rounded-full transition-all"
-                  style={{
-                    background: dotColor,
-                    boxShadow: sig.bias !== 'NO_DATA' ? `0 0 6px ${dotColor}50` : 'none',
-                    opacity: sig.bias === 'NO_DATA' ? 0.3 : 1,
-                  }}
-                  title={`${sig.label}: ${sig.bias}`}
-                />
-              );
-            })}
+      {/* ── CONFIDENCE TIMELINE (THE MOAT) ─────────────── */}
+      <div className="px-4 pb-3">
+        <div className="rounded-lg overflow-hidden" style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid rgba(255,255,255,0.04)' }}>
+          <div className="flex items-center justify-between px-3 pt-2">
+            <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>Bias Timeline</span>
+            <span className="text-[9px] font-mono" style={{ color: 'rgba(255,255,255,0.2)' }}>{timelineHistory.length > 0 ? `${timelineHistory.length} pts` : 'Tracking...'}</span>
           </div>
-          <div className="flex items-center gap-1.5 text-[11px]">
-            {bullCount > 0 && <span style={{ color: COLORS.green }}>{bullCount} bull</span>}
-            {bearCount > 0 && <span style={{ color: COLORS.red }}>{bearCount} bear</span>}
-            {neutralCount > 0 && <span style={{ color: '#ffc107' }}>{neutralCount} neutral</span>}
-            {noDataCount > 0 && <span style={{ color: 'rgba(255,255,255,0.4)' }}>{noDataCount} pending</span>}
-          </div>
-          <div className="flex-1" />
-          <span
-            className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-            style={{ background: `${biasColor}15`, color: biasColor, border: `1px solid ${biasColor}25` }}
-          >
-            {thesis.bias === 'BULLISH' ? '▲ BULLISH' : thesis.bias === 'BEARISH' ? '▼ BEARISH' : '◆ NEUTRAL'}
-          </span>
+          <ConfidenceTimeline history={timelineHistory} height={140} marketSession={marketSession} ticker={ticker} />
         </div>
       </div>
 

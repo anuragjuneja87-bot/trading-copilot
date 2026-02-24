@@ -1,0 +1,635 @@
+diff --git a/next.config.js b/next.config.js
+index 630abe8..c0ad9e3 100644
+--- a/next.config.js
++++ b/next.config.js
+@@ -2,6 +2,10 @@
+ const nextConfig = {
+   // Enable React strict mode for better development
+   reactStrictMode: true,
++
++  // ── SECURITY: Disable source maps in production ──
++  // Prevents exposing your source code to anyone who opens DevTools
++  productionBrowserSourceMaps: false,
+   
+   // Image optimization
+   images: {
+diff --git a/src/app/api/ai/ask/route.ts b/src/app/api/ai/ask/route.ts
+index 624fca1..accd549 100644
+--- a/src/app/api/ai/ask/route.ts
++++ b/src/app/api/ai/ask/route.ts
+@@ -1,4 +1,5 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateText } from '@/lib/security';
+ 
+ // Databricks configuration
+ const DATABRICKS_HOST = process.env.DATABRICKS_HOST;
+@@ -11,28 +12,23 @@ export async function POST(request: NextRequest) {
+     if (!DATABRICKS_HOST || DATABRICKS_HOST.includes('your-workspace')) {
+       console.error('DATABRICKS_HOST is not configured or contains placeholder value');
+       return NextResponse.json(
+-        { 
+-          success: false, 
+-          error: 'Databricks configuration is missing. Please set DATABRICKS_HOST in your .env file.' 
+-        },
+-        { status: 500 }
++        { success: false, error: 'AI service is not configured' },
++        { status: 503 }
+       );
+     }
+ 
+     if (!DATABRICKS_TOKEN || DATABRICKS_TOKEN.includes('your-personal-access-token')) {
+       console.error('DATABRICKS_TOKEN is not configured or contains placeholder value');
+       return NextResponse.json(
+-        { 
+-          success: false, 
+-          error: 'Databricks token is missing. Please set DATABRICKS_TOKEN in your .env file.' 
+-        },
+-        { status: 500 }
++        { success: false, error: 'AI service is not configured' },
++        { status: 503 }
+       );
+     }
+ 
+-    const { question, history } = await request.json();
++    const { question: rawQuestion, history } = await request.json();
++    const question = validateText(rawQuestion, 5000);
+ 
+-    if (!question || typeof question !== 'string') {
++    if (!question) {
+       return NextResponse.json(
+         { success: false, error: 'Question is required' },
+         { status: 400 }
+@@ -168,8 +164,8 @@ export async function POST(request: NextRequest) {
+     return NextResponse.json(
+       { 
+         success: false, 
+-        error: error.message || 'Internal server error',
+-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
++        error: "An error occurred" || 'Internal server error',
++        // Stack traces never sent to client
+       },
+       { status: 500 }
+     );
+diff --git a/src/app/api/ai/darkpool-insight/route.ts b/src/app/api/ai/darkpool-insight/route.ts
+index 93d4469..eaca57f 100644
+--- a/src/app/api/ai/darkpool-insight/route.ts
++++ b/src/app/api/ai/darkpool-insight/route.ts
+@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
+     console.error('Dark pool insight error:', error);
+     return NextResponse.json({
+       success: false,
+-      error: error.message || 'Failed to generate insight',
++      error: "An error occurred" || 'Failed to generate insight',
+     }, { status: 500 });
+   }
+ }
+diff --git a/src/app/api/ai/flow-insight/route.ts b/src/app/api/ai/flow-insight/route.ts
+index 8c852fb..218ed3b 100644
+--- a/src/app/api/ai/flow-insight/route.ts
++++ b/src/app/api/ai/flow-insight/route.ts
+@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
+     console.error('Flow insight error:', error);
+     return NextResponse.json({
+       success: false,
+-      error: error.message || 'Failed to generate insight',
++      error: "An error occurred" || 'Failed to generate insight',
+     }, { status: 500 });
+   }
+ }
+diff --git a/src/app/api/ai/format/route.ts b/src/app/api/ai/format/route.ts
+index c209073..b40abb2 100644
+--- a/src/app/api/ai/format/route.ts
++++ b/src/app/api/ai/format/route.ts
+@@ -634,7 +634,7 @@ export async function POST(request: NextRequest) {
+ 
+     if (!DATABRICKS_HOST || !DATABRICKS_TOKEN) {
+       return NextResponse.json(
+-        { success: false, error: 'Databricks configuration missing. Check DATABRICKS_HOST and DATABRICKS_TOKEN in .env' },
++        { success: false, error: 'AI service is not configured' },
+         { status: 500 }
+       );
+     }
+@@ -1191,7 +1191,7 @@ export async function POST(request: NextRequest) {
+       );
+     }
+     return NextResponse.json(
+-      { success: false, error: error.message || 'Failed to format analysis' },
++      { success: false, error: "An error occurred" || 'Failed to format analysis' },
+       { status: 500 }
+     );
+   }
+diff --git a/src/app/api/ai/news-insight/route.ts b/src/app/api/ai/news-insight/route.ts
+index 8814bde..94c4d98 100644
+--- a/src/app/api/ai/news-insight/route.ts
++++ b/src/app/api/ai/news-insight/route.ts
+@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
+     console.error('News insight error:', error);
+     return NextResponse.json({
+       success: false,
+-      error: error.message || 'Failed to generate insight',
++      error: "An error occurred" || 'Failed to generate insight',
+     }, { status: 500 });
+   }
+ }
+diff --git a/src/app/api/ai/thesis/route.ts b/src/app/api/ai/thesis/route.ts
+index 68c283f..19f88eb 100644
+--- a/src/app/api/ai/thesis/route.ts
++++ b/src/app/api/ai/thesis/route.ts
+@@ -328,7 +328,7 @@ Keep it under 150 words.`;
+     return { ticker, ...parsed, fullResponse: fullText };
+   } catch (error: any) {
+     console.error(`Error generating thesis for ${ticker}:`, error);
+-    return { ticker, fullResponse: '', error: error.message || 'Failed to generate thesis' };
++    return { ticker, fullResponse: '', error: "An error occurred" || 'Failed to generate thesis' };
+   }
+ }
+ 
+@@ -350,11 +350,11 @@ export async function POST(request: NextRequest) {
+     }
+ 
+     if (!DATABRICKS_HOST || DATABRICKS_HOST.includes('your-workspace')) {
+-      return NextResponse.json({ success: false, error: 'Databricks configuration is missing' }, { status: 500 });
++      return NextResponse.json({ success: false, error: 'AI service is not configured' }, { status: 503 });
+     }
+ 
+     if (!DATABRICKS_TOKEN || DATABRICKS_TOKEN.includes('your-personal-access-token')) {
+-      return NextResponse.json({ success: false, error: 'Databricks token is missing' }, { status: 500 });
++      return NextResponse.json({ success: false, error: 'AI service is not configured' }, { status: 503 });
+     }
+ 
+     const theses: ThesisData[] = [];
+@@ -376,6 +376,6 @@ export async function POST(request: NextRequest) {
+     });
+   } catch (error: any) {
+     console.error('Thesis API error:', error);
+-    return NextResponse.json({ success: false, error: error.message || 'Failed to generate thesis report' }, { status: 500 });
++    return NextResponse.json({ success: false, error: "An error occurred" || 'Failed to generate thesis report' }, { status: 500 });
+   }
+ }
+diff --git a/src/app/api/darkpool/route.ts b/src/app/api/darkpool/route.ts
+index aca0eeb..86e5d8d 100644
+--- a/src/app/api/darkpool/route.ts
++++ b/src/app/api/darkpool/route.ts
+@@ -1,5 +1,6 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import type { DarkPoolPrint, DarkPoolStats, PriceLevel } from '@/types/darkpool';
++import { validateTicker, validateInt, safeError } from '@/lib/security';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ const POLYGON_BASE_URL = 'https://api.polygon.io';
+@@ -295,10 +296,10 @@ function getLastTradingDayRange(): { gte: number; lte: number; isMarketClosed: b
+ 
+ export async function GET(request: NextRequest) {
+   const { searchParams } = new URL(request.url);
+-  const ticker = searchParams.get('tickers')?.toUpperCase() || searchParams.get('ticker')?.toUpperCase();
+-  const limit = parseInt(searchParams.get('limit') || '100');
++  const ticker = validateTicker(searchParams.get('tickers') || searchParams.get('ticker'));
++  const limit = validateInt(searchParams.get('limit'), 100, 1, 500);
+   
+-  console.log('[DarkPool] Request received:', { ticker, limit, params: Object.fromEntries(searchParams.entries()) });
++  // Request params logged — redacted in production
+   
+   if (!ticker) {
+     return NextResponse.json({ success: false, error: 'Ticker required' }, { status: 400 });
+@@ -424,8 +425,8 @@ export async function GET(request: NextRequest) {
+     return processAndReturn(blockTrades.slice(0, limit), ticker, currentPrice, vwap, dateStr, timestampGte, timestampLte, isMarketClosed, tradingDay);
+     
+   } catch (error: any) {
+-    console.error('[DarkPool] Error:', error);
+-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
++    const err = safeError(error, 'DarkPool', 'Failed to fetch dark pool data');
++    return NextResponse.json({ success: false, error: err.message }, { status: err.status });
+   }
+ }
+ 
+diff --git a/src/app/api/economic-calendar/route.ts b/src/app/api/economic-calendar/route.ts
+index 6e0e950..58ba3b3 100644
+--- a/src/app/api/economic-calendar/route.ts
++++ b/src/app/api/economic-calendar/route.ts
+@@ -201,7 +201,7 @@ export async function GET(request: NextRequest) {
+     return NextResponse.json(
+       {
+         success: false,
+-        error: error.message || 'Failed to fetch economic calendar',
++        error: "An error occurred" || 'Failed to fetch economic calendar',
+       },
+       { status: 500 }
+     );
+diff --git a/src/app/api/flow/options/route.ts b/src/app/api/flow/options/route.ts
+index 1658a55..f0f229f 100644
+--- a/src/app/api/flow/options/route.ts
++++ b/src/app/api/flow/options/route.ts
+@@ -1,5 +1,6 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import type { EnhancedOptionTrade, EnhancedFlowStats, GexStrike, FlowTimeSeries } from '@/types/flow';
++import { validateTickers, validateInt, safeError } from '@/lib/security';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ const DEFAULT_TICKERS = ['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA'];
+@@ -228,14 +229,18 @@ export async function GET(request: NextRequest) {
+ 
+   if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
+     return NextResponse.json(
+-      { success: false, error: 'POLYGON_API_KEY not configured' },
++      { success: false, error: 'Market data service not configured' },
+       { status: 500 }
+     );
+   }
+ 
+   const tickers = tickersParam 
+-    ? tickersParam.split(',').map(t => t.trim().toUpperCase())
++    ? validateTickers(tickersParam, 10)
+     : DEFAULT_TICKERS;
++  
++  if (tickersParam && tickers.length === 0) {
++    return NextResponse.json({ success: false, error: 'Invalid ticker symbols' }, { status: 400 });
++  }
+ 
+   let allTrades: EnhancedOptionTrade[] = [];
+   const errors: string[] = [];
+@@ -816,15 +821,10 @@ export async function GET(request: NextRequest) {
+     }
+     
+     // Only return error if we have no data at all
++    const err = safeError(error, 'FlowOptions', 'Failed to fetch options flow');
+     return NextResponse.json(
+-      { 
+-        success: false, 
+-        error: error instanceof Error ? error.message : 'Internal server error',
+-        details: error?.code === 'UND_ERR_CONNECT_TIMEOUT' 
+-          ? 'Polygon API connection timeout - API may be unavailable. Try demo mode.' 
+-          : undefined
+-      },
+-      { status: 500 }
++      { success: false, error: err.message },
++      { status: err.status }
+     );
+   }
+ }
+diff --git a/src/app/api/levels/route.ts b/src/app/api/levels/route.ts
+index 29b6228..d5c9ba9 100644
+--- a/src/app/api/levels/route.ts
++++ b/src/app/api/levels/route.ts
+@@ -1,4 +1,5 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateTicker, validateTickers, validateInt } from '@/lib/security';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ 
+@@ -9,7 +10,7 @@ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ export async function GET(request: NextRequest) {
+   try {
+     const { searchParams } = new URL(request.url);
+-    const ticker = searchParams.get('ticker')?.toUpperCase();
++    const ticker = validateTicker(searchParams.get('ticker'));
+ 
+     if (!ticker) {
+       return NextResponse.json(
+@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
+ 
+     if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
+       return NextResponse.json(
+-        { success: false, error: 'POLYGON_API_KEY not configured' },
++        { success: false, error: 'Market data service not configured' },
+         { status: 500 }
+       );
+     }
+@@ -231,7 +232,7 @@ export async function GET(request: NextRequest) {
+     return NextResponse.json(
+       {
+         success: false,
+-        error: error.message || 'Failed to fetch key levels',
++        error: "An error occurred" || 'Failed to fetch key levels',
+       },
+       { status: 500 }
+     );
+diff --git a/src/app/api/market-pulse/route.ts b/src/app/api/market-pulse/route.ts
+index c5fccec..69ca45f 100644
+--- a/src/app/api/market-pulse/route.ts
++++ b/src/app/api/market-pulse/route.ts
+@@ -1,4 +1,5 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateTicker, validateTickers, validateInt } from '@/lib/security';
+ import {
+   TickerSnapshot,
+   VixData,
+diff --git a/src/app/api/market/expected-move/route.ts b/src/app/api/market/expected-move/route.ts
+index 2733ed8..bda1245 100644
+--- a/src/app/api/market/expected-move/route.ts
++++ b/src/app/api/market/expected-move/route.ts
+@@ -1,10 +1,11 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateTicker, validateTickers, validateInt } from '@/lib/security';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ 
+ export async function GET(request: NextRequest) {
+   const { searchParams } = new URL(request.url);
+-  const ticker = searchParams.get('ticker')?.toUpperCase();
++  const ticker = validateTicker(searchParams.get('ticker'));
+   
+   if (!ticker) {
+     return NextResponse.json({ success: false, error: 'Ticker required' }, { status: 400 });
+@@ -73,6 +74,6 @@ export async function GET(request: NextRequest) {
+     
+   } catch (error: any) {
+     console.error('[Expected Move API] Error:', error);
+-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
++    return NextResponse.json({ success: false, error: "An error occurred" }, { status: 500 });
+   }
+ }
+diff --git a/src/app/api/market/levels/[ticker]/route.ts b/src/app/api/market/levels/[ticker]/route.ts
+index 9f19d8e..e707347 100644
+--- a/src/app/api/market/levels/[ticker]/route.ts
++++ b/src/app/api/market/levels/[ticker]/route.ts
+@@ -1,4 +1,5 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateTicker, validateTickers, validateInt } from '@/lib/security';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ const POLYGON_BASE_URL = 'https://api.polygon.io';
+@@ -12,7 +13,7 @@ export async function GET(
+ ) {
+   try {
+     const { ticker: tickerParam } = await params;
+-    const ticker = tickerParam?.toUpperCase();
++    const ticker = validateTicker(tickerParam);
+     
+     if (!ticker) {
+       return NextResponse.json(
+@@ -23,7 +24,7 @@ export async function GET(
+ 
+     if (!POLYGON_API_KEY) {
+       return NextResponse.json(
+-        { success: false, error: 'API key not configured' }, 
++        { success: false, error: 'Market data service not configured' }, 
+         { status: 500 }
+       );
+     }
+@@ -342,7 +343,7 @@ export async function GET(
+   } catch (error: any) {
+     console.error('[Levels API] Error:', error);
+     return NextResponse.json(
+-      { success: false, error: error.message || 'Internal server error' }, 
++      { success: false, error: "An error occurred" || 'Internal server error' }, 
+       { status: 500 }
+     );
+   }
+diff --git a/src/app/api/market/max-pain/route.ts b/src/app/api/market/max-pain/route.ts
+index a0dd4d3..116e251 100644
+--- a/src/app/api/market/max-pain/route.ts
++++ b/src/app/api/market/max-pain/route.ts
+@@ -1,10 +1,11 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateTicker, validateTickers, validateInt } from '@/lib/security';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ 
+ export async function GET(request: NextRequest) {
+   const { searchParams } = new URL(request.url);
+-  const ticker = searchParams.get('ticker')?.toUpperCase();
++  const ticker = validateTicker(searchParams.get('ticker'));
+   
+   if (!ticker) {
+     return NextResponse.json({ success: false, error: 'Ticker required' }, { status: 400 });
+@@ -90,6 +91,6 @@ export async function GET(request: NextRequest) {
+     
+   } catch (error: any) {
+     console.error('[Max Pain API] Error:', error);
+-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
++    return NextResponse.json({ success: false, error: "An error occurred" }, { status: 500 });
+   }
+ }
+diff --git a/src/app/api/market/prices/route.ts b/src/app/api/market/prices/route.ts
+index e6a97b0..afd9a37 100644
+--- a/src/app/api/market/prices/route.ts
++++ b/src/app/api/market/prices/route.ts
+@@ -1,4 +1,5 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateTicker, validateTickers, validateInt } from '@/lib/security';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ const POLYGON_BASE_URL = 'https://api.polygon.io';
+@@ -17,15 +18,19 @@ export async function GET(request: NextRequest) {
+ 
+     if (!POLYGON_API_KEY) {
+       return NextResponse.json(
+-        { success: false, error: 'API key not configured' },
++        { success: false, error: 'Market data service not configured' },
+         { status: 500 }
+       );
+     }
+ 
+-    const tickers = tickersParam
+-      .split(',')
+-      .map(t => t.trim().toUpperCase())
+-      .filter(Boolean);
++    const tickers = validateTickers(tickersParam, 20);
++    
++    if (tickers.length === 0) {
++      return NextResponse.json(
++        { success: false, error: 'No valid ticker symbols provided' },
++        { status: 400 }
++      );
++    }
+     
+     if (tickers.length === 0) {
+       return NextResponse.json({ success: true, data: [] });
+@@ -152,7 +157,7 @@ export async function GET(request: NextRequest) {
+   } catch (error: any) {
+     console.error('[Market Prices API] Error:', error);
+     return NextResponse.json(
+-      { success: false, error: error.message || 'Failed to fetch prices' },
++      { success: false, error: "An error occurred" || 'Failed to fetch prices' },
+       { status: 500 }
+     );
+   }
+diff --git a/src/app/api/market/regime/route.ts b/src/app/api/market/regime/route.ts
+index 60f7875..ce272fc 100644
+--- a/src/app/api/market/regime/route.ts
++++ b/src/app/api/market/regime/route.ts
+@@ -141,8 +141,8 @@ export async function GET(request: NextRequest) {
+     return NextResponse.json(
+       { 
+         success: false, 
+-        error: error.message || 'Failed to fetch regime data',
+-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
++        error: "An error occurred" || 'Failed to fetch regime data',
++        // Stack traces never sent to client
+       },
+       { status: 500 }
+     );
+diff --git a/src/app/api/market/relative-strength/route.ts b/src/app/api/market/relative-strength/route.ts
+index dab04d5..61ae95b 100644
+--- a/src/app/api/market/relative-strength/route.ts
++++ b/src/app/api/market/relative-strength/route.ts
+@@ -1,4 +1,5 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateTicker, validateTickers, validateInt } from '@/lib/security';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ 
+@@ -173,7 +174,7 @@ function buildSeries(
+ export async function GET(request: NextRequest) {
+   try {
+     const { searchParams } = new URL(request.url);
+-    const ticker = searchParams.get('ticker')?.toUpperCase();
++    const ticker = validateTicker(searchParams.get('ticker'));
+ 
+     if (!ticker) {
+       return NextResponse.json({ success: false, error: 'Ticker required' }, { status: 400 });
+@@ -322,6 +323,6 @@ export async function GET(request: NextRequest) {
+     });
+   } catch (error: any) {
+     console.error('[Relative Strength API] Error:', error);
+-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
++    return NextResponse.json({ success: false, error: "An error occurred" }, { status: 500 });
+   }
+ }
+diff --git a/src/app/api/market/volume-pressure/route.ts b/src/app/api/market/volume-pressure/route.ts
+index 676a04a..81f8129 100644
+--- a/src/app/api/market/volume-pressure/route.ts
++++ b/src/app/api/market/volume-pressure/route.ts
+@@ -1,4 +1,5 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateTicker, validateTickers, validateInt } from '@/lib/security';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ 
+@@ -39,7 +40,7 @@ function getMarketTimeRange(): { fromTs: number; toTs: number; isLive: boolean }
+ export async function GET(request: NextRequest) {
+   try {
+     const { searchParams } = new URL(request.url);
+-    const ticker = searchParams.get('ticker')?.toUpperCase();
++    const ticker = validateTicker(searchParams.get('ticker'));
+     const fromParam = searchParams.get('from');
+     const toParam = searchParams.get('to');
+ 
+@@ -176,6 +177,6 @@ export async function GET(request: NextRequest) {
+     });
+   } catch (error: any) {
+     console.error('[Volume Pressure API] Error:', error);
+-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
++    return NextResponse.json({ success: false, error: "An error occurred" }, { status: 500 });
+   }
+ }
+\ No newline at end of file
+diff --git a/src/app/api/news/route.ts b/src/app/api/news/route.ts
+index c79b4db..b60f943 100644
+--- a/src/app/api/news/route.ts
++++ b/src/app/api/news/route.ts
+@@ -1,4 +1,5 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateTicker, validateTickers, validateInt } from '@/lib/security';
+ import { NewsArticle, TickerSentiment, MarketMood } from '@/types/news';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY; // Massive.com uses Polygon API key
+@@ -349,7 +350,7 @@ export async function GET(request: NextRequest) {
+     if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
+       console.warn('POLYGON_API_KEY is not configured properly');
+       return NextResponse.json(
+-        { success: false, error: 'News API is not configured' },
++        { success: false, error: 'News service not configured' },
+         { status: 500 }
+       );
+     }
+@@ -358,11 +359,11 @@ export async function GET(request: NextRequest) {
+     let tickers: string[] = [...MARKET_TICKERS];
+     
+     if (tickersParam && tickersParam.trim()) {
+-      const watchlistTickers = tickersParam.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
++      const watchlistTickers = validateTickers(tickersParam, 20);
+       tickers = [...new Set([...MARKET_TICKERS, ...watchlistTickers])];
+     } else if (ticker) {
+-      // Legacy support for single ticker param
+-      tickers = [...new Set([...MARKET_TICKERS, ticker.toUpperCase()])];
++      const validTicker = validateTicker(ticker);
++      if (validTicker) tickers = [...new Set([...MARKET_TICKERS, validTicker])];
+     }
+     // If no tickers param provided, use just MARKET_TICKERS (SPY, QQQ, VIX)
+ 
+@@ -621,7 +622,7 @@ export async function GET(request: NextRequest) {
+   } catch (error: any) {
+     console.error('News API error:', error);
+     return NextResponse.json(
+-      { success: false, error: error.message || 'Failed to fetch news' },
++      { success: false, error: "An error occurred" || 'Failed to fetch news' },
+       { status: 500 }
+     );
+   }
+diff --git a/src/app/api/overnight-gaps/route.ts b/src/app/api/overnight-gaps/route.ts
+index f25fc1b..10e9db3 100644
+--- a/src/app/api/overnight-gaps/route.ts
++++ b/src/app/api/overnight-gaps/route.ts
+@@ -1,4 +1,5 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateTicker, validateTickers, validateInt } from '@/lib/security';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ 
+@@ -27,14 +28,14 @@ export async function GET(request: NextRequest) {
+ 
+     if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
+       return NextResponse.json(
+-        { success: false, error: 'POLYGON_API_KEY not configured' },
++        { success: false, error: 'Market data service not configured' },
+         { status: 500 }
+       );
+     }
+ 
+     // Parse watchlist tickers
+     const watchlistTickers = tickersParam
+-      ? tickersParam.split(',').map(t => t.trim().toUpperCase())
++      ? validateTickers(tickersParam, 10)
+       : ['SPY', 'QQQ', 'NVDA'];
+ 
+     // Fetch watchlist tickers
+@@ -139,7 +140,7 @@ export async function GET(request: NextRequest) {
+     return NextResponse.json(
+       {
+         success: false,
+-        error: error.message || 'Failed to fetch overnight gaps',
++        error: "An error occurred" || 'Failed to fetch overnight gaps',
+       },
+       { status: 500 }
+     );
+diff --git a/src/app/api/premarket-setup/route.ts b/src/app/api/premarket-setup/route.ts
+index 409c139..9987fd7 100644
+--- a/src/app/api/premarket-setup/route.ts
++++ b/src/app/api/premarket-setup/route.ts
+@@ -1,4 +1,5 @@
+ import { NextRequest, NextResponse } from 'next/server';
++import { validateTicker, validateTickers, validateInt } from '@/lib/security';
+ 
+ const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+ 
+@@ -41,14 +42,18 @@ export async function GET(request: NextRequest) {
+ 
+     if (!POLYGON_API_KEY || POLYGON_API_KEY.includes('your_')) {
+       return NextResponse.json(
+-        { success: false, error: 'POLYGON_API_KEY not configured' },
++        { success: false, error: 'Market data service not configured' },
+         { status: 500 }
+       );
+     }
+ 
+     const tickers = tickersParam
+-      ? tickersParam.split(',').map(t => t.trim().toUpperCase())
++      ? validateTickers(tickersParam, 10)
+       : ['SPY', 'QQQ', 'NVDA'];
++    
++    if (tickersParam && tickers.length === 0) {
++      return NextResponse.json({ success: false, error: 'Invalid ticker symbols' }, { status: 400 });
++    }
+ 
+     // Fetch prices from Polygon snapshot
+     const pricesUrl = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${tickers.join(',')}&apiKey=${POLYGON_API_KEY}`;
+@@ -217,7 +222,7 @@ export async function GET(request: NextRequest) {
+     return NextResponse.json(
+       {
+         success: false,
+-        error: error.message || 'Failed to fetch premarket setup',
++        error: "An error occurred" || 'Failed to fetch premarket setup',
+       },
+       { status: 500 }
+     );
