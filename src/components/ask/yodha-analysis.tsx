@@ -10,6 +10,7 @@ import {
   BarChart3, Zap, MessageSquare, RefreshCw
 } from 'lucide-react';
 import { ConfidenceTimeline, fetchTimelineHistory, postTimelinePoint, type TimelinePoint } from './confidence-timeline';
+import { computeBiasScore } from '@/lib/bias-score';
 import type { ConfidencePoint } from '@/hooks/use-ml-prediction';
 
 /* ──────────────────────────────────────────────────────────
@@ -120,70 +121,25 @@ export function YodhaAnalysis({
   const mlDirection = mlPrediction?.direction ?? 'NEUTRAL';
 
   // ── WEIGHTED DIRECTIONAL BIAS SCORE ──
-  // Uses raw numeric data, not binary labels. Each component maps to 0-100
-  // where 50=neutral, >50=bullish, <50=bearish. Weighted average gives
-  // a dynamic score that moves with the market.
+  // Uses shared scoring algorithm (same as server-side cron worker)
   const { biasScore, biasDirection } = useMemo(() => {
-    const components: { score: number; weight: number; name: string }[] = [];
-
-    // 1. Options Flow (weight: 30%) — highest signal: direct institutional intent
-    if (flowStats?.callRatio != null && flowStats.tradeCount && flowStats.tradeCount > 0) {
-      // callRatio is 0-100 (already a directional score!)
-      const flowScore = flowStats.callRatio;
-      // Boost if sweeps present (institutional urgency)
-      const sweepBoost = (flowStats.sweepRatio || 0) > 0.1 ? 5 : 0;
-      // Boost if net delta confirms direction
-      const deltaBoost = flowStats.netDeltaAdjustedFlow
-        ? (flowStats.netDeltaAdjustedFlow > 50000 ? 3 : flowStats.netDeltaAdjustedFlow < -50000 ? -3 : 0)
-        : 0;
-      components.push({ score: Math.min(100, Math.max(0, flowScore + sweepBoost + deltaBoost)), weight: 0.30, name: 'flow' });
-    }
-
-    // 2. Dark Pool (weight: 20%) — institutional block positioning
-    if (darkPoolStats?.printCount && darkPoolStats.printCount > 0 && darkPoolStats.bullishPct != null) {
-      components.push({ score: darkPoolStats.bullishPct, weight: 0.20, name: 'dp' });
-    }
-
-    // 3. Price vs VWAP (weight: 20%) — key intraday pivot
-    if (levels.vwap && price > 0) {
-      const vwapDelta = ((price - levels.vwap) / levels.vwap) * 100; // % above/below
-      // Map: -1% below = 20, at VWAP = 50, +1% above = 80
-      const vwapScore = Math.min(100, Math.max(0, 50 + vwapDelta * 30));
-      components.push({ score: vwapScore, weight: 0.20, name: 'vwap' });
-    }
-
-    // 4. Volume Pressure (weight: 15%) — confirms direction
-    if (volumePressure !== undefined) {
-      // volumePressure is roughly -100 to +100
-      const vpScore = Math.min(100, Math.max(0, 50 + (volumePressure / 2)));
-      components.push({ score: vpScore, weight: 0.15, name: 'volume' });
-    }
-
-    // 5. Price Momentum / Change (weight: 10%)
-    if (changePercent !== undefined) {
-      // Map: -2% = 10, 0% = 50, +2% = 90
-      const momentumScore = Math.min(100, Math.max(0, 50 + changePercent * 20));
-      components.push({ score: momentumScore, weight: 0.10, name: 'momentum' });
-    }
-
-    // 6. Relative Strength (weight: 5%)
-    if (relativeStrength) {
-      const rsScore = Math.min(100, Math.max(0, 50 + relativeStrength.rsVsSpy * 15));
-      components.push({ score: rsScore, weight: 0.05, name: 'rs' });
-    }
-
-    // Calculate weighted average (redistribute weights if some components missing)
-    if (components.length === 0) return { biasScore: 50, biasDirection: 'NEUTRAL' as const };
-    
-    const totalWeight = components.reduce((sum, c) => sum + c.weight, 0);
-    const weightedScore = components.reduce((sum, c) => sum + c.score * (c.weight / totalWeight), 0);
-    const finalScore = Math.round(weightedScore);
-
-    // Determine direction from score
-    const dir: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 
-      finalScore >= 60 ? 'BULLISH' : finalScore <= 40 ? 'BEARISH' : 'NEUTRAL';
-
-    return { biasScore: finalScore, biasDirection: dir };
+    const result = computeBiasScore({
+      callRatio: flowStats?.callRatio,
+      sweepRatio: flowStats?.sweepRatio,
+      netDelta: flowStats?.netDeltaAdjustedFlow,
+      tradeCount: flowStats?.tradeCount,
+      dpBullishPct: darkPoolStats?.bullishPct,
+      dpPrintCount: darkPoolStats?.printCount,
+      price,
+      vwap: levels.vwap ?? undefined,
+      changePercent,
+      volumePressure,
+      rsVsSpy: relativeStrength?.rsVsSpy,
+      gexFlip: levels.gexFlip ?? undefined,
+      callWall: levels.callWall ?? undefined,
+      putWall: levels.putWall ?? undefined,
+    });
+    return { biasScore: result.score, biasDirection: result.direction };
   }, [flowStats, darkPoolStats, levels, price, volumePressure, changePercent, relativeStrength]);
 
   const signalStrength = biasScore;  // Alias for compatibility
@@ -191,10 +147,7 @@ export function YodhaAnalysis({
   const moveProbability = mlConfidence !== null ? mlConfidence : signalStrength;
   const isMLBacked = mlConfidence !== null;
 
-  // ── Confidence Timeline: SERVER-SIDE persistence ──
-  const [timelineHistory, setTimelineHistory] = useState<TimelinePoint[]>([]);
-  
-  // Signal counts for the confluence bar (moved up — needed by timeline recorder)
+  // Signal counts for the confluence bar (needed by timeline recorder + display)
   const activeSignals = signals.filter(s => s.bias !== 'NO_DATA');
   const bullCount = activeSignals.filter(s => s.bias === 'BULLISH').length;
   const bearCount = activeSignals.filter(s => s.bias === 'BEARISH').length;
