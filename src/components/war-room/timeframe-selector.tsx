@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 
 export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
 
-export const DEFAULT_TIMEFRAME: Timeframe = '15m';
+export const DEFAULT_TIMEFRAME: Timeframe = '5m';
 
 interface TimeframeSelectorProps {
   value: Timeframe;
