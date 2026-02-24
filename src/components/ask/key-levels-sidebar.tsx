@@ -85,7 +85,7 @@ export function KeyLevelsSidebar({ ticker, className }: KeyLevelsSidebarProps) {
 
   if (error || !levels) {
     return (
-      <div className={cn("p-4 text-gray-500 text-sm", className)}>
+      <div className={cn("p-4 text-gray-400 text-sm", className)}>
         Unable to load key levels
       </div>
     );
@@ -197,7 +197,7 @@ export function KeyLevelsSidebar({ ticker, className }: KeyLevelsSidebarProps) {
               ±${levels.expectedMove.toFixed(2)}
             </span>
           </div>
-          <div className="text-[10px] text-gray-600 mt-1">
+          <div className="text-[10px] text-gray-500 mt-1">
             Range: ${(levels.currentPrice - levels.expectedMove).toFixed(2)} - ${(levels.currentPrice + levels.expectedMove).toFixed(2)}
           </div>
         </div>

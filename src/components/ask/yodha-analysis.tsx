@@ -153,14 +153,14 @@ export function YodhaAnalysis({
             <span className="text-sm font-black text-white uppercase tracking-wider" style={{ fontFamily: "'Oxanium', monospace" }}>
               Yodha
             </span>
-            <span className="text-xs text-gray-500 ml-2">{ticker}</span>
+            <span className="text-xs text-gray-400 ml-2">{ticker}</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {mlLoading && (
             <div className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: COLORS.cyan }} />
-              <span className="text-[10px] text-gray-500">Analyzing</span>
+              <span className="text-[11px] text-gray-400">Analyzing</span>
             </div>
           )}
           {mlRefresh && !mlLoading && (
@@ -201,12 +201,12 @@ export function YodhaAnalysis({
               </div>
             ) : (
               <div className="h-[52px] flex items-center justify-center rounded-lg mb-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                <span className="text-[10px] text-gray-600">Confidence history builds during session</span>
+                <span className="text-[11px] text-gray-500">Confidence history builds during session</span>
               </div>
             )}
 
             {/* One-liner */}
-            <p className="text-xs text-gray-400 leading-relaxed">
+            <p className="text-xs text-gray-300 leading-relaxed">
               {thesis.oneLiner}
             </p>
 
@@ -239,11 +239,11 @@ export function YodhaAnalysis({
               );
             })}
           </div>
-          <div className="flex items-center gap-1.5 text-[10px]">
+          <div className="flex items-center gap-1.5 text-[11px]">
             {bullCount > 0 && <span style={{ color: COLORS.green }}>{bullCount} bull</span>}
             {bearCount > 0 && <span style={{ color: COLORS.red }}>{bearCount} bear</span>}
             {neutralCount > 0 && <span style={{ color: '#ffc107' }}>{neutralCount} neutral</span>}
-            {noDataCount > 0 && <span className="text-gray-600">{noDataCount} pending</span>}
+            {noDataCount > 0 && <span className="text-gray-500">{noDataCount} pending</span>}
           </div>
           <div className="flex-1" />
           <span
@@ -268,7 +268,7 @@ export function YodhaAnalysis({
           className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-lg"
           style={{ background: `linear-gradient(180deg, ${biasColor}80, ${biasColor}20)` }}
         />
-        <p className="text-sm text-gray-200 leading-relaxed pl-2">{thesis.body}</p>
+        <p className="text-sm text-gray-100 leading-relaxed pl-2">{thesis.body}</p>
       </div>
 
       {/* ── SETUP (entry/targets/stop) ────────────────────── */}
@@ -292,7 +292,7 @@ export function YodhaAnalysis({
       {thesis.risk && (
         <div className="mx-4 mb-3 px-3 py-2 rounded-lg flex items-start gap-2" style={{ background: 'rgba(255,82,82,0.05)', border: '1px solid rgba(255,82,82,0.1)' }}>
           <AlertTriangle className="w-3 h-3 text-amber-500 mt-0.5 flex-shrink-0" />
-          <p className="text-[11px] text-gray-400 leading-relaxed">{thesis.risk}</p>
+          <p className="text-[11px] text-gray-300 leading-relaxed">{thesis.risk}</p>
         </div>
       )}
 
@@ -322,12 +322,12 @@ export function YodhaAnalysis({
                 <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-1.5">
                     <Icon className="w-3 h-3" style={{ color: signal.bias === 'NO_DATA' ? '#555' : color }} />
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{signal.label}</span>
+                    <span className="text-[11px] font-bold text-gray-300 uppercase tracking-wider">{signal.label}</span>
                   </div>
                   <div className="w-1.5 h-1.5 rounded-full" style={{ background: color, opacity: signal.bias === 'NO_DATA' ? 0.3 : 1 }} />
                 </div>
                 {isOpen && signal.bias !== 'NO_DATA' ? (
-                  <p className="text-[11px] text-gray-300 leading-relaxed">{signal.summary}</p>
+                  <p className="text-[11px] text-gray-200 leading-relaxed">{signal.summary}</p>
                 ) : (
                   <span className="text-[11px] font-medium" style={{ color: signal.bias === 'NO_DATA' ? '#555' : color }}>
                     {signal.bias === 'NO_DATA' ? 'Awaiting data' : signal.bias}
@@ -712,14 +712,14 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
           >
             ASK YODHA
           </span>
-          <span className="text-[10px] text-gray-500 ml-2">
+          <span className="text-[11px] text-gray-400 ml-2">
             AI Trading Analysis
           </span>
         </div>
         {answer && (
           <button
             onClick={() => setAnswer('')}
-            className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 rounded"
+            className="text-[11px] text-gray-400 hover:text-gray-200 transition-colors px-2 py-0.5 rounded"
             style={{ background: 'rgba(255,255,255,0.04)' }}
           >
             Clear
@@ -737,7 +737,7 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
               border: `1px solid ${COLORS.cyan}15`,
             }}
           >
-            <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">{answer}</p>
+            <p className="text-sm text-gray-100 leading-relaxed whitespace-pre-wrap">{answer}</p>
           </div>
         </div>
       )}
@@ -751,7 +751,7 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
               onClick={() => { setQuery(s); handleAsk(s); }}
               className="group px-3 py-1.5 rounded-full text-[11px] transition-all duration-200"
               style={{
-                color: 'rgba(255,255,255,0.5)',
+                color: 'rgba(255,255,255,0.6)',
                 background: 'rgba(0,229,255,0.04)',
                 border: '1px solid rgba(0,229,255,0.08)',
               }}
@@ -780,7 +780,7 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
             <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: COLORS.cyan, animationDelay: '150ms' }} />
             <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: COLORS.cyan, animationDelay: '300ms' }} />
           </div>
-          <span className="text-xs text-gray-500">Yodha is analyzing {ticker}...</span>
+          <span className="text-xs text-gray-400">Yodha is analyzing {ticker}...</span>
         </div>
       )}
 
@@ -795,7 +795,7 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholder={`Ask about ${ticker}...`}
-          className="flex-1 bg-transparent text-sm text-white placeholder-gray-600 focus:outline-none"
+          className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 focus:outline-none"
           style={{ fontFamily: "'Oxanium', monospace" }}
           disabled={loading}
         />
@@ -823,7 +823,7 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
 function SetupLevel({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div className="px-3 py-2 rounded-lg" style={{ background: `${color}08`, border: `1px solid ${color}20` }}>
-      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{label}</div>
+      <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{label}</div>
       <div className="text-sm font-mono font-bold" style={{ color }}>{value}</div>
     </div>
   );

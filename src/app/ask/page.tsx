@@ -100,7 +100,7 @@ interface PanelSummary {
 
 function buildFlowSummary(flow: any, session: string): PanelSummary {
   if (!flow?.tradeCount) {
-    return { text: session !== 'open' ? 'Market closed · No session data' : null, color: '#555' };
+    return { text: session !== 'open' ? 'Market closed · No live data' : null, color: '#555' };
   }
   const callPct = flow.callRatio ? (flow.callRatio * 100).toFixed(0) : '—';
   const sweeps = flow.sweepRatio ? (flow.sweepRatio * 100).toFixed(0) : '0';
@@ -122,7 +122,7 @@ function buildFlowSummary(flow: any, session: string): PanelSummary {
 
 function buildDarkPoolSummary(dp: any, session: string): PanelSummary {
   if (!dp?.printCount) {
-    return { text: session !== 'open' ? 'Market closed · No session data' : null, color: '#555' };
+    return { text: session !== 'open' ? 'Market closed · No live data' : null, color: '#555' };
   }
   const bullPct = dp.bullishPct?.toFixed(0) || '—';
   const prints = dp.printCount;
@@ -309,7 +309,7 @@ function AskPageContent() {
           </div>
 
           <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
-            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Key Levels</div>
+            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Key Levels</div>
             <div className="space-y-1">
               <LevelRow label="Call Wall" value={data.levels?.callWall || null} color={COLORS.green} currentPrice={data.price} />
               <LevelRow label="Put Wall" value={data.levels?.putWall || null} color={COLORS.red} currentPrice={data.price} />
@@ -372,7 +372,7 @@ function AskPageContent() {
                   {ticker}
                 </button>
               ))}
-              {watchlist.length > 5 && <span className="text-[10px] text-gray-600">+{watchlist.length - 5}</span>}
+              {watchlist.length > 5 && <span className="text-[10px] text-gray-500">+{watchlist.length - 5}</span>}
 
               <SymbolSearch onSelect={handleSelectTicker} />
               <div className="flex-1" />
@@ -395,7 +395,7 @@ function AskPageContent() {
                 style={{ background: 'rgba(255,255,255,0.05)' }}
               >
                 <RefreshCw className={`w-3 h-3 ${data.isLoading ? 'animate-spin' : ''}`} />
-                <span className="text-gray-400">Refresh (R)</span>
+                <span className="text-gray-300">Refresh (R)</span>
               </button>
             </div>
 
@@ -403,7 +403,7 @@ function AskPageContent() {
               <TimeframeSelector value={timeframe} onChange={setTimeframe} />
               <div className="flex items-center gap-4">
                 <MarketClock />
-                <span className="text-xs text-gray-500">{timeframeRange.label}</span>
+                <span className="text-xs text-gray-400">{timeframeRange.label}</span>
               </div>
             </div>
           </div>
@@ -557,7 +557,7 @@ function SymbolSearch({ onSelect }: { onSelect: (ticker: string) => void }) {
         className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all ml-1"
         style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
         <Search className="w-3 h-3" /><span>Search</span>
-        <kbd className="hidden sm:inline text-[9px] text-gray-600 ml-1 px-1 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.06)' }}>⌘K</kbd>
+        <kbd className="hidden sm:inline text-[9px] text-gray-500 ml-1 px-1 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.06)' }}>⌘K</kbd>
       </button>
     );
   }
@@ -565,7 +565,7 @@ function SymbolSearch({ onSelect }: { onSelect: (ticker: string) => void }) {
   return (
     <div className="flex items-center gap-1 ml-1">
       <div className="relative">
-        <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-500" />
+        <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
         <input ref={inputRef} type="text" value={query}
           onChange={(e) => setQuery(e.target.value.toUpperCase())}
           onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); if (e.key === 'Escape') setOpen(false); }}
@@ -587,7 +587,7 @@ function LevelRow({ label, value, color, currentPrice }: { label: string; value:
   const distancePct = value && currentPrice ? ((value - currentPrice) / currentPrice) * 100 : null;
   return (
     <div className="flex justify-between items-center py-1">
-      <span className="text-[10px] text-gray-400 font-semibold">{label}</span>
+      <span className="text-[10px] text-gray-300 font-semibold">{label}</span>
       <div className="text-right">
         <span className="text-xs font-mono font-bold" style={{ color }}>
           {value ? `$${value.toFixed(2)}` : '—'}
@@ -610,7 +610,7 @@ function GexContext({ price, gexFlip }: { price: number; gexFlip: number | null 
       <div className="font-bold text-xs" style={{ color: isAbove ? '#00e676' : '#ff5252' }}>
         {isAbove ? '↑ ABOVE FLIP' : '↓ BELOW FLIP'}
       </div>
-      <div className="text-gray-400 mt-0.5 text-[10px]">
+      <div className="text-gray-300 mt-0.5 text-[10px]">
         {isAbove ? 'Mean reversion zone' : 'Trend amplification'}
       </div>
     </div>
@@ -624,7 +624,7 @@ function AskLandingView({ onSelectTicker, watchlist }: { onSelectTicker: (ticker
       <div className="text-center max-w-md">
         <YodhaLogo size={56} className="mx-auto mb-4" />
         <h1 className="text-3xl font-bold text-white mb-1" style={{ fontFamily: "'Oxanium', monospace" }}>War Room</h1>
-        <p className="text-gray-500 text-sm mb-6">Enter a symbol to begin analysis</p>
+        <p className="text-gray-400 text-sm mb-6">Enter a symbol to begin analysis</p>
         <div className="mb-6">
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === 'Enter' && search && onSelectTicker(search)}
@@ -650,7 +650,7 @@ export default function AskPage() {
   return (
     <Suspense fallback={
       <div className="h-screen flex items-center justify-center" style={{ background: COLORS.bg }}>
-        <div className="text-gray-400">Loading...</div>
+        <div className="text-gray-300">Loading...</div>
       </div>
     }>
       <AskPageContent />

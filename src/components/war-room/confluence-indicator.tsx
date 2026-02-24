@@ -171,7 +171,7 @@ export function ConfluenceIndicator({
         {confluenceScore.noData > 0 && (
           <>
             {' / '}
-            <span className="font-semibold text-gray-600">{confluenceScore.noData} no data</span>
+            <span className="font-semibold text-gray-500">{confluenceScore.noData} no data</span>
           </>
         )}
       </div>
