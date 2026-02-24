@@ -450,6 +450,7 @@ function AskPageContent() {
                 relativeStrength={data.relativeStrength}
                 levels={data.levels}
                 marketSession={data.marketSession}
+                volumePressure={volumePressure}
                 mlPrediction={mlResult.prediction}
                 mlLoading={mlResult.isLoading}
                 mlError={mlResult.error}

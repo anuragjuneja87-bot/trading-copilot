@@ -459,7 +459,7 @@ export function ConfidenceTimeline({
    HISTORY MANAGER — localStorage persistence
    ────────────────────────────────────────────────────────── */
 
-const STORAGE_PREFIX = 'yodha-timeline';
+const STORAGE_PREFIX = 'yodha-tl-v2'; // v2 = weighted directional score
 const MIN_INTERVAL_MS = 5000; // Min 5s between points
 
 function getStorageKey(ticker: string): string {
@@ -511,7 +511,14 @@ export function cleanOldTimelines(): void {
     const today = new Date().toISOString().slice(0, 10);
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const k = localStorage.key(i);
-      if (k?.startsWith(STORAGE_PREFIX) && !k.endsWith(today)) {
+      if (!k) continue;
+      // Remove ALL old v1 data (stale 50% algorithm)
+      if (k.startsWith('yodha-timeline')) {
+        localStorage.removeItem(k);
+        continue;
+      }
+      // Remove expired v2 data (not today)
+      if (k.startsWith(STORAGE_PREFIX) && !k.endsWith(today)) {
         localStorage.removeItem(k);
       }
     }

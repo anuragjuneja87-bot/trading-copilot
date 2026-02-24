@@ -55,6 +55,7 @@ interface YodhaAnalysisProps {
     vwap?: number | null;
   };
   marketSession: 'pre-market' | 'open' | 'after-hours' | 'closed';
+  volumePressure?: number;
   // ML prediction (passed from parent)
   mlPrediction?: MLPrediction | null;
   mlLoading?: boolean;
@@ -87,6 +88,7 @@ export function YodhaAnalysis({
   relativeStrength,
   levels,
   marketSession,
+  volumePressure,
   mlPrediction,
   mlLoading,
   mlError,
@@ -117,18 +119,74 @@ export function YodhaAnalysis({
   const hasMLSignal = mlPrediction?.has_signal ?? false;
   const mlDirection = mlPrediction?.direction ?? 'NEUTRAL';
 
-  // Rule-based signal strength when ML is unavailable
-  const signalStrength = useMemo(() => {
-    const active = signals.filter(s => s.bias !== 'NO_DATA');
-    const bull = active.filter(s => s.bias === 'BULLISH').length;
-    const bear = active.filter(s => s.bias === 'BEARISH').length;
-    const total = active.length;
-    if (total === 0) return 0;
-    const dominant = Math.max(bull, bear);
-    const alignment = dominant / total;
-    const coverage = Math.min(total / 4, 1);
-    return Math.round(alignment * coverage * 100);
-  }, [signals]);
+  // ── WEIGHTED DIRECTIONAL BIAS SCORE ──
+  // Uses raw numeric data, not binary labels. Each component maps to 0-100
+  // where 50=neutral, >50=bullish, <50=bearish. Weighted average gives
+  // a dynamic score that moves with the market.
+  const { biasScore, biasDirection } = useMemo(() => {
+    const components: { score: number; weight: number; name: string }[] = [];
+
+    // 1. Options Flow (weight: 30%) — highest signal: direct institutional intent
+    if (flowStats?.callRatio != null && flowStats.tradeCount && flowStats.tradeCount > 0) {
+      // callRatio is 0-100 (already a directional score!)
+      const flowScore = flowStats.callRatio;
+      // Boost if sweeps present (institutional urgency)
+      const sweepBoost = (flowStats.sweepRatio || 0) > 0.1 ? 5 : 0;
+      // Boost if net delta confirms direction
+      const deltaBoost = flowStats.netDeltaAdjustedFlow
+        ? (flowStats.netDeltaAdjustedFlow > 50000 ? 3 : flowStats.netDeltaAdjustedFlow < -50000 ? -3 : 0)
+        : 0;
+      components.push({ score: Math.min(100, Math.max(0, flowScore + sweepBoost + deltaBoost)), weight: 0.30, name: 'flow' });
+    }
+
+    // 2. Dark Pool (weight: 20%) — institutional block positioning
+    if (darkPoolStats?.printCount && darkPoolStats.printCount > 0 && darkPoolStats.bullishPct != null) {
+      components.push({ score: darkPoolStats.bullishPct, weight: 0.20, name: 'dp' });
+    }
+
+    // 3. Price vs VWAP (weight: 20%) — key intraday pivot
+    if (levels.vwap && price > 0) {
+      const vwapDelta = ((price - levels.vwap) / levels.vwap) * 100; // % above/below
+      // Map: -1% below = 20, at VWAP = 50, +1% above = 80
+      const vwapScore = Math.min(100, Math.max(0, 50 + vwapDelta * 30));
+      components.push({ score: vwapScore, weight: 0.20, name: 'vwap' });
+    }
+
+    // 4. Volume Pressure (weight: 15%) — confirms direction
+    if (volumePressure !== undefined) {
+      // volumePressure is roughly -100 to +100
+      const vpScore = Math.min(100, Math.max(0, 50 + (volumePressure / 2)));
+      components.push({ score: vpScore, weight: 0.15, name: 'volume' });
+    }
+
+    // 5. Price Momentum / Change (weight: 10%)
+    if (changePercent !== undefined) {
+      // Map: -2% = 10, 0% = 50, +2% = 90
+      const momentumScore = Math.min(100, Math.max(0, 50 + changePercent * 20));
+      components.push({ score: momentumScore, weight: 0.10, name: 'momentum' });
+    }
+
+    // 6. Relative Strength (weight: 5%)
+    if (relativeStrength) {
+      const rsScore = Math.min(100, Math.max(0, 50 + relativeStrength.rsVsSpy * 15));
+      components.push({ score: rsScore, weight: 0.05, name: 'rs' });
+    }
+
+    // Calculate weighted average (redistribute weights if some components missing)
+    if (components.length === 0) return { biasScore: 50, biasDirection: 'NEUTRAL' as const };
+    
+    const totalWeight = components.reduce((sum, c) => sum + c.weight, 0);
+    const weightedScore = components.reduce((sum, c) => sum + c.score * (c.weight / totalWeight), 0);
+    const finalScore = Math.round(weightedScore);
+
+    // Determine direction from score
+    const dir: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 
+      finalScore >= 60 ? 'BULLISH' : finalScore <= 40 ? 'BEARISH' : 'NEUTRAL';
+
+    return { biasScore: finalScore, biasDirection: dir };
+  }, [flowStats, darkPoolStats, levels, price, volumePressure, changePercent, relativeStrength]);
+
+  const signalStrength = biasScore;  // Alias for compatibility
 
   const moveProbability = mlConfidence !== null ? mlConfidence : signalStrength;
   const isMLBacked = mlConfidence !== null;
@@ -143,15 +201,18 @@ export function YodhaAnalysis({
     cleanOldTimelines();
   }, [ticker]);
 
+  // The direction shown on timeline uses weighted score when ML unavailable
+  const effectiveDirection = isMLBacked ? mlDirection : biasDirection;
+
   // Ref to always have latest values for the interval recorder
   const latestValuesRef = useRef({
-    moveProbability, bias: thesis.bias, bullCount, bearCount, neutralCount,
+    moveProbability, bias: effectiveDirection, bullCount, bearCount, neutralCount,
   });
   useEffect(() => {
     latestValuesRef.current = {
-      moveProbability, bias: thesis.bias, bullCount, bearCount, neutralCount,
+      moveProbability, bias: effectiveDirection, bullCount, bearCount, neutralCount,
     };
-  }, [moveProbability, thesis.bias, bullCount, bearCount, neutralCount]);
+  }, [moveProbability, effectiveDirection, bullCount, bearCount, neutralCount]);
 
   // Record on every signal change (skip 0-confidence initial render)
   useEffect(() => {
@@ -159,11 +220,11 @@ export function YodhaAnalysis({
     const point: TimelinePoint = {
       time: Date.now(),
       confidence: moveProbability,
-      direction: thesis.bias,
+      direction: effectiveDirection,
       bullCount, bearCount, neutralCount,
     };
     setTimelineHistory(prev => appendTimelinePoint(ticker, prev, point));
-  }, [moveProbability, thesis.bias, marketSession, ticker, bullCount, bearCount, neutralCount]);
+  }, [moveProbability, effectiveDirection, marketSession, ticker, bullCount, bearCount, neutralCount]);
 
   // ALSO record periodically (every 30s) even when signals are stable
   useEffect(() => {
@@ -184,8 +245,10 @@ export function YodhaAnalysis({
     return () => clearInterval(interval);
   }, [marketSession, ticker]);
 
-  const biasColor = thesis.bias === 'BULLISH' ? COLORS.green
-    : thesis.bias === 'BEARISH' ? COLORS.red
+  // Use weighted direction for display when ML unavailable
+  const displayDirection = isMLBacked ? mlDirection : biasDirection;
+  const biasColor = displayDirection === 'BULLISH' ? COLORS.green
+    : displayDirection === 'BEARISH' ? COLORS.red
     : '#ffc107';
 
   // Signal counts for the confluence bar
@@ -261,7 +324,7 @@ export function YodhaAnalysis({
                 </span>
               </div>
             ) : (
-              <ConfidenceGauge value={moveProbability} color={biasColor} direction={isMLBacked ? mlDirection : thesis.bias} hasSignal={isMLBacked ? hasMLSignal : moveProbability >= 50} />
+              <ConfidenceGauge value={moveProbability} color={biasColor} direction={displayDirection} hasSignal={isMLBacked ? hasMLSignal : moveProbability >= 50} />
             )}
             <span className="text-[8px] font-bold uppercase tracking-widest mt-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
               {marketSession === 'pre-market' ? 'Gap' : isMLBacked ? 'ML' : 'Signals'}
@@ -285,7 +348,7 @@ export function YodhaAnalysis({
           {/* Right: Signal dots + bias badge */}
           <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
             <span className="text-[10px] font-bold px-2.5 py-1 rounded-md" style={{ background: `${biasColor}15`, color: biasColor, border: `1px solid ${biasColor}25` }}>
-              {thesis.bias === 'BULLISH' ? '▲ BULLISH' : thesis.bias === 'BEARISH' ? '▼ BEARISH' : '◆ NEUTRAL'}
+              {displayDirection === 'BULLISH' ? '▲ BULLISH' : displayDirection === 'BEARISH' ? '▼ BEARISH' : '◆ NEUTRAL'}
             </span>
             <div className="flex gap-1">
               {signals.map((sig, i) => {
