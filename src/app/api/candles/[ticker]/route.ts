@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { redisGet, redisSet, isMarketOpen } from '@/lib/redis';
 import { validateTicker } from '@/lib/security';
+import { computeBarPressure, pressureToColor } from '@/lib/candle-pressure';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 export const maxDuration = 30;
@@ -87,7 +88,7 @@ export async function GET(
 
     // Compute running VWAP (resets daily for intraday)
     let cumVol = 0, cumPV = 0, lastDay = '';
-    const processed = bars.map((bar: any) => {
+    const processed = bars.map((bar: any, i: number) => {
       // Reset VWAP at day boundary for intraday
       if (isIntraday) {
         const dayStr = new Date(bar.t).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -96,16 +97,29 @@ export async function GET(
       const typical = (bar.h + bar.l + bar.c) / 3;
       cumVol += bar.v;
       cumPV += typical * bar.v;
-
+      const vwap = cumVol > 0 ? cumPV / cumVol : bar.c;
+      const { bp, brp } = computeBarPressure({ bar, i, bars, vwap });
+      const color = pressureToColor(bp, brp);
       return {
-        t: Math.floor(bar.t / 1000), // seconds (lightweight-charts uses seconds)
+        t: Math.floor(bar.t / 1000),
         o: bar.o, h: bar.h, l: bar.l, c: bar.c,
         v: bar.v,
-        vw: cumVol > 0 ? Math.round((cumPV / cumVol) * 100) / 100 : bar.c,
+        vw: Math.round(vwap * 100) / 100,
+        bp, brp, color,
       };
     });
 
-    const result = { ticker, tf, bars: processed, count: processed.length, cachedAt: Date.now() };
+    // Ensure strictly ascending time (lightweight-charts requirement): dedupe by t, keep last bar per time
+    type BarItem = (typeof processed)[number];
+    const seen = new Map<number, BarItem>();
+    for (const b of processed) {
+      seen.set(b.t, b);
+    }
+    const deduped: BarItem[] = Array.from(seen.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, b]) => b);
+
+    const result = { ticker, tf, bars: deduped, count: deduped.length, cachedAt: Date.now() };
     await redisSet(cacheKey, result, tfCfg.cache * 3);
 
     return NextResponse.json({ ...result, source: 'polygon' });

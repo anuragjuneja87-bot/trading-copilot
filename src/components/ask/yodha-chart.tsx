@@ -1,28 +1,50 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { createChart, ColorType, CrosshairMode, LineStyle } from 'lightweight-charts';
-import type { IChartApi, Time } from 'lightweight-charts';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
 
-/* ══════════════════════════════════════════════════════════
-   YODHA CHART — TradingView Lightweight Charts
+/* ════════════════════════════════════════════════════════════════
+   YODHA CHART — Pressure-colored candlestick chart
    
-   Dual-pane layout (synced time + crosshair):
-   ┌─────────────────────────────────┐
-   │  Candlestick + VWAP + Levels   │  flex-1
-   ├─────────────────────────────────┤
-   │  Bull / Bear Pressure (0-100)  │  140px
-   └─────────────────────────────────┘
+   Replaces TradingView widget with custom Lightweight Charts.
+   Secret sauce: candle colors driven by scoring algo + ML.
+   Color is computed SERVER-SIDE and returned per bar.
    
-   All timestamps shifted to ET for display.
-   Data: /api/candles (Redis) + /api/timeline (Redis)
-   ══════════════════════════════════════════════════════════ */
+   Data contract:
+     /api/candles/[ticker]?tf=5m → { bars: [{ t, o, h, l, c, v, vw, bp, brp, color }] }
+     bp = bull pressure (0-100), brp = bear pressure (0-100)
+     color = hex color from server scoring algo
+   ════════════════════════════════════════════════════════════════ */
 
-// ── Types ────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────
+
+interface Bar {
+  t: number;       // UTC timestamp (ms from Polygon)
+  o: number;       // open
+  h: number;       // high
+  l: number;       // low
+  c: number;       // close
+  v: number;       // volume
+  vw: number;      // VWAP
+  bp?: number;     // bull pressure 0-100 (from scoring algo)
+  brp?: number;    // bear pressure 0-100 (from scoring algo)
+  color?: string;  // hex candle color (server-computed)
+}
+
+interface LevelDef {
+  price: number;
+  label: string;
+  color: string;
+  style: number;   // LineStyle enum value
+  width?: number;
+  group: string;
+}
 
 interface YodhaChartProps {
   ticker: string;
   timeframe: string;
+  price: number;
+  changePercent: number;
+  marketSession: 'pre-market' | 'open' | 'after-hours' | 'closed';
   levels: {
     callWall: number | null;
     putWall: number | null;
@@ -30,475 +52,516 @@ interface YodhaChartProps {
     maxPain?: number | null;
     vwap?: number | null;
   };
-  price: number;
-  changePercent: number;
-  marketSession: 'pre-market' | 'open' | 'after-hours' | 'closed';
-  entryLevel?: number;
-  targetLevel?: number;
-  stopLevel?: number;
+  // Optional: Camarilla inputs (prev day H/L/C)
+  prevDayHLC?: { h: number; l: number; c: number };
 }
 
-interface Bar {
-  t: number; o: number; h: number; l: number; c: number; v: number; vw: number;
-}
+// ── Pressure → Color (client fallback if server doesn't provide color) ──
 
-interface PressurePoint {
-  t: number; bp: number; brp: number;
-}
-
-// ── Constants ────────────────────────────────────────────
-
-const TF_API: Record<string, string> = {
-  '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
-  '1h': '1h', '4h': '4h', '1d': '1d', '1w': '1w',
+const PRESSURE_COLORS = {
+  strongBull: '#26a69a',
+  bull:       '#1b8a7a',
+  crossover:  '#ff9800',
+  bear:       '#c94442',
+  strongBear: '#ef5350',
 };
 
-const C = {
-  bg: '#131722',
-  grid: 'rgba(42,46,57,0.3)',
-  gridFaint: 'rgba(42,46,57,0.15)',
-  border: 'rgba(42,46,57,0.6)',
-  crosshair: 'rgba(120,123,134,0.4)',
-  crossLabel: 'rgba(42,46,57,0.95)',
-  text: 'rgba(209,212,220,0.65)',
-  textDim: 'rgba(209,212,220,0.3)',
-  font: "'JetBrains Mono', 'SF Mono', monospace",
-  bull: '#26a69a',
-  bear: '#ef5350',
-  vwap: '#2962ff',
-  cw: '#ff9800',
-  pw: '#e040fb',
-  gex: '#fdd835',
-};
-
-// ── Timezone: compute ET offset (handles EST/EDT automatically) ──
-function getETOffsetSeconds(): number {
-  const now = new Date();
-  const utcStr = now.toLocaleString('en-US', { timeZone: 'UTC' });
-  const etStr = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
-  const diffMs = new Date(etStr).getTime() - new Date(utcStr).getTime();
-  return Math.round(diffMs / 1000);
+function pressureToColor(bp: number, brp: number): string {
+  const spread = bp - brp;
+  if (spread > 25)  return PRESSURE_COLORS.strongBull;
+  if (spread > 8)   return PRESSURE_COLORS.bull;
+  if (spread > -8)  return PRESSURE_COLORS.crossover;
+  if (spread > -25) return PRESSURE_COLORS.bear;
+  return PRESSURE_COLORS.strongBear;
 }
 
-// ── Component ────────────────────────────────────────────
+// ── Timezone helpers ──
 
-export function YodhaChart({
-  ticker, timeframe, levels, price, changePercent, marketSession,
-  entryLevel, targetLevel, stopLevel,
+function fmtET(utcMs: number): string {
+  return new Date(utcMs).toLocaleTimeString('en-US', {
+    hour: 'numeric', minute: '2-digit', hour12: true,
+    timeZone: 'America/New_York',
+  });
+}
+
+function fmtDateET(utcMs: number): string {
+  return new Date(utcMs).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', timeZone: 'America/New_York',
+  });
+}
+
+// ── Constants ──
+
+const TF_MAP: Record<string, { apiTf: string; label: string; barMins: number }> = {
+  '1m':  { apiTf: '1m',  label: '1m',  barMins: 1 },
+  '5m':  { apiTf: '5m',  label: '5m',  barMins: 5 },
+  '15m': { apiTf: '15m', label: '15m', barMins: 15 },
+  '30m': { apiTf: '30m', label: '30m', barMins: 30 },
+  '1h':  { apiTf: '1h',  label: '1H',  barMins: 60 },
+  '1d':  { apiTf: '1d',  label: '1D',  barMins: 1440 },
+};
+
+const FONT = "'JetBrains Mono', 'SF Mono', monospace";
+
+// ── Component ──────────────────────────────────────────
+
+function YodhaChartInner({
+  ticker, timeframe, price, changePercent, marketSession, levels, prevDayHLC,
 }: YodhaChartProps) {
-  const mainBoxRef = useRef<HTMLDivElement>(null);
-  const indBoxRef = useRef<HTMLDivElement>(null);
-  const mainRef = useRef<IChartApi | null>(null);
-  const indRef = useRef<IChartApi | null>(null);
-  const candleRef = useRef<any>(null);
-  const vwapRef = useRef<any>(null);
-  const bullRef = useRef<any>(null);
-  const bearRef = useRef<any>(null);
-  const plinesRef = useRef<any[]>([]);
-  const syncLock = useRef(false);
+  const mainRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<any>(null);
+  const candleSeriesRef = useRef<any>(null);
+  const vwapSeriesRef = useRef<any>(null);
+  const activeLevelsRef = useRef<Record<string, any>>({});
+  const pressureMapRef = useRef<Record<number, { bp: number; brp: number }>>({});
+  const lcRef = useRef<any>(null); // lightweight-charts module
 
+  const [bars, setBars] = useState<Bar[]>([]);
+  const [activeTF, setActiveTF] = useState(timeframe || '5m');
+  const [groupVis, setGroupVis] = useState({ vwap: true, walls: true, cam: true });
   const [loading, setLoading] = useState(true);
-  const [barCount, setBarCount] = useState(0);
-  const [tip, setTip] = useState<{ b: number; br: number } | null>(null);
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
 
-  const apiTf = TF_API[timeframe] || '5m';
-  const etOffset = useRef(getETOffsetSeconds());
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Shift UTC seconds → ET seconds for display
-  const toET = useCallback((utcSec: number) => (utcSec + etOffset.current) as Time, []);
+  // ── Compute Camarilla levels from prev day HLC ──
+  const camLevels = prevDayHLC ? (() => {
+    const R = prevDayHLC.h - prevDayHLC.l;
+    return {
+      r4: +(prevDayHLC.c + R * 1.1 / 2).toFixed(2),
+      r3: +(prevDayHLC.c + R * 1.1 / 4).toFixed(2),
+      s3: +(prevDayHLC.c - R * 1.1 / 4).toFixed(2),
+      s4: +(prevDayHLC.c - R * 1.1 / 2).toFixed(2),
+    };
+  })() : null;
 
-  // ── Create both charts ──
+  // ── Fetch candle data ──
+  const fetchCandles = useCallback(async (tf: string) => {
+    const config = TF_MAP[tf] || TF_MAP['5m'];
+    try {
+      const res = await fetch(`/api/candles/${ticker}?tf=${config.apiTf}&_t=${Date.now()}`, {
+        cache: 'no-store',
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.bars?.length > 0) {
+        setBars(data.bars);
+      }
+    } catch (e) {
+      console.error('[YodhaChart] fetch error:', e);
+    }
+  }, [ticker]);
+
+  // ── Initialize Lightweight Charts (dynamic import) ──
   useEffect(() => {
-    if (!mainBoxRef.current || !indBoxRef.current) return;
+    if (!mainRef.current) return;
 
-    // ── Main (candlestick) chart ──
-    const main = createChart(mainBoxRef.current, {
-      layout: {
-        background: { type: ColorType.Solid, color: C.bg },
-        textColor: C.text,
-        fontFamily: C.font,
-        fontSize: 11,
-      },
-      grid: {
-        vertLines: { color: C.grid },
-        horzLines: { color: C.grid },
-      },
-      crosshair: {
-        mode: CrosshairMode.Normal,
-        vertLine: { color: C.crosshair, width: 1 as any, style: LineStyle.Dashed, labelBackgroundColor: C.crossLabel, labelVisible: false },
-        horzLine: { color: C.crosshair, width: 1 as any, style: LineStyle.Dashed, labelBackgroundColor: C.crossLabel },
-      },
-      rightPriceScale: {
-        borderColor: C.border,
-        scaleMargins: { top: 0.06, bottom: 0.06 },
-        entireTextOnly: true,
-      },
-      timeScale: {
-        borderColor: C.border,
-        timeVisible: true,
-        secondsVisible: false,
-        rightOffset: 4,
-        barSpacing: 8,
-        minBarSpacing: 2,
-        visible: false, // hide time on main — show on indicator only
-      },
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
-      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
-    });
+    let destroyed = false;
 
-    const candle = main.addCandlestickSeries({
-      upColor: C.bull,
-      downColor: C.bear,
-      borderUpColor: C.bull,
-      borderDownColor: C.bear,
-      wickUpColor: C.bull,
-      wickDownColor: C.bear,
-    });
+    (async () => {
+      // Dynamic import — lightweight-charts is a client-only library
+      const LC = await import('lightweight-charts');
+      if (destroyed) return;
+      lcRef.current = LC;
 
-    const vwapLine = main.addLineSeries({
-      color: C.vwap,
-      lineWidth: 1,
-      lineStyle: LineStyle.Solid,
-      crosshairMarkerVisible: false,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
+      const { createChart, ColorType, CrosshairMode, LineStyle } = LC;
+      const el = mainRef.current!;
 
-    // ── Indicator (pressure) chart ──
-    const ind = createChart(indBoxRef.current, {
-      layout: {
-        background: { type: ColorType.Solid, color: C.bg },
-        textColor: C.textDim,
-        fontFamily: C.font,
-        fontSize: 10,
-      },
-      grid: {
-        vertLines: { color: C.gridFaint },
-        horzLines: { color: C.gridFaint },
-      },
-      crosshair: {
-        mode: CrosshairMode.Normal,
-        vertLine: { color: C.crosshair, width: 1 as any, style: LineStyle.Dashed, labelBackgroundColor: C.crossLabel },
-        horzLine: { color: C.crosshair, width: 1 as any, style: LineStyle.Dashed, labelBackgroundColor: C.crossLabel },
-      },
-      rightPriceScale: {
-        borderColor: C.border,
-        scaleMargins: { top: 0.12, bottom: 0.08 },
-      },
-      timeScale: {
-        borderColor: C.border,
-        timeVisible: true,
-        secondsVisible: false,
-        rightOffset: 4,
-        barSpacing: 8,
-        minBarSpacing: 2,
-        visible: true,
-      },
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
-      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
-    });
+      const chart = createChart(el, {
+        width: el.clientWidth,
+        height: el.clientHeight,
+        layout: {
+          background: { type: ColorType.Solid, color: '#131722' },
+          textColor: 'rgba(209,212,220,0.65)',
+          fontFamily: FONT,
+          fontSize: 11,
+        },
+        grid: {
+          vertLines: { color: 'rgba(42,46,57,0.3)' },
+          horzLines: { color: 'rgba(42,46,57,0.3)' },
+        },
+        crosshair: {
+          mode: CrosshairMode.Normal,
+          vertLine: { color: 'rgba(120,123,134,0.4)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: 'rgba(42,46,57,0.95)' },
+          horzLine: { color: 'rgba(120,123,134,0.4)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: 'rgba(42,46,57,0.95)' },
+        },
+        rightPriceScale: {
+          borderColor: 'rgba(42,46,57,0.6)',
+          scaleMargins: { top: 0.06, bottom: 0.06 },
+        },
+        timeScale: {
+          borderColor: 'rgba(42,46,57,0.6)',
+          timeVisible: true,
+          secondsVisible: false,
+          rightOffset: 5,
+          barSpacing: 8,
+          minBarSpacing: 2,
+          visible: true,
+          tickMarkFormatter: (time: number, type: number) => {
+            // type: 0=Year, 1=Month, 2=Day, 3=Time
+            const ms = (time as number) * 1000;
+            return type <= 2 ? fmtDateET(ms) : fmtET(ms);
+          },
+        },
+        localization: {
+          timeFormatter: (t: number) => fmtET((t as number) * 1000) + ' ET',
+        },
+        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+        handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+      });
 
-    const bullSeries = ind.addAreaSeries({
-      lineColor: C.bull,
-      topColor: 'rgba(38,166,154,0.4)',
-      bottomColor: 'rgba(38,166,154,0.02)',
-      lineWidth: 2,
-      crosshairMarkerVisible: true,
-      crosshairMarkerRadius: 3,
-      priceLineVisible: false,
-      lastValueVisible: true,
-    });
+      chartRef.current = chart;
 
-    const bearSeries = ind.addAreaSeries({
-      lineColor: C.bear,
-      topColor: 'rgba(239,83,80,0.3)',
-      bottomColor: 'rgba(239,83,80,0.02)',
-      lineWidth: 2,
-      crosshairMarkerVisible: true,
-      crosshairMarkerRadius: 3,
-      priceLineVisible: false,
-      lastValueVisible: true,
-    });
+      // Candle series (colors overridden per-bar)
+      const cs = chart.addCandlestickSeries({
+        upColor: '#26a69a', downColor: '#ef5350',
+        borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+        wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+      });
+      candleSeriesRef.current = cs;
 
-    // ── Time scale sync ──
-    main.timeScale().subscribeVisibleLogicalRangeChange((range: any) => {
-      if (syncLock.current || !range) return;
-      syncLock.current = true;
-      try { ind.timeScale().setVisibleLogicalRange(range); } catch {}
-      syncLock.current = false;
-    });
-    ind.timeScale().subscribeVisibleLogicalRangeChange((range: any) => {
-      if (syncLock.current || !range) return;
-      syncLock.current = true;
-      try { main.timeScale().setVisibleLogicalRange(range); } catch {}
-      syncLock.current = false;
-    });
+      // VWAP line
+      const vwap = chart.addLineSeries({
+        color: '#2962ff', lineWidth: 1, lineStyle: LineStyle.Solid,
+        crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false,
+      });
+      vwapSeriesRef.current = vwap;
 
-    // ── Crosshair sync ──
-    let xSyncing = false;
-    main.subscribeCrosshairMove((p: any) => {
-      if (xSyncing) return;
-      xSyncing = true;
-      try {
-        if (p.time) { ind.setCrosshairPosition(NaN, p.time, bullSeries); }
-        else { ind.clearCrosshairPosition(); setTip(null); }
-      } catch {}
-      xSyncing = false;
-    });
-    ind.subscribeCrosshairMove((p: any) => {
-      if (xSyncing) return;
-      xSyncing = true;
-      try {
-        if (p.time) {
-          main.setCrosshairPosition(NaN, p.time, candle);
-          const bv = p.seriesData?.get(bullSeries) as any;
-          const brv = p.seriesData?.get(bearSeries) as any;
-          if (bv || brv) {
-            setTip({ b: Math.round(bv?.value ?? 0), br: Math.round(brv?.value ?? 0) });
-          }
+      // Crosshair → show pressure in overlay
+      chart.subscribeCrosshairMove((param: any) => {
+        const el = document.getElementById('yodha-pressure-readout');
+        if (!el) return;
+        if (!param.time) { el.innerHTML = ''; return; }
+
+        const p = pressureMapRef.current[param.time as number];
+        if (p) {
+          const sp = Math.round(p.bp - p.brp);
+          el.innerHTML =
+            `<span style="color:#26a69a;font-weight:700">▲ ${Math.round(p.bp)}</span>` +
+            `<span style="color:rgba(209,212,220,0.15);margin:0 5px">|</span>` +
+            `<span style="color:#ef5350;font-weight:700">▼ ${Math.round(p.brp)}</span>` +
+            `<span style="color:rgba(209,212,220,0.15);margin:0 5px">|</span>` +
+            `<span style="color:${sp >= 0 ? '#26a69a' : '#ef5350'};font-weight:700">Δ${sp >= 0 ? '+' : ''}${sp}</span>`;
         } else {
-          main.clearCrosshairPosition();
-          setTip(null);
+          el.innerHTML = '';
         }
-      } catch {}
-      xSyncing = false;
-    });
+      });
 
-    // Store refs
-    mainRef.current = main;
-    indRef.current = ind;
-    candleRef.current = candle;
-    vwapRef.current = vwapLine;
-    bullRef.current = bullSeries;
-    bearRef.current = bearSeries;
+      // Resize
+      const ro = new ResizeObserver(() => {
+        chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+      });
+      ro.observe(el);
 
-    // ── Responsive ──
-    const ro1 = new ResizeObserver(e => {
-      const { width, height } = e[0].contentRect;
-      if (width > 0 && height > 0) main.applyOptions({ width, height });
-    });
-    const ro2 = new ResizeObserver(e => {
-      const { width, height } = e[0].contentRect;
-      if (width > 0 && height > 0) ind.applyOptions({ width, height });
-    });
-    ro1.observe(mainBoxRef.current);
-    ro2.observe(indBoxRef.current);
+      // Initial fetch
+      setLoading(true);
+      await fetchCandles(activeTF);
+      setLoading(false);
+    })();
 
     return () => {
-      ro1.disconnect(); ro2.disconnect();
-      main.remove(); ind.remove();
-      mainRef.current = indRef.current = null;
-      candleRef.current = vwapRef.current = bullRef.current = bearRef.current = null;
+      destroyed = true;
+      if (chartRef.current) {
+        try { chartRef.current.remove(); } catch {}
+        chartRef.current = null;
+      }
     };
+  }, [ticker]); // Only reinit chart on ticker change
+
+  // ── Update chart data when bars change ──
+  useEffect(() => {
+    if (!bars.length || !candleSeriesRef.current || !lcRef.current) return;
+
+    const cs = candleSeriesRef.current;
+    const vwapSeries = vwapSeriesRef.current;
+
+    // Build pressure map + candle data with colors
+    // API returns t in seconds; if bar.t looks like ms (>= 1e10), convert to seconds
+    const toTime = (t: number) => (t >= 1e10 ? Math.floor(t / 1000) : t) as number;
+    const pressureMap: Record<number, { bp: number; brp: number }> = {};
+    const candleByTime = new Map<number, any>();
+    const vwapByTime = new Map<number, number>();
+
+    for (const bar of bars) {
+      const timeSec = toTime(bar.t);
+      const bp = bar.bp ?? 0;
+      const brp = bar.brp ?? 0;
+      const col = bar.color || pressureToColor(bp, brp);
+      candleByTime.set(timeSec, {
+        time: timeSec,
+        open: bar.o,
+        high: bar.h,
+        low: bar.l,
+        close: bar.c,
+        color: col,
+        borderColor: col,
+        wickColor: col,
+      });
+      vwapByTime.set(timeSec, bar.vw);
+      pressureMap[timeSec] = { bp, brp };
+    }
+
+    // Strictly ascending time (dedupe by time, keep last bar per time)
+    const candleData = Array.from(candleByTime.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, d]) => d);
+    const vwapData = Array.from(vwapByTime.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([time, value]) => ({ time, value }));
+
+    pressureMapRef.current = pressureMap;
+    cs.setData(candleData);
+    if (vwapSeries) vwapSeries.setData(vwapData);
+
+    // Draw levels
+    drawLevels();
+
+    // Fit content
+    if (chartRef.current) {
+      chartRef.current.timeScale().fitContent();
+    }
+  }, [bars, groupVis, levels, camLevels]);
+
+  // ── Draw levels on candle series ──
+  const drawLevels = useCallback(() => {
+    const cs = candleSeriesRef.current;
+    const LC = lcRef.current;
+    if (!cs || !LC) return;
+
+    const { LineStyle } = LC;
+
+    // Remove existing
+    Object.values(activeLevelsRef.current).forEach((pl) => {
+      try { cs.removePriceLine(pl); } catch {}
+    });
+    activeLevelsRef.current = {};
+
+    const allLevels: Record<string, LevelDef> = {};
+
+    // VWAP (from latest bar's vw or levels prop)
+    const lastBar = bars[bars.length - 1];
+    const vwapPrice = levels.vwap || lastBar?.vw;
+    if (vwapPrice && groupVis.vwap) {
+      allLevels.vwap = { price: vwapPrice, label: 'VWAP', color: '#2962ff', style: LineStyle.Solid, group: 'vwap' };
+    }
+
+    // Call Wall / Put Wall
+    if (groupVis.walls) {
+      if (levels.callWall) allLevels.cw = { price: levels.callWall, label: 'CW', color: '#ff9800', style: LineStyle.Dashed, group: 'walls' };
+      if (levels.putWall) allLevels.pw = { price: levels.putWall, label: 'PW', color: '#e040fb', style: LineStyle.Dashed, group: 'walls' };
+    }
+
+    // Camarilla
+    if (groupVis.cam && camLevels) {
+      allLevels.r4 = { price: camLevels.r4, label: 'R4', color: '#00bcd4', style: LineStyle.Dotted, group: 'cam' };
+      allLevels.r3 = { price: camLevels.r3, label: 'R3', color: '#00bcd4', style: LineStyle.Dashed, group: 'cam' };
+      allLevels.s3 = { price: camLevels.s3, label: 'S3', color: '#ff7043', style: LineStyle.Dashed, group: 'cam' };
+      allLevels.s4 = { price: camLevels.s4, label: 'S4', color: '#ff7043', style: LineStyle.Dotted, group: 'cam' };
+    }
+
+    // Create price lines
+    Object.entries(allLevels).forEach(([key, lv]) => {
+      activeLevelsRef.current[key] = cs.createPriceLine({
+        price: lv.price,
+        color: lv.color,
+        lineWidth: lv.width || 1,
+        lineStyle: lv.style,
+        axisLabelVisible: true,
+        title: `${lv.label} ${lv.price.toFixed(2)}`,
+      });
+    });
+  }, [bars, groupVis, levels, camLevels]);
+
+  // ── Timeframe change ──
+  const handleTFChange = useCallback(async (tf: string) => {
+    setActiveTF(tf);
+    setLoading(true);
+    await fetchCandles(tf);
+    setLoading(false);
+  }, [fetchCandles]);
+
+  // ── Polling ──
+  useEffect(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    // Poll rate based on TF and market session
+    const config = TF_MAP[activeTF] || TF_MAP['5m'];
+    let interval: number;
+    if (marketSession === 'open') {
+      interval = config.barMins <= 5 ? 10_000 : 30_000;
+    } else if (marketSession === 'pre-market' || marketSession === 'after-hours') {
+      interval = 30_000;
+    } else {
+      interval = 120_000;
+    }
+
+    pollRef.current = setInterval(() => fetchCandles(activeTF), interval);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [activeTF, marketSession, fetchCandles]);
+
+  // ── Level chip toggle ──
+  const toggleGroup = useCallback((group: string) => {
+    setGroupVis(prev => ({ ...prev, [group]: !prev[group as keyof typeof prev] }));
   }, []);
 
-  // ── Fetch + render ──
-  const fetchAndRender = useCallback(async (fit = false) => {
-    const main = mainRef.current;
-    const ind = indRef.current;
-    const cs = candleRef.current;
-    const vs = vwapRef.current;
-    const bs = bullRef.current;
-    const brs = bearRef.current;
-    if (!main || !ind || !cs || !vs || !bs || !brs) return;
-
-    try {
-      const [cRes, pRes] = await Promise.all([
-        fetch(`/api/candles/${ticker}?tf=${apiTf}&_t=${Date.now()}`, { cache: 'no-store' }),
-        fetch(`/api/timeline/${ticker}?_t=${Date.now()}`, { cache: 'no-store' }),
-      ]);
-
-      // ── Candles ──
-      if (cRes.ok) {
-        const cData = await cRes.json();
-        const bars: Bar[] = cData.bars || [];
-        if (bars.length > 0) {
-          // Shift to ET for display
-          cs.setData(bars.map(b => ({
-            time: toET(b.t), open: b.o, high: b.h, low: b.l, close: b.c,
-          })));
-          vs.setData(bars.map(b => ({ time: toET(b.t), value: b.vw })));
-          setBarCount(bars.length);
-
-          // ── Price levels ──
-          plinesRef.current.forEach(pl => { try { cs.removePriceLine(pl); } catch {} });
-          plinesRef.current = [];
-
-          const addLvl = (v: number | null | undefined, t: string, col: string, s = LineStyle.Dashed, w = 1) => {
-            if (v == null || Math.abs((v - price) / price) > 0.10) return;
-            try {
-              plinesRef.current.push(cs.createPriceLine({
-                price: v, color: col, lineWidth: w, lineStyle: s,
-                axisLabelVisible: true, title: t,
-              }));
-            } catch {}
-          };
-
-          if (levels.vwap) addLvl(levels.vwap, 'VWAP', C.vwap, LineStyle.Solid, 1);
-          addLvl(entryLevel, 'ENTRY', C.bull, LineStyle.Dashed, 1);
-          addLvl(targetLevel, 'TARGET', '#2979ff', LineStyle.Dashed, 1);
-          addLvl(stopLevel, 'STOP', C.bear, LineStyle.Dashed, 1);
-          addLvl(levels.callWall, 'CW', C.cw, LineStyle.Dotted, 1);
-          addLvl(levels.putWall, 'PW', C.pw, LineStyle.Dotted, 1);
-          addLvl(levels.gexFlip, 'GEX', C.gex, LineStyle.Dotted, 1);
-        }
-      }
-
-      // ── Pressure ──
-      if (pRes.ok) {
-        const pData = await pRes.json();
-        const pts: PressurePoint[] = (pData.points || []).filter((p: any) => p.bp > 0 || p.brp > 0);
-
-        if (pts.length > 0) {
-          // Timeline stores ms → convert to seconds → shift to ET
-          bs.setData(pts.map(p => ({ time: toET(Math.floor(p.t / 1000)), value: p.bp })));
-          brs.setData(pts.map(p => ({ time: toET(Math.floor(p.t / 1000)), value: p.brp })));
-
-          // 50-line reference
-          try {
-            bs.createPriceLine({
-              price: 50, color: 'rgba(209,212,220,0.06)', lineWidth: 1,
-              lineStyle: LineStyle.Dotted, axisLabelVisible: false, title: '',
-            });
-          } catch {}
-        }
-      }
-
-      if (fit) {
-        main.timeScale().fitContent();
-      }
-      setLoading(false);
-    } catch (e) {
-      console.error('[YodhaChart]', e);
-      setLoading(false);
-    }
-  }, [ticker, apiTf, levels, price, entryLevel, targetLevel, stopLevel, toET]);
-
-  // ── Ticker / timeframe change ──
-  useEffect(() => {
-    setLoading(true);
-    fetchAndRender(true);
-
-    if (pollRef.current) clearInterval(pollRef.current);
-    const ms = marketSession === 'open'
-      ? (['1m', '5m'].includes(timeframe) ? 10000 : 30000)
-      : 120000;
-    pollRef.current = setInterval(() => fetchAndRender(false), ms);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [ticker, timeframe, marketSession, fetchAndRender]);
-
-  // ── Reactive level updates ──
-  useEffect(() => {
-    const cs = candleRef.current;
-    if (!cs) return;
-    plinesRef.current.forEach(pl => { try { cs.removePriceLine(pl); } catch {} });
-    plinesRef.current = [];
-    const add = (v: number | null | undefined, t: string, col: string, s = LineStyle.Dashed, w = 1) => {
-      if (v == null || Math.abs((v - price) / price) > 0.10) return;
-      try {
-        plinesRef.current.push(cs.createPriceLine({
-          price: v, color: col, lineWidth: w, lineStyle: s, axisLabelVisible: true, title: t,
-        }));
-      } catch {}
-    };
-    if (levels.vwap) add(levels.vwap, 'VWAP', C.vwap, LineStyle.Solid, 1);
-    add(entryLevel, 'ENTRY', C.bull, LineStyle.Dashed, 1);
-    add(targetLevel, 'TARGET', '#2979ff', LineStyle.Dashed, 1);
-    add(stopLevel, 'STOP', C.bear, LineStyle.Dashed, 1);
-    add(levels.callWall, 'CW', C.cw, LineStyle.Dotted, 1);
-    add(levels.putWall, 'PW', C.pw, LineStyle.Dotted, 1);
-    add(levels.gexFlip, 'GEX', C.gex, LineStyle.Dotted, 1);
-  }, [levels, price, entryLevel, targetLevel, stopLevel]);
-
-  const spread = tip ? tip.b - tip.br : null;
+  // ── Render ──
+  const isUp = changePercent >= 0;
+  const priceColor = isUp ? '#26a69a' : '#ef5350';
 
   return (
-    <div
-      className="yodha-chart-root"
-      style={{
-        height: '100%', width: '100%', display: 'flex', flexDirection: 'column',
-        background: C.bg, borderRadius: 4, position: 'relative', overflow: 'hidden',
-      }}
-    >
-      {/* CSS to hide TV attribution logo */}
-      <style>{`
-        .yodha-chart-root a[href*="tradingview"] { display: none !important; }
-        .yodha-chart-root div[class*="attribution"] { display: none !important; }
-        .yodha-chart-root table td[style*="20px"] img { display: none !important; }
-      `}</style>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#131722', borderRadius: 6, overflow: 'hidden', fontFamily: FONT }}>
 
-      {/* Loading */}
-      {loading && (
-        <div style={{
-          position: 'absolute', inset: 0, zIndex: 10,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(19,23,34,0.9)',
-        }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{
-              width: 22, height: 22,
-              border: '2px solid rgba(38,166,154,0.25)', borderTopColor: C.bull,
-              borderRadius: '50%', animation: 'yspin 0.7s linear infinite', margin: '0 auto 10px',
-            }} />
-            <span style={{ color: C.textDim, fontSize: 11, fontFamily: C.font }}>
-              Loading {ticker}…
-            </span>
-            <style>{`@keyframes yspin { to { transform: rotate(360deg); } }`}</style>
-          </div>
-        </div>
-      )}
-
-      {/* ── MAIN CHART ── */}
-      <div style={{ flex: '1 1 0%', minHeight: 0, position: 'relative' }}>
-        <div ref={mainBoxRef} style={{ width: '100%', height: '100%' }} />
-        {barCount > 0 && (
-          <div style={{
-            position: 'absolute', bottom: 6, left: 10,
-            fontSize: 9, color: 'rgba(209,212,220,0.12)',
-            fontFamily: C.font, pointerEvents: 'none', letterSpacing: 0.3,
-          }}>
-            {barCount} bars · Polygon
-          </div>
-        )}
-      </div>
-
-      {/* ── DIVIDER + INDICATOR LABEL ── */}
+      {/* ── Toolbar ── */}
       <div style={{
-        height: 22, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10,
-        paddingLeft: 10, paddingRight: 10,
-        background: 'rgba(19,23,34,0.6)',
-        borderTop: `1px solid ${C.border}`,
-        borderBottom: `1px solid rgba(42,46,57,0.3)`,
+        display: 'flex', alignItems: 'center', height: 38, padding: '0 12px',
+        background: '#131722', borderBottom: '1px solid rgba(42,46,57,0.6)', gap: 10, flexShrink: 0,
       }}>
-        <span style={{ fontSize: 10, fontWeight: 600, fontFamily: C.font, color: 'rgba(209,212,220,0.3)' }}>
-          Bull / Bear Pressure
+        <span style={{ fontSize: 14, fontWeight: 700, color: '#fff', letterSpacing: 0.3 }}>{ticker}</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: priceColor }}>${price.toFixed(2)}</span>
+        <span style={{
+          fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 3,
+          background: isUp ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)',
+          color: priceColor,
+        }}>
+          {isUp ? '+' : ''}{changePercent.toFixed(2)}%
         </span>
-        <span style={{ fontSize: 9, fontFamily: C.font, color: C.bull, fontWeight: 600 }}>● Bull</span>
-        <span style={{ fontSize: 9, fontFamily: C.font, color: C.bear, fontWeight: 600 }}>● Bear</span>
 
-        {/* Live crosshair readout */}
-        {tip && (
-          <span style={{ fontSize: 10, fontFamily: C.font, marginLeft: 'auto' }}>
-            <span style={{ color: C.bull, fontWeight: 700 }}>▲ {tip.b}</span>
-            <span style={{ color: 'rgba(209,212,220,0.15)', margin: '0 5px' }}>|</span>
-            <span style={{ color: C.bear, fontWeight: 700 }}>▼ {tip.br}</span>
-            {spread != null && (
-              <>
-                <span style={{ color: 'rgba(209,212,220,0.15)', margin: '0 5px' }}>|</span>
-                <span style={{ color: spread >= 0 ? C.bull : C.bear, fontWeight: 700 }}>
-                  Δ{spread >= 0 ? '+' : ''}{spread}
-                </span>
-              </>
-            )}
-          </span>
-        )}
+        <div style={{ width: 1, height: 18, background: 'rgba(42,46,57,0.6)' }} />
+
+        {/* TF Buttons */}
+        <div style={{ display: 'flex', gap: 1 }}>
+          {Object.entries(TF_MAP).map(([key, cfg]) => (
+            <button
+              key={key}
+              onClick={() => handleTFChange(key)}
+              style={{
+                background: activeTF === key ? 'rgba(41,98,255,0.22)' : 'transparent',
+                color: activeTF === key ? '#fff' : 'rgba(209,212,220,0.4)',
+                border: 'none', fontFamily: 'inherit', fontSize: '10.5px', fontWeight: 500,
+                padding: '4px 9px', borderRadius: 3, cursor: 'pointer',
+                transition: 'all 0.12s',
+              }}
+            >
+              {cfg.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ width: 1, height: 18, background: 'rgba(42,46,57,0.6)' }} />
+
+        {/* Level Chips */}
+        <div style={{ display: 'flex', gap: 5, marginLeft: 'auto' }}>
+          {[
+            { group: 'vwap', label: 'VWAP', color: '#2962ff' },
+            { group: 'walls', label: 'CW / PW', color: '#ff9800' },
+            ...(camLevels ? [{ group: 'cam', label: 'Camarilla', color: '#00bcd4' }] : []),
+          ].map(chip => {
+            const vis = groupVis[chip.group as keyof typeof groupVis];
+            return (
+              <div
+                key={chip.group}
+                onClick={() => toggleGroup(chip.group)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 3,
+                  fontSize: 9, padding: '2px 6px', borderRadius: 3, cursor: 'pointer',
+                  userSelect: 'none', transition: 'opacity 0.15s',
+                  color: chip.color,
+                  borderColor: chip.color + '40',
+                  borderWidth: 1, borderStyle: 'solid',
+                  opacity: vis ? 1 : 0.2,
+                }}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: chip.color }} />
+                {chip.label}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {/* ── INDICATOR CHART ── */}
-      <div style={{ height: 140, flexShrink: 0 }}>
-        <div ref={indBoxRef} style={{ width: '100%', height: '100%' }} />
+      {/* ── Chart Area ── */}
+      <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+        {/* Pressure Legend + Live Readout (overlay) */}
+        <div style={{
+          position: 'absolute', top: 6, left: 10, zIndex: 5,
+          display: 'flex', alignItems: 'center', gap: 10,
+          pointerEvents: 'none', fontSize: 9, fontWeight: 600, fontFamily: FONT,
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'rgba(19,23,34,0.75)', padding: '3px 8px', borderRadius: 4,
+            border: '1px solid rgba(42,46,57,0.3)',
+          }}>
+            <div style={{ width: 10, height: 10, borderRadius: 2, background: '#26a69a' }} />
+            <span style={{ color: 'rgba(209,212,220,0.45)' }}>Bullish</span>
+            <div style={{ width: 10, height: 10, borderRadius: 2, background: '#ff9800' }} />
+            <span style={{ color: 'rgba(209,212,220,0.45)' }}>Crossover</span>
+            <div style={{ width: 10, height: 10, borderRadius: 2, background: '#ef5350' }} />
+            <span style={{ color: 'rgba(209,212,220,0.45)' }}>Bearish</span>
+          </div>
+          <div
+            id="yodha-pressure-readout"
+            style={{
+              background: 'rgba(19,23,34,0.75)', padding: '3px 8px', borderRadius: 4,
+              border: '1px solid rgba(42,46,57,0.3)', fontSize: 10,
+            }}
+          />
+        </div>
+
+        {/* Loading overlay */}
+        {loading && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 10,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(19,23,34,0.7)',
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{
+                width: 24, height: 24,
+                border: '2px solid rgba(38,166,154,0.3)', borderTopColor: '#26a69a',
+                borderRadius: '50%', animation: 'yodha-spin 0.8s linear infinite',
+                margin: '0 auto 8px',
+              }} />
+              <span style={{ color: 'rgba(209,212,220,0.4)', fontSize: 11, fontFamily: FONT }}>
+                Loading {ticker}...
+              </span>
+              <style>{`@keyframes yodha-spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+          </div>
+        )}
+
+        {/* The chart mounts here */}
+        <div ref={mainRef} style={{ width: '100%', height: '100%' }} />
       </div>
     </div>
   );
 }
+
+export const YodhaChart = memo(YodhaChartInner);
+
+/* ════════════════════════════════════════════════════════════════
+   SERVER-SIDE: Add to /api/candles/[ticker]/route.ts
+   
+   After computing VWAP for each bar, also compute pressure + color:
+   
+   ```ts
+   import { computeBarPressure } from '@/lib/bias-score';
+   
+   const processedBars = bars.map((bar, i) => {
+     const { bp, brp } = computeBarPressure(bar, prevBars, flowData, mlScore);
+     const spread = bp - brp;
+     const color = spread > 25  ? '#26a69a'   // strong bull
+                 : spread > 8   ? '#1b8a7a'   // bull
+                 : spread > -8  ? '#ff9800'    // crossover
+                 : spread > -25 ? '#c94442'    // bear
+                 : '#ef5350';                  // strong bear
+     return {
+       t: bar.t, o: bar.o, h: bar.h, l: bar.l, c: bar.c,
+       v: bar.v, vw: computedVwap,
+       bp, brp, color,
+     };
+   });
+   ```
+   
+   This keeps your scoring algo + ML model server-side.
+   The client just renders whatever color the API sends.
+   ════════════════════════════════════════════════════════════════ */

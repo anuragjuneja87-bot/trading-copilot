@@ -1,5 +1,3 @@
-# 3. Create candle pressure module (starter — you'll evolve this)
-cat > src/lib/candle-pressure.ts << 'EOF'
 interface PressureInput { bar: any; i: number; bars: any[]; vwap: number; }
 
 export function computeBarPressure(input: PressureInput): { bp: number; brp: number } {
@@ -26,10 +24,3 @@ export function pressureToColor(bp: number, brp: number): string {
   if (spread > -25) return '#c94442';
   return '#ef5350';
 }
-EOF
-
-# 4. Update page.tsx — swap TradingView for YodhaChart
-cd src/app/ask
-sed -i '' "s|import { TradingViewPanel } from '@/components/ask/tradingview-panel';|import { YodhaChart } from '@/components/ask/yodha-chart';|" page.tsx
-sed -i '' 's|<div className="h-\[400px\]">|<div className="h-[580px]">|' page.tsx
-sed -i '' 's|<TradingViewPanel ticker={selectedTicker} timeframe={timeframe} />|<YodhaChart ticker={selectedTicker} timeframe={timeframe} price={data.price} changePercent={data.changePercent} marketSession={data.marketSession} levels={data.levels} />|' page.tsx
