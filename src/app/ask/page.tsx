@@ -6,7 +6,7 @@ import { useWatchlistStore } from '@/stores';
 import { useWarRoomData } from '@/hooks/use-war-room-data';
 import { useMLPrediction } from '@/hooks/use-ml-prediction';
 import { COLORS } from '@/lib/echarts-theme';
-import { RefreshCw, Search, ChevronDown, ChevronRight, Sparkles, Building2, BarChart3, Activity, Newspaper, Target } from 'lucide-react';
+import { RefreshCw, Search, ChevronDown, ChevronRight, Sparkles, Building2, BarChart3, Activity, Newspaper, Target, Layers } from 'lucide-react';
 import { YodhaLogo, YodhaWordmark } from '@/components/brand/yodha-logo';
 
 // Components
@@ -40,6 +40,7 @@ function CollapsiblePanel({
   subtitleColor,
   icon: Icon,
   defaultOpen = false,
+  forceOpen,
   children,
   height = '400px',
 }: {
@@ -48,11 +49,17 @@ function CollapsiblePanel({
   subtitleColor?: string;
   icon?: any;
   defaultOpen?: boolean;
+  forceOpen?: boolean;
   children: React.ReactNode;
   height?: string;
 }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const dotColor = subtitleColor || '#555';
+
+  // Sync with external forceOpen when it changes
+  useEffect(() => {
+    if (forceOpen !== undefined) setIsOpen(forceOpen);
+  }, [forceOpen]);
 
   return (
     <div
@@ -251,6 +258,7 @@ function AskPageContent() {
 
   // Volume pressure
   const [volumePressure, setVolumePressure] = useState<number | undefined>(undefined);
+  const [allPanelsOpen, setAllPanelsOpen] = useState<boolean | undefined>(undefined);
 
   useEffect(() => {
     if (!selectedTicker) return;
@@ -452,8 +460,18 @@ function AskPageContent() {
               </div>
 
               {/* DETAILED DATA PANELS (collapsible) */}
+              <div className="flex items-center justify-end mb-1">
+                <button
+                  onClick={() => setAllPanelsOpen(prev => prev === true ? false : true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] transition-all hover:bg-white/5"
+                  style={{ color: allPanelsOpen ? COLORS.cyan : 'rgba(255,255,255,0.5)', border: `1px solid ${allPanelsOpen ? COLORS.cyan + '30' : 'rgba(255,255,255,0.08)'}` }}
+                >
+                  <Layers className="w-3 h-3" />
+                  {allPanelsOpen ? 'Collapse All' : 'Expand All'}
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-3">
-                <CollapsiblePanel title="Options Flow" height="420px" icon={Sparkles} subtitle={ps.flow.text} subtitleColor={ps.flow.color}>
+                <CollapsiblePanel title="Options Flow" height="420px" icon={Sparkles} subtitle={ps.flow.text} subtitleColor={ps.flow.color} forceOpen={allPanelsOpen}>
                   <OptionsFlowPanel
                     stats={data.flow?.stats || null}
                     trades={data.flow?.trades || []}
@@ -465,7 +483,7 @@ function AskPageContent() {
                     vwap={data.levels?.vwap || null}
                   />
                 </CollapsiblePanel>
-                <CollapsiblePanel title="Gamma & Key Levels" height="420px" icon={Target} subtitle={ps.gamma.text} subtitleColor={ps.gamma.color}>
+                <CollapsiblePanel title="Gamma & Key Levels" height="420px" icon={Target} subtitle={ps.gamma.text} subtitleColor={ps.gamma.color} forceOpen={allPanelsOpen}>
                   <GammaLevelsPanel
                     ticker={selectedTicker}
                     gexByStrike={data.flow?.stats?.gexByStrike || []}
@@ -475,10 +493,10 @@ function AskPageContent() {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <CollapsiblePanel title="Volume Pressure" height="380px" icon={BarChart3} subtitle={ps.volume.text} subtitleColor={ps.volume.color}>
+                <CollapsiblePanel title="Volume Pressure" height="380px" icon={BarChart3} subtitle={ps.volume.text} subtitleColor={ps.volume.color} forceOpen={allPanelsOpen}>
                   <VolumePressurePanel ticker={selectedTicker} timeframeRange={timeframeRange} />
                 </CollapsiblePanel>
-                <CollapsiblePanel title="Dark Pool Activity" height="380px" icon={Building2} subtitle={ps.darkPool.text} subtitleColor={ps.darkPool.color}>
+                <CollapsiblePanel title="Dark Pool Activity" height="380px" icon={Building2} subtitle={ps.darkPool.text} subtitleColor={ps.darkPool.color} forceOpen={allPanelsOpen}>
                   <DarkPoolPanel
                     prints={data.darkpool?.prints || []}
                     stats={data.darkpool?.stats || null}
@@ -493,10 +511,10 @@ function AskPageContent() {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <CollapsiblePanel title="Relative Strength" height="380px" icon={Activity} subtitle={ps.rs.text} subtitleColor={ps.rs.color}>
+                <CollapsiblePanel title="Relative Strength" height="380px" icon={Activity} subtitle={ps.rs.text} subtitleColor={ps.rs.color} forceOpen={allPanelsOpen}>
                   <RelativeStrengthPanel ticker={selectedTicker} timeframeRange={timeframeRange} />
                 </CollapsiblePanel>
-                <CollapsiblePanel title="News Sentiment" height="380px" icon={Newspaper} subtitle={ps.news.text} subtitleColor={ps.news.color}>
+                <CollapsiblePanel title="News Sentiment" height="380px" icon={Newspaper} subtitle={ps.news.text} subtitleColor={ps.news.color} forceOpen={allPanelsOpen}>
                   <NewsSentimentPanel
                     ticker={selectedTicker}
                     items={data.news.items}
