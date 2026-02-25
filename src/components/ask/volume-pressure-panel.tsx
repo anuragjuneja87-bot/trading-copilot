@@ -157,6 +157,12 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
   const chartOption = useMemo(() => {
     if (!metrics) return null;
     
+    // ★ Dynamic area fill based on CVD direction
+    const lastCvd = metrics.cvdData[metrics.cvdData.length - 1] || 0;
+    const isPositiveCvd = lastCvd >= 0;
+    const fillTop = isPositiveCvd ? 'rgba(0,220,130,0.22)' : 'rgba(255,71,87,0.22)';
+    const fillBottom = isPositiveCvd ? 'rgba(0,220,130,0.02)' : 'rgba(255,71,87,0.02)';
+
     return {
       tooltip: {
         trigger: 'axis',
@@ -218,6 +224,10 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
       },
       yAxis: {
         type: 'value',
+        // ★ Scale to actual data range, not anchored to 0
+        // This makes CVD movements visible instead of a flat line at the top
+        min: 'dataMin',
+        max: 'dataMax',
         axisLine: { show: false },
         axisTick: { show: false },
         splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)', type: 'dashed' } },
@@ -230,15 +240,14 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
           data: metrics.cvdData,
           smooth: 0.3,
           symbol: 'none',
-          lineStyle: { width: 2 },
+          lineStyle: { width: 2.5 },
           areaStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(0,220,130,0.06)' },
-                { offset: 0.5, color: 'transparent' },
-                { offset: 1, color: 'rgba(255,71,87,0.06)' },
+                { offset: 0, color: fillTop },
+                { offset: 1, color: fillBottom },
               ],
             },
           },
