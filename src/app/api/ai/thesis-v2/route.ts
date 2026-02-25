@@ -8,6 +8,10 @@ export const maxDuration = 30;
    
    Takes all 7 signal states + price data + levels, sends to Claude,
    returns structured JSON thesis for the YodhaThesis component.
+   
+   v2.1: ATR-aware gap classification — normalizes gap % against
+         the ticker's typical daily range so indices like SPY are
+         not incorrectly classified as "flat" on meaningful gaps.
    ══════════════════════════════════════════════════════════════ */
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -89,19 +93,101 @@ export interface ThesisV2Response {
   generatedAt: string;
 }
 
-// ── Market State Detection ──────────────────────────────────
+// ── ATR Proxy Computation ─────────────────────────────────
+// Uses previous day's high-low range as a single-day ATR proxy.
+// Falls back to known typical ATR percentages for major instruments.
+
+/** Known typical daily ATR as % of price (approximate, conservative) */
+const KNOWN_ATR_PCT: Record<string, number> = {
+  // Major indices — tight daily ranges
+  SPY: 0.85, QQQ: 1.1, IWM: 1.2, DIA: 0.75,
+  // Leveraged ETFs
+  TQQQ: 3.3, SQQQ: 3.3, SPXL: 2.5, SPXS: 2.5,
+  UPRO: 2.5, SDS: 1.7, QLD: 2.2, TNA: 3.5, TZA: 3.5,
+  // Sector ETFs
+  XLF: 0.9, XLE: 1.3, XLK: 1.0, XLV: 0.8, XBI: 1.5,
+  ARKK: 2.0, SMH: 1.5, XLC: 0.9, XLI: 0.8, XLP: 0.6,
+  XLU: 0.7, XLRE: 0.9,
+  // Mega-caps (approximate)
+  AAPL: 1.5, MSFT: 1.4, GOOGL: 1.6, AMZN: 1.8, META: 2.0,
+  NVDA: 3.0, TSLA: 3.0, AMD: 2.5, NFLX: 2.2, CRM: 1.8,
+};
+
+interface ATRContext {
+  atrPct: number;        // Estimated daily ATR as % of price
+  gapAsAtrRatio: number; // How much of the ATR the gap consumes (0-1+)
+  source: 'prevDay' | 'known' | 'default';
+}
+
+function computeATRContext(
+  ticker: string,
+  changePercent: number,
+  price: number,
+  levels: ThesisV2Request['levels'],
+): ATRContext {
+  const absPctChange = Math.abs(changePercent);
+
+  // 1. Try computing from previous day's high-low range
+  if (levels.prevHigh && levels.prevLow && levels.prevHigh > levels.prevLow) {
+    const prevRange = levels.prevHigh - levels.prevLow;
+    const midPrice = (levels.prevHigh + levels.prevLow) / 2;
+    const atrPct = (prevRange / midPrice) * 100;
+
+    // Sanity check: ATR should be between 0.1% and 15%
+    if (atrPct >= 0.1 && atrPct <= 15) {
+      return {
+        atrPct,
+        gapAsAtrRatio: atrPct > 0 ? absPctChange / atrPct : 0,
+        source: 'prevDay',
+      };
+    }
+  }
+
+  // 2. Use known ATR table
+  const knownAtr = KNOWN_ATR_PCT[ticker.toUpperCase()];
+  if (knownAtr) {
+    return {
+      atrPct: knownAtr,
+      gapAsAtrRatio: knownAtr > 0 ? absPctChange / knownAtr : 0,
+      source: 'known',
+    };
+  }
+
+  // 3. Default fallback: assume ~1.5% daily ATR (midcap stock average)
+  const defaultAtr = 1.5;
+  return {
+    atrPct: defaultAtr,
+    gapAsAtrRatio: defaultAtr > 0 ? absPctChange / defaultAtr : 0,
+    source: 'default',
+  };
+}
+
+// ── Market State Detection (ATR-aware) ──────────────────────
 
 function detectMarketState(
   session: string,
   changePercent: number,
   signals: ThesisV2Request['signals'],
+  atrContext: ATRContext,
 ): ThesisV2Response['marketState'] {
   if (session === 'closed') return 'closed';
   if (session === 'after-hours') return 'after_hours';
   
   if (session === 'pre-market') {
-    if (changePercent >= 0.5) return 'pre_gap_up';
-    if (changePercent <= -0.5) return 'pre_gap_down';
+    // ── ATR-relative thresholds ──
+    // A gap consuming ≥20% of the daily ATR is directionally meaningful
+    // Example: SPY +0.34% with ATR 0.85% → ratio 0.40 → gap UP (not flat)
+    // Example: NVDA +0.34% with ATR 3.0% → ratio 0.11 → flat (correctly)
+    const ratio = atrContext.gapAsAtrRatio;
+
+    if (changePercent > 0 && ratio >= 0.20) return 'pre_gap_up';
+    if (changePercent < 0 && ratio >= 0.20) return 'pre_gap_down';
+
+    // Also catch absolute large moves (>0.8%) regardless of ATR
+    // Handles tickers where we lack ATR data but the move is clearly large
+    if (changePercent >= 0.8) return 'pre_gap_up';
+    if (changePercent <= -0.8) return 'pre_gap_down';
+
     return 'pre_flat';
   }
 
@@ -132,7 +218,11 @@ function buildSignalSnapshot(signals: ThesisV2Request['signals']): string {
 
 // ── Prompt Builder ──────────────────────────────────────────
 
-function buildPrompt(req: ThesisV2Request, marketState: ThesisV2Response['marketState']): string {
+function buildPrompt(
+  req: ThesisV2Request,
+  marketState: ThesisV2Response['marketState'],
+  atrContext: ATRContext,
+): string {
   const { ticker, price, changePercent, prevClose, signals, levels } = req;
   
   // Count signals
@@ -169,11 +259,25 @@ ${levels.prevHigh ? `- Previous High: $${levels.prevHigh.toFixed(2)}` : ''}
 ${levels.prevLow ? `- Previous Low: $${levels.prevLow.toFixed(2)}` : ''}
 - Previous Close: $${prevClose.toFixed(2)}`;
 
+  // ATR context block — gives the LLM instrument-awareness
+  const atrBlock = `
+ATR CONTEXT (instrument-relative move sizing):
+- Estimated daily ATR: ${atrContext.atrPct.toFixed(2)}% (source: ${atrContext.source === 'prevDay' ? 'previous day range' : atrContext.source === 'known' ? 'known instrument profile' : 'default estimate'})
+- Pre-market gap as % of ATR: ${(atrContext.gapAsAtrRatio * 100).toFixed(0)}%
+- Interpretation: ${
+  atrContext.gapAsAtrRatio >= 0.50 ? 'LARGE gap — more than half the typical daily range is already consumed' :
+  atrContext.gapAsAtrRatio >= 0.30 ? 'MEANINGFUL gap — roughly a third of the typical daily range' :
+  atrContext.gapAsAtrRatio >= 0.20 ? 'MODERATE gap — noticeable relative to this instrument\'s normal movement' :
+  atrContext.gapAsAtrRatio >= 0.10 ? 'SMALL gap — minor move relative to typical daily range' :
+  'NEGLIGIBLE — well within normal noise for this instrument'
+}`;
+
   const baseContext = `
 TICKER: ${ticker}
 PRICE: $${price.toFixed(2)}
 CHANGE: ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}% from previous close ($${prevClose.toFixed(2)})
 MARKET STATE: ${marketState}
+${atrBlock}
 ${signalSummary}
 ${levelsSummary}`;
 
@@ -213,11 +317,19 @@ Include a risk warning about the conflicting signals.`;
     case 'pre_gap_up':
     case 'pre_gap_down':
       stateInstructions = `
-This is PRE-MARKET with a ${marketState === 'pre_gap_up' ? `gap UP of +${changePercent.toFixed(1)}%` : `gap DOWN of ${changePercent.toFixed(1)}%`}.
+This is PRE-MARKET with a ${marketState === 'pre_gap_up' ? `gap UP of +${changePercent.toFixed(2)}%` : `gap DOWN of ${changePercent.toFixed(2)}%`}.
+
+IMPORTANT — ATR CONTEXT: This gap represents ${(atrContext.gapAsAtrRatio * 100).toFixed(0)}% of the ticker's typical daily range (ATR ~${atrContext.atrPct.toFixed(2)}%).${
+  atrContext.gapAsAtrRatio >= 0.30
+    ? ` This is a significant move for ${ticker} — treat it with conviction, not dismissal.`
+    : atrContext.gapAsAtrRatio >= 0.20
+      ? ` This is a meaningful directional move for ${ticker} even though the absolute percentage may look small.`
+      : ''
+}
 
 Write a 2-3 paragraph thesis that:
-1. Opens with the gap direction and magnitude
-2. Provides context (any overnight catalysts if inferable from price action)
+1. Opens with the gap direction, magnitude, AND its significance relative to this ticker's typical daily range
+2. Provides context (any overnight catalysts if inferable from price action, supporting signals)
 3. Identifies key levels that will matter at the open
 4. Presents TWO scenarios: "If gap holds" and "If gap fades"
 
@@ -228,7 +340,8 @@ ${marketState === 'pre_gap_down' && Math.abs(changePercent) > 2 ? 'Note if this 
 
     case 'pre_flat':
       stateInstructions = `
-This is PRE-MARKET with the stock essentially FLAT (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(1)}%).
+This is PRE-MARKET with the stock essentially FLAT (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%).
+The gap represents only ${(atrContext.gapAsAtrRatio * 100).toFixed(0)}% of the typical daily ATR — genuinely minimal movement.
 
 Write a SHORT thesis (1-2 paragraphs) that:
 1. States the stock is flat with no overnight catalyst
@@ -282,6 +395,7 @@ Rules:
 - Reference specific signal values (e.g. "96% call ratio", "62% sell-side dark pool prints").
 - GEX context: Above GEX flip = mean-reversion zone (moves get capped). Below = trend-amplification zone (moves extend).
 - If ML model has a signal, mention its probability and direction.
+- CRITICAL: Use the ATR CONTEXT to correctly assess the significance of price moves. A 0.3% gap on SPY (an index with ~0.85% daily ATR) is NOT the same as 0.3% on NVDA (with ~3% daily ATR). Always frame the gap relative to the instrument's typical daily range. Never call a move "flat" or "dead" if it consumes >20% of the daily ATR.
 
 CRITICAL: Respond ONLY with valid JSON matching this schema. No markdown, no backticks, no text outside the JSON:
 
@@ -376,32 +490,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'AI service not configured' }, { status: 503 });
     }
 
-    // 1. Detect market state
-    const marketState = detectMarketState(marketSession, changePercent, signals);
+    // 1. Compute ATR context for instrument-relative gap sizing
+    const atrContext = computeATRContext(ticker, changePercent, effectivePrice, levels);
 
-    // 2. Build signal snapshot for gating
+    // 2. Detect market state (now ATR-aware)
+    const marketState = detectMarketState(marketSession, changePercent, signals, atrContext);
+
+    // 3. Build signal snapshot for gating
     const signalSnapshot = buildSignalSnapshot(signals);
 
-    // 3. Build prompt & call Claude
-    const prompt = buildPrompt(body, marketState);
+    // 4. Build prompt & call Claude (with ATR context)
+    const prompt = buildPrompt(body, marketState, atrContext);
     const rawResponse = await callClaude(prompt);
 
-    // 4. Parse response
+    // 5. Parse response
     const parsed = parseClaudeResponse(rawResponse);
 
-    // 5. Build signal count summary
+    // 6. Build signal count summary
     const signalList = [signals.flow, signals.volume, signals.darkPool, signals.gex, signals.vwap, signals.rs, signals.ml];
     const active = signalList.filter(s => s.status !== 'no_data');
     const bulls = active.filter(s => s.status === 'bullish').length;
     const bears = active.filter(s => s.status === 'bearish').length;
     const neutrals = active.filter(s => s.status === 'neutral').length;
 
-    // 6. Build ML confidence tag
+    // 7. Build ML confidence tag
     const mlTag = signals.ml.status !== 'no_data' && signals.ml.probability
       ? `ML ${signals.ml.probability.toFixed(0)}% · ${bulls}/${active.length} bull`
       : `${bulls}/${active.length} bull`;
 
-    // 7. Build footer based on state
+    // 8. Build footer based on state
     let footer: string;
     switch (marketState) {
       case 'rth_bullish':
@@ -422,13 +539,13 @@ export async function POST(request: NextRequest) {
         break;
     }
 
-    // 8. Build bias
+    // 9. Build bias
     let bias: ThesisV2Response['bias'] = 'NEUTRAL';
     if (marketState === 'rth_bullish' || marketState === 'pre_gap_up') bias = 'BULLISH';
     else if (marketState === 'rth_bearish' || marketState === 'pre_gap_down') bias = 'BEARISH';
     else if (marketState === 'rth_mixed') bias = 'MIXED';
 
-    // 9. Gap label for pre-market
+    // 10. Gap label for pre-market (now ATR-contextualized)
     let gapLabel: string | undefined;
     if (marketState === 'pre_gap_up') gapLabel = `GAP UP +${changePercent.toFixed(1)}%`;
     else if (marketState === 'pre_gap_down') gapLabel = `GAP DOWN ${changePercent.toFixed(1)}%`;
