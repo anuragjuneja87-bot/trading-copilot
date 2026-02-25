@@ -6,15 +6,14 @@ import { COLORS } from '@/lib/echarts-theme';
 import { isMarketClosed, getLastTradingDay, formatTradingDay, getMarketStatus } from '@/lib/market-utils';
 
 /* ════════════════════════════════════════════════════════════════
-   VOLUME PRESSURE PANEL v2 — CVD-focused redesign
+   VOLUME PRESSURE PANEL v2.1 — Color-changing CVD
    
-   Changes from v1:
-   - Removed buy/sell volume bars (noise)
-   - CVD line is the primary visual — full chart area
+   v2.1 changes:
+   - CVD line changes color at zero crossing (green > 0, red < 0)
+   - Auto-scroll to latest data (dataZoom end: 100)
    - Session pressure = total buy / total sell across ALL buckets
    - Rolling pressure = last 15 buckets (trend indicator)
-   - Compact gauge: session % + rolling trend arrow
-   - Consistent with header summary badge
+   - Zero reference line for visual clarity
    ════════════════════════════════════════════════════════════════ */
 
 interface VolumePressurePanelProps {
@@ -34,10 +33,10 @@ interface TickBucket {
   buyVolume: number;
   sellVolume: number;
   totalVolume: number;
-  pressure: number; // -100 to +100
+  pressure: number;
 }
 
-const ROLLING_WINDOW = 15; // Number of recent buckets for trend calculation
+const ROLLING_WINDOW = 15;
 
 export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePanelProps) {
   const [data, setData] = useState<TickBucket[]>([]);
@@ -45,7 +44,6 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
   const [error, setError] = useState<string | null>(null);
   const [bucketLabel, setBucketLabel] = useState('15min buckets');
   
-  // Market status detection
   const marketStatus = getMarketStatus();
   const isClosed = isMarketClosed();
   const lastTradingDay = getLastTradingDay();
@@ -92,12 +90,9 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
   const metrics = useMemo(() => {
     if (!data.length) return null;
     
-    // CVD (cumulative volume delta)
     let cumulativeDelta = 0;
     const cvdData: number[] = [];
     const timeLabels: string[] = [];
-    
-    // Session totals
     let totalBuy = 0;
     let totalSell = 0;
     
@@ -109,13 +104,13 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
       totalSell += d.sellVolume;
     });
     
-    // Session-wide pressure (total buy vs total sell across ALL data)
+    // Session-wide pressure
     const totalVol = totalBuy + totalSell;
     const sessionPressure = totalVol > 0 
       ? Math.round(((totalBuy - totalSell) / totalVol) * 100) 
       : 0;
     
-    // Rolling pressure (last N buckets for trend)
+    // Rolling pressure (last N buckets)
     const recentBuckets = data.slice(-ROLLING_WINDOW);
     const recentBuy = recentBuckets.reduce((s, d) => s + d.buyVolume, 0);
     const recentSell = recentBuckets.reduce((s, d) => s + d.sellVolume, 0);
@@ -124,7 +119,6 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
       ? Math.round(((recentBuy - recentSell) / recentTotal) * 100) 
       : 0;
     
-    // Trend: compare rolling to session (is pressure increasing or fading?)
     const trendDelta = rollingPressure - sessionPressure;
     
     return {
@@ -138,7 +132,6 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
     };
   }, [data]);
 
-  // ── Derived display values ──
   const sessionPressure = metrics?.sessionPressure || 0;
   const rollingPressure = metrics?.rollingPressure || 0;
   const trendDelta = metrics?.trendDelta || 0;
@@ -160,16 +153,9 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
     return v.toString();
   };
 
-  // ── CVD-only chart ──
+  // ── CVD chart with color change at zero ──
   const chartOption = useMemo(() => {
     if (!metrics) return null;
-    
-    // Determine CVD color based on direction (positive = green area, negative = red area)
-    const lastCvd = metrics.cvdData[metrics.cvdData.length - 1] || 0;
-    const cvdColor = lastCvd >= 0 ? '#00dc82' : '#ff4757';
-    const cvdAreaColor = lastCvd >= 0 
-      ? 'rgba(0,220,130,0.08)' 
-      : 'rgba(255,71,87,0.08)';
     
     return {
       tooltip: {
@@ -180,9 +166,21 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
         formatter: (params: any) => {
           const time = params[0]?.axisValue || '';
           const cvd = params[0]?.value || 0;
+          const color = cvd >= 0 ? '#00dc82' : '#ff4757';
           return `<div style="font-weight:bold;margin-bottom:4px">${time}</div>` +
-            `<div style="color:${cvdColor}">CVD: ${formatVol(cvd)}</div>`;
+            `<div style="color:${color}">CVD: ${formatVol(cvd)}</div>`;
         },
+      },
+      // ★ Color-changing CVD: green above zero, red below zero
+      visualMap: {
+        show: false,
+        type: 'piecewise',
+        dimension: 1,
+        pieces: [
+          { gte: 0, color: '#00dc82' },
+          { lt: 0, color: '#ff4757' },
+        ],
+        seriesIndex: 0,
       },
       grid: { top: 16, right: 55, bottom: 45, left: 55 },
       dataZoom: [
@@ -198,14 +196,16 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
           xAxisIndex: 0,
           height: 18,
           bottom: 2,
+          start: 0,
+          end: 100,
           borderColor: 'transparent',
           backgroundColor: 'rgba(255,255,255,0.03)',
-          fillerColor: `${cvdColor}15`,
-          handleStyle: { color: cvdColor, borderColor: cvdColor },
+          fillerColor: 'rgba(0,220,130,0.1)',
+          handleStyle: { color: '#00dc82', borderColor: '#00dc82' },
           textStyle: { color: '#666', fontSize: 9 },
           dataBackground: {
-            lineStyle: { color: `${cvdColor}50` },
-            areaStyle: { color: `${cvdColor}0A` },
+            lineStyle: { color: 'rgba(0,220,130,0.3)' },
+            areaStyle: { color: 'rgba(0,220,130,0.05)' },
           },
         },
       ],
@@ -230,16 +230,29 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
           data: metrics.cvdData,
           smooth: 0.3,
           symbol: 'none',
-          lineStyle: { color: cvdColor, width: 2 },
+          lineStyle: { width: 2 },
           areaStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: cvdAreaColor },
-                { offset: 1, color: 'transparent' },
+                { offset: 0, color: 'rgba(0,220,130,0.06)' },
+                { offset: 0.5, color: 'transparent' },
+                { offset: 1, color: 'rgba(255,71,87,0.06)' },
               ],
             },
+          },
+          // ★ Zero reference line
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            label: { show: false },
+            lineStyle: {
+              color: 'rgba(255,255,255,0.1)',
+              type: 'dashed',
+              width: 1,
+            },
+            data: [{ yAxis: 0 }],
           },
           z: 10,
         },
@@ -275,7 +288,6 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
 
       {/* ── Pressure Summary — compact row ── */}
       <div className="flex items-center gap-4 mb-3 py-2 px-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
-        {/* Session pressure */}
         <div className="flex items-center gap-2">
           <span className="text-2xl font-black font-mono" style={{ color: pressureColor }}>
             {sessionPressure > 0 ? '+' : ''}{sessionPressure}%
@@ -285,10 +297,8 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
           </span>
         </div>
         
-        {/* Divider */}
         <div className="w-px h-6" style={{ background: 'rgba(255,255,255,0.08)' }} />
         
-        {/* Rolling trend */}
         <div className="flex flex-col">
           <span className="text-xs text-gray-500">Last {ROLLING_WINDOW} bars</span>
           <div className="flex items-center gap-1.5">
@@ -301,10 +311,8 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
           </div>
         </div>
         
-        {/* Divider */}
         <div className="w-px h-6" style={{ background: 'rgba(255,255,255,0.08)' }} />
         
-        {/* Buy/Sell totals */}
         {metrics && (
           <div className="flex items-center gap-3 text-xs">
             <span style={{ color: COLORS.green }}>

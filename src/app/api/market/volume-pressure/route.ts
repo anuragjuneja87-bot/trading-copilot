@@ -78,11 +78,12 @@ export async function GET(request: NextRequest) {
       isLive = marketRange.isLive;
     }
 
-    // Use date string format for Polygon
+    // Use date string format for Polygon (covers full trading day)
     const fromDate = new Date(fromTs).toISOString().split('T')[0];
     const toDate = new Date(toTs).toISOString().split('T')[0];
 
-    const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/minute/${fromDate}/${toDate}?adjusted=true&sort=asc&limit=500&apiKey=${POLYGON_API_KEY}`;
+    // ★ Increased limit from 500 to 50000 to ensure all 1-min bars are returned
+    const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/minute/${fromDate}/${toDate}?adjusted=true&sort=asc&limit=50000&apiKey=${POLYGON_API_KEY}`;
 
     const res = await fetch(url, {
       next: { revalidate: isLive ? 30 : 300 },
@@ -114,12 +115,16 @@ export async function GET(request: NextRequest) {
       : rangeMinutes <= 5 ? 1 : rangeMinutes <= 15 ? 1 : rangeMinutes <= 30 ? 2
       : rangeMinutes <= 60 ? 5 : rangeMinutes <= 240 ? 5 : rangeMinutes <= 480 ? 15 : 60;
 
-    // Filter to regular market hours only (9:30 AM - 4:00 PM ET)
+    // ★ Filter to RTH (9:30 AM - 4:00 PM ET) AND within the requested time range
     const filteredBars = bars.filter((bar: any) => {
       const barDate = new Date(bar.t);
       const barET = new Date(barDate.toLocaleString('en-US', { timeZone: 'America/New_York' }));
       const barMinutes = barET.getHours() * 60 + barET.getMinutes();
-      return barMinutes >= 570 && barMinutes < 960;
+      // Must be within RTH
+      if (barMinutes < 570 || barMinutes >= 960) return false;
+      // ★ Must be within requested time range
+      if (bar.t < fromTs || bar.t > toTs) return false;
+      return true;
     });
 
     const buckets: Record<string, { buyVolume: number; sellVolume: number; timeMs: number }> = {};
