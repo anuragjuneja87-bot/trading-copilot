@@ -8,12 +8,13 @@ import type { ThesisV2Request, ThesisV2Response } from '@/app/api/ai/thesis-v2/r
 import type { MLPrediction } from '@/app/api/ml/predict/route';
 
 /* ══════════════════════════════════════════════════════════════
-   YODHA THESIS — AI/LLM-powered thesis panel (v2)
+   YODHA THESIS — AI/LLM-powered thesis panel (v2.2)
    
-   Replaces the old rule-based YodhaAnalysis component.
-   Renders 8 market states with conversational thesis text,
-   dual setups for conflicting signals, session recaps, and
-   adaptive risk warnings.
+   v2.2 Changes:
+   - Expanded props to include quality metrics (totalPremium,
+     netDeltaAdjustedFlow, tradeCount, printCount, totalValue)
+   - Quality-aware signal building with minimum thresholds
+   - Passes quality metadata through to thesis API for LLM context
    ══════════════════════════════════════════════════════════════ */
 
 // ── Props ──────────────────────────────────────────────────
@@ -27,11 +28,20 @@ interface YodhaThesisProps {
     putRatio?: number;
     sweepRatio?: number;
     tradeCount?: number;
+    // Quality metrics (available from EnhancedFlowStats at runtime)
+    totalPremium?: number;
+    callPremium?: number;
+    putPremium?: number;
+    netDeltaAdjustedFlow?: number;
   } | null;
   darkPoolStats: {
     printCount?: number;
     bullishPct?: number;
     bearishPct?: number;
+    // Quality metrics (available from DarkPoolStats at runtime)
+    totalValue?: number;
+    bullishValue?: number;
+    bearishValue?: number;
   } | null;
   relativeStrength: {
     rsVsSpy: number;
@@ -79,8 +89,13 @@ const BIAS_STYLES: Record<string, { bg: string; border: string; color: string; l
   NEUTRAL: { bg: 'rgba(255,193,7,0.1)', border: 'rgba(255,193,7,0.2)', color: C.yellow, label: '◆ NEUTRAL' },
 };
 
-// ── Signal Builder ─────────────────────────────────────────
-// Converts component props into the signal format the API expects
+// ── Quality Thresholds (must match confluence-indicator) ────
+
+const FLOW_MIN_TRADES = 5;
+const FLOW_MIN_PREMIUM = 50000;
+const DP_MIN_PRINTS = 5;
+
+// ── Signal Builder (quality-aware) ─────────────────────────
 
 function buildSignals(
   flowStats: YodhaThesisProps['flowStats'],
@@ -96,50 +111,95 @@ function buildSignals(
   const isClosed = marketSession === 'closed' || marketSession === 'after-hours';
   const isIndex = ['SPY', 'QQQ', 'IWM', 'DIA'].includes(ticker.toUpperCase());
 
-  // Flow
+  // ── Flow (quality-gated) ──
   const callRatio = flowStats?.callRatio;
-  const hasFlow = callRatio != null && (flowStats?.tradeCount || 0) > 0;
-  const flowStatus = hasFlow ? (callRatio! >= 60 ? 'bullish' : callRatio! <= 40 ? 'bearish' : 'neutral') : 'no_data';
+  const flowTradeCount = flowStats?.tradeCount ?? 0;
+  const flowPremium = flowStats?.totalPremium ?? ((flowStats?.callPremium || 0) + (flowStats?.putPremium || 0));
+  const flowNetDelta = flowStats?.netDeltaAdjustedFlow ?? 0;
+  const hasFlow = callRatio != null && flowTradeCount > 0;
+  const flowMeetsThreshold = hasFlow && flowTradeCount >= FLOW_MIN_TRADES && flowPremium >= FLOW_MIN_PREMIUM;
+  const flowStatus = flowMeetsThreshold ? (callRatio! >= 60 ? 'bullish' : callRatio! <= 40 ? 'bearish' : 'neutral') : 'no_data';
 
-  // Volume
+  // ── Volume ──
   const vp = volumePressure ?? 0;
   const hasVol = vp !== 0;
   const volStatus = hasVol ? (vp > 20 ? 'bullish' : vp < -20 ? 'bearish' : 'neutral') : 'no_data';
 
-  // Dark Pool
+  // ── Dark Pool (quality-gated) ──
   const dpBull = darkPoolStats?.bullishPct;
-  const hasDp = (darkPoolStats?.printCount || 0) > 0 && dpBull != null;
-  const dpStatus = hasDp ? (dpBull! > 55 ? 'bullish' : dpBull! < 45 ? 'bearish' : 'neutral') : 'no_data';
+  const dpPrintCount = darkPoolStats?.printCount ?? 0;
+  const dpTotalValue = darkPoolStats?.totalValue ?? 0;
+  const hasDp = dpPrintCount > 0 && dpBull != null;
+  const dpMeetsThreshold = hasDp && dpPrintCount >= DP_MIN_PRINTS;
+  const dpStatus = dpMeetsThreshold ? (dpBull! > 55 ? 'bullish' : dpBull! < 45 ? 'bearish' : 'neutral') : 'no_data';
 
-  // GEX
+  // ── GEX ──
   const gexFlip = levels.gexFlip;
   const gexStatus = gexFlip ? (price > gexFlip ? 'bullish' : 'bearish') : 'no_data';
 
-  // VWAP
+  // ── VWAP ──
   const vwap = levels.vwap;
   const vwapDist = vwap && vwap > 0 ? ((price - vwap) / vwap) * 100 : null;
   const vwapStatus = vwapDist != null ? (vwapDist > 0.1 ? 'bullish' : vwapDist < -0.1 ? 'bearish' : 'neutral') : 'no_data';
 
-  // RS
+  // ── RS ──
   const rs = relativeStrength?.rsVsSpy;
   const regime = relativeStrength?.regime;
   const rsStatus = !isIndex && rs != null
     ? (regime === 'STRONG_OUTPERFORM' || regime === 'OUTPERFORM' || rs > 0.5 ? 'bullish' : regime === 'STRONG_UNDERPERFORM' || regime === 'UNDERPERFORM' || rs < -0.5 ? 'bearish' : 'neutral')
     : 'no_data';
 
-  // ML
+  // ── ML ──
   const mlDir = mlPrediction?.direction?.toLowerCase();
   const mlProb = mlPrediction?.move_probability;
   const mlStatus = mlDir ? (mlDir === 'bullish' ? 'bullish' : mlDir === 'bearish' ? 'bearish' : 'neutral') : 'no_data';
 
+  // Build flow value label (show thin data hint if below threshold)
+  let flowValue: string;
+  if (flowMeetsThreshold) flowValue = `${callRatio!.toFixed(0)}% calls`;
+  else if (hasFlow) flowValue = `${callRatio!.toFixed(0)}% (thin)`;
+  else flowValue = isClosed ? 'Closed' : 'No data';
+
+  // Build DP value label
+  let dpValue: string;
+  if (dpMeetsThreshold) dpValue = `${dpBull!.toFixed(0)}% buy`;
+  else if (hasDp) dpValue = `${dpPrintCount}p (thin)`;
+  else dpValue = isClosed ? 'Closed' : 'No data';
+
   return {
-    flow: { status: flowStatus, value: hasFlow ? `${callRatio!.toFixed(0)}% calls` : isClosed ? 'Closed' : 'No data', callRatio, sweepRatio: flowStats?.sweepRatio },
-    volume: { status: volStatus, value: hasVol ? `${vp > 0 ? '+' : ''}${vp.toFixed(0)}%` : isClosed ? 'Closed' : 'No data', pressure: vp },
-    darkPool: { status: dpStatus, value: hasDp ? `${dpBull!.toFixed(0)}% buy` : isClosed ? 'Closed' : 'No data', bullishPct: dpBull },
-    gex: { status: gexStatus, value: gexFlip ? (price > gexFlip ? 'Above flip' : 'Below flip') : 'No data' },
-    vwap: { status: vwapStatus, value: vwapDist != null ? `${vwapDist >= 0 ? '+' : ''}${vwapDist.toFixed(2)}%` : 'No data', vwapPrice: vwap ?? undefined },
-    rs: { status: rsStatus, value: rs != null && !isIndex ? `${rs >= 0 ? '+' : ''}${rs.toFixed(1)} vs SPY` : isIndex ? 'Index' : 'No data', rsVsSpy: rs ?? undefined },
-    ml: { status: mlStatus, value: mlProb != null ? `${(mlProb * 100).toFixed(0)}%` : 'Loading', probability: mlProb != null ? mlProb * 100 : undefined, direction: mlPrediction?.direction },
+    flow: {
+      status: flowStatus, value: flowValue, callRatio, sweepRatio: flowStats?.sweepRatio,
+      tradeCount: flowTradeCount, totalPremium: flowPremium, netDelta: flowNetDelta,
+    },
+    volume: {
+      status: volStatus,
+      value: hasVol ? `${vp > 0 ? '+' : ''}${vp.toFixed(0)}%` : isClosed ? 'Closed' : 'No data',
+      pressure: vp,
+    },
+    darkPool: {
+      status: dpStatus, value: dpValue, bullishPct: dpBull,
+      printCount: dpPrintCount, totalValue: dpTotalValue,
+    },
+    gex: {
+      status: gexStatus,
+      value: gexFlip ? (price > gexFlip ? 'Above flip' : 'Below flip') : 'No data',
+    },
+    vwap: {
+      status: vwapStatus,
+      value: vwapDist != null ? `${vwapDist >= 0 ? '+' : ''}${vwapDist.toFixed(2)}%` : 'No data',
+      vwapPrice: vwap ?? undefined,
+    },
+    rs: {
+      status: rsStatus,
+      value: rs != null && !isIndex ? `${rs >= 0 ? '+' : ''}${rs.toFixed(1)} vs SPY` : isIndex ? 'Index' : 'No data',
+      rsVsSpy: rs ?? undefined,
+    },
+    ml: {
+      status: mlStatus,
+      value: mlProb != null ? `${(mlProb * 100).toFixed(0)}%` : 'Loading',
+      probability: mlProb != null ? mlProb * 100 : undefined,
+      direction: mlPrediction?.direction,
+    },
   };
 }
 
@@ -148,7 +208,7 @@ function buildSignals(
 export function YodhaThesis(props: YodhaThesisProps) {
   const { ticker, price, changePercent, flowStats, darkPoolStats, relativeStrength, levels, marketSession, volumePressure, mlPrediction, mlLoading } = props;
 
-  // Build signals from props
+  // Build quality-aware signals
   const signals = useMemo(() => buildSignals(
     flowStats, darkPoolStats, volumePressure, levels, price, relativeStrength, mlPrediction, ticker, marketSession,
   ), [flowStats, darkPoolStats, volumePressure, levels, price, relativeStrength, mlPrediction, ticker, marketSession]);
@@ -184,16 +244,7 @@ export function YodhaThesis(props: YodhaThesisProps) {
       className="rounded-xl overflow-hidden relative"
       style={{ background: C.cardBg, border: `1px solid ${C.cardBorder}` }}
     >
-      {/* ── HEADER ──────────────────────────────────────── */}
-      <Header
-        ticker={ticker}
-        thesis={thesis}
-        isLoading={isLoading || !!mlLoading}
-        onRefresh={refresh}
-        marketSession={marketSession}
-      />
-
-      {/* ── BODY ────────────────────────────────────────── */}
+      <Header ticker={ticker} thesis={thesis} isLoading={isLoading || !!mlLoading} onRefresh={refresh} marketSession={marketSession} />
       {isLoading && !thesis ? (
         <LoadingState />
       ) : thesis ? (
@@ -203,32 +254,17 @@ export function YodhaThesis(props: YodhaThesisProps) {
       ) : (
         <LoadingState />
       )}
-
-      {/* ── FOOTER ──────────────────────────────────────── */}
-      {thesis && (
-        <Footer
-          thesis={thesis}
-          secondsSinceUpdate={secondsSinceUpdate}
-          onRefresh={refresh}
-          isLoading={isLoading}
-        />
-      )}
+      {thesis && <Footer thesis={thesis} secondsSinceUpdate={secondsSinceUpdate} onRefresh={refresh} isLoading={isLoading} />}
     </div>
   );
 }
 
 // ══════════════════════════════════════════════════════════════
-//  SUB-COMPONENTS
+//  SUB-COMPONENTS (unchanged from v2)
 // ══════════════════════════════════════════════════════════════
 
-// ── Header ─────────────────────────────────────────────────
-
 function Header({ ticker, thesis, isLoading, onRefresh, marketSession }: {
-  ticker: string;
-  thesis: ThesisV2Response | null;
-  isLoading: boolean;
-  onRefresh: () => void;
-  marketSession: string;
+  ticker: string; thesis: ThesisV2Response | null; isLoading: boolean; onRefresh: () => void; marketSession: string;
 }) {
   const bias = thesis?.bias || 'NEUTRAL';
   const style = BIAS_STYLES[bias] || BIAS_STYLES.NEUTRAL;
@@ -237,46 +273,21 @@ function Header({ ticker, thesis, isLoading, onRefresh, marketSession }: {
   const isAfterHours = marketSession === 'after-hours';
 
   return (
-    <div
-      className="flex items-center justify-between px-5 py-3"
-      style={{ borderBottom: `1px solid ${C.cardBorder}` }}
-    >
+    <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
       <div className="flex items-center gap-2.5">
-        <div
-          className="w-8 h-8 rounded-lg flex items-center justify-center"
-          style={{
-            background: `linear-gradient(135deg, ${C.cyan}20, ${C.purple}15)`,
-            border: `1px solid ${C.cyan}30`,
-            boxShadow: `0 0 12px ${C.cyan}15`,
-          }}
-        >
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+          style={{ background: `linear-gradient(135deg, ${C.cyan}20, ${C.purple}15)`, border: `1px solid ${C.cyan}30`, boxShadow: `0 0 12px ${C.cyan}15` }}>
           <Shield className="w-4 h-4" style={{ color: C.cyan }} />
         </div>
-        <span
-          className="text-sm font-black text-white uppercase tracking-wider"
-          style={{ fontFamily: "'Oxanium', monospace" }}
-        >
-          Yodha
-        </span>
+        <span className="text-sm font-black text-white uppercase tracking-wider" style={{ fontFamily: "'Oxanium', monospace" }}>Yodha</span>
         <span className="text-xs text-gray-300">{ticker}</span>
         {isPreMarket && (
-          <span
-            className="text-[9px] font-bold px-2 py-0.5 rounded"
-            style={{ background: 'rgba(255,193,7,0.1)', color: C.yellow, border: '1px solid rgba(255,193,7,0.2)' }}
-          >
-            PRE-MARKET
-          </span>
+          <span className="text-[9px] font-bold px-2 py-0.5 rounded" style={{ background: 'rgba(255,193,7,0.1)', color: C.yellow, border: '1px solid rgba(255,193,7,0.2)' }}>PRE-MARKET</span>
         )}
         {isAfterHours && (
-          <span
-            className="text-[9px] font-bold px-2 py-0.5 rounded"
-            style={{ background: 'rgba(168,85,247,0.1)', color: C.purple, border: '1px solid rgba(168,85,247,0.2)' }}
-          >
-            AFTER-HOURS
-          </span>
+          <span className="text-[9px] font-bold px-2 py-0.5 rounded" style={{ background: 'rgba(168,85,247,0.1)', color: C.purple, border: '1px solid rgba(168,85,247,0.2)' }}>AFTER-HOURS</span>
         )}
       </div>
-
       <div className="flex items-center gap-3">
         {isLoading && (
           <div className="flex items-center gap-1.5">
@@ -284,44 +295,24 @@ function Header({ ticker, thesis, isLoading, onRefresh, marketSession }: {
             <span className="text-[10px] text-gray-400">Analyzing</span>
           </div>
         )}
-
         {thesis?.mlConfidence && (
-          <div
-            className="text-[10px] font-semibold px-2 py-1 rounded"
-            style={{ color: C.textMuted, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
-          >
+          <div className="text-[10px] font-semibold px-2 py-1 rounded" style={{ color: C.textMuted, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
             {thesis.mlConfidence}
           </div>
         )}
-
         {thesis && !isClosed && !isAfterHours && (
-          <div
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-bold"
-            style={{ background: style.bg, color: style.color, border: `1px solid ${style.border}` }}
-          >
-            <div
-              className="w-[6px] h-[6px] rounded-full"
-              style={{ background: style.color, animation: 'pulse 2s ease-in-out infinite' }}
-            />
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-bold" style={{ background: style.bg, color: style.color, border: `1px solid ${style.border}` }}>
+            <div className="w-[6px] h-[6px] rounded-full" style={{ background: style.color, animation: 'pulse 2s ease-in-out infinite' }} />
             {thesis.gapLabel || style.label}
           </div>
         )}
-
         {(isClosed || isAfterHours) && (
-          <span
-            className="text-[10px] font-semibold px-2.5 py-1 rounded"
-            style={{ background: 'rgba(255,193,7,0.08)', color: C.yellow, border: '1px solid rgba(255,193,7,0.15)' }}
-          >
+          <span className="text-[10px] font-semibold px-2.5 py-1 rounded" style={{ background: 'rgba(255,193,7,0.08)', color: C.yellow, border: '1px solid rgba(255,193,7,0.15)' }}>
             {isClosed ? 'MARKET CLOSED' : 'AFTER-HOURS'}
           </span>
         )}
-
         {!isLoading && (
-          <button
-            onClick={onRefresh}
-            className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
-            title="Refresh thesis"
-          >
+          <button onClick={onRefresh} className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors" title="Refresh thesis">
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
         )}
@@ -330,23 +321,11 @@ function Header({ ticker, thesis, isLoading, onRefresh, marketSession }: {
   );
 }
 
-// ── Thesis Body (routes to correct state renderer) ─────────
-
 function ThesisBody({ thesis, ticker }: { thesis: ThesisV2Response; ticker: string }) {
-  const ms = thesis.marketState;
-
-  if (ms === 'closed' || ms === 'after_hours') {
-    return <ClosedBody thesis={thesis} ticker={ticker} />;
-  }
-
+  if (thesis.marketState === 'closed' || thesis.marketState === 'after_hours') return <ClosedBody thesis={thesis} ticker={ticker} />;
   return (
     <div>
-      {/* Thesis text */}
-      <div className="px-5 py-4">
-        <ThesisText text={thesis.thesis} />
-      </div>
-
-      {/* Setups */}
+      <div className="px-5 py-4"><ThesisText text={thesis.thesis} /></div>
       {thesis.bullSetup && thesis.bearSetup ? (
         <DualSetup bull={thesis.bullSetup} bear={thesis.bearSetup} />
       ) : thesis.bullSetup ? (
@@ -354,117 +333,68 @@ function ThesisBody({ thesis, ticker }: { thesis: ThesisV2Response; ticker: stri
       ) : thesis.bearSetup ? (
         <SingleSetup setup={thesis.bearSetup} direction="bear" />
       ) : null}
-
-      {/* Risk */}
       {thesis.risk && <RiskBar icon={thesis.risk.icon} text={thesis.risk.text} />}
     </div>
   );
 }
 
-// ── Thesis Text (with inline highlighting) ─────────────────
-
 function ThesisText({ text }: { text: string }) {
-  // Split into paragraphs
   const paragraphs = text.split(/\n\n+/).filter(Boolean);
-
   return (
     <div className="space-y-2.5">
       {paragraphs.map((p, i) => (
-        <p
-          key={i}
-          className="text-[13.5px] leading-[1.75] tracking-[0.01em]"
-          style={{ color: C.textPrimary }}
-          dangerouslySetInnerHTML={{ __html: highlightText(p) }}
-        />
+        <p key={i} className="text-[13.5px] leading-[1.75] tracking-[0.01em]" style={{ color: C.textPrimary }} dangerouslySetInnerHTML={{ __html: highlightText(p) }} />
       ))}
     </div>
   );
 }
 
-/** Highlight dollar amounts, percentages, and key terms in thesis text */
 function highlightText(text: string): string {
   return text
-    // Dollar amounts → cyan
     .replace(/\$[\d,]+\.?\d*/g, (m) => `<span style="color:${C.cyan};font-weight:600">${m}</span>`)
-    // Positive percentages → green
     .replace(/\+\d+\.?\d*%/g, (m) => `<span style="color:${C.green};font-weight:600">${m}</span>`)
-    // Negative percentages → red
     .replace(/-\d+\.?\d*%/g, (m) => `<span style="color:${C.red};font-weight:600">${m}</span>`)
-    // Percentage with no sign (e.g. "96% calls") → keep as-is but bold
     .replace(/(\d+\.?\d*%)/g, (m) => `<span style="font-weight:600">${m}</span>`)
-    // Key terms
-    .replace(/\b(VWAP|GEX flip|call wall|put wall|Camarilla R[34]|Camarilla S[34]|mean-reversion|trend-amplification)\b/gi, 
-      (m) => `<strong>${m}</strong>`);
+    .replace(/\b(VWAP|GEX flip|call wall|put wall|Camarilla R[34]|Camarilla S[34]|mean-reversion|trend-amplification)\b/gi, (m) => `<strong>${m}</strong>`);
 }
 
-// ── Single Setup Grid ──────────────────────────────────────
-
-function SingleSetup({ setup, direction }: {
-  setup: NonNullable<ThesisV2Response['bullSetup']>;
-  direction: 'bull' | 'bear';
-}) {
+function SingleSetup({ setup, direction }: { setup: NonNullable<ThesisV2Response['bullSetup']>; direction: 'bull' | 'bear' }) {
   const isBull = direction === 'bull';
-  const entryColor = isBull ? C.cyan : C.red;
-  const targetColor = isBull ? C.green : C.red;
-  const stopColor = isBull ? C.red : C.green;
-
   return (
     <div className="px-5 pb-4">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <SetupItem label="Entry" price={setup.entry.price} context={setup.entry.context} color={entryColor} />
-        {setup.targets.map((t, i) => (
-          <SetupItem key={i} label={`Target ${i + 1}`} price={t.price} context={t.context} color={targetColor} />
-        ))}
-        <SetupItem label="Stop" price={setup.stop.price} context={setup.stop.context} color={stopColor} />
+        <SetupItem label="Entry" price={setup.entry.price} context={setup.entry.context} color={isBull ? C.cyan : C.red} />
+        {setup.targets.map((t, i) => <SetupItem key={i} label={`Target ${i + 1}`} price={t.price} context={t.context} color={isBull ? C.green : C.red} />)}
+        <SetupItem label="Stop" price={setup.stop.price} context={setup.stop.context} color={isBull ? C.red : C.green} />
       </div>
     </div>
   );
 }
 
-// ── Dual Setup (Bull + Bear) ───────────────────────────────
-
-function DualSetup({ bull, bear }: {
-  bull: NonNullable<ThesisV2Response['bullSetup']>;
-  bear: NonNullable<ThesisV2Response['bearSetup']>;
-}) {
+function DualSetup({ bull, bear }: { bull: NonNullable<ThesisV2Response['bullSetup']>; bear: NonNullable<ThesisV2Response['bearSetup']> }) {
   return (
     <div className="px-5 pb-4 space-y-3">
-      {/* Bull */}
       <div>
         <div className="flex items-center gap-1.5 mb-2">
           <div className="w-1.5 h-1.5 rounded-full" style={{ background: C.green }} />
-          <span className="text-[9px] font-bold uppercase tracking-[1.5px]" style={{ color: C.green }}>
-            🟢 Bull Setup
-          </span>
-          {bull.label && (
-            <span className="text-[9px] ml-1" style={{ color: C.textMuted }}>— {bull.label}</span>
-          )}
+          <span className="text-[9px] font-bold uppercase tracking-[1.5px]" style={{ color: C.green }}>🟢 Bull Setup</span>
+          {bull.label && <span className="text-[9px] ml-1" style={{ color: C.textMuted }}>— {bull.label}</span>}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <SetupItem label="Entry" price={bull.entry.price} context={bull.entry.context} color={C.cyan} />
-          {bull.targets.map((t, i) => (
-            <SetupItem key={i} label={`Target ${i + 1}`} price={t.price} context={t.context} color={C.green} />
-          ))}
+          {bull.targets.map((t, i) => <SetupItem key={i} label={`Target ${i + 1}`} price={t.price} context={t.context} color={C.green} />)}
           <SetupItem label="Stop" price={bull.stop.price} context={bull.stop.context} color={C.red} />
         </div>
       </div>
-
-      {/* Bear */}
       <div>
         <div className="flex items-center gap-1.5 mb-2">
           <div className="w-1.5 h-1.5 rounded-full" style={{ background: C.red }} />
-          <span className="text-[9px] font-bold uppercase tracking-[1.5px]" style={{ color: C.red }}>
-            🔴 Bear Setup
-          </span>
-          {bear.label && (
-            <span className="text-[9px] ml-1" style={{ color: C.textMuted }}>— {bear.label}</span>
-          )}
+          <span className="text-[9px] font-bold uppercase tracking-[1.5px]" style={{ color: C.red }}>🔴 Bear Setup</span>
+          {bear.label && <span className="text-[9px] ml-1" style={{ color: C.textMuted }}>— {bear.label}</span>}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <SetupItem label="Entry" price={bear.entry.price} context={bear.entry.context} color={C.red} />
-          {bear.targets.map((t, i) => (
-            <SetupItem key={i} label={`Target ${i + 1}`} price={t.price} context={t.context} color={C.red} />
-          ))}
+          {bear.targets.map((t, i) => <SetupItem key={i} label={`Target ${i + 1}`} price={t.price} context={t.context} color={C.red} />)}
           <SetupItem label="Stop" price={bear.stop.price} context={bear.stop.context} color={C.green} />
         </div>
       </div>
@@ -472,110 +402,50 @@ function DualSetup({ bull, bear }: {
   );
 }
 
-// ── Setup Item ─────────────────────────────────────────────
-
-function SetupItem({ label, price, context, color }: {
-  label: string;
-  price: string;
-  context: string;
-  color: string;
-}) {
+function SetupItem({ label, price, context, color }: { label: string; price: string; context: string; color: string }) {
   return (
-    <div
-      className="px-3 py-2.5 rounded-md"
-      style={{
-        background: `${color}08`,
-        border: `1px solid ${color}20`,
-      }}
-    >
-      <div className="text-[9px] font-bold uppercase tracking-[1.5px] mb-1" style={{ color }}>
-        {label}
-      </div>
-      <div className="text-[13px] font-bold font-mono" style={{ color }}>
-        {price}
-      </div>
-      <div className="text-[9px] mt-0.5" style={{ color: C.textMuted }}>
-        {context}
-      </div>
+    <div className="px-3 py-2.5 rounded-md" style={{ background: `${color}08`, border: `1px solid ${color}20` }}>
+      <div className="text-[9px] font-bold uppercase tracking-[1.5px] mb-1" style={{ color }}>{label}</div>
+      <div className="text-[13px] font-bold font-mono" style={{ color }}>{price}</div>
+      <div className="text-[9px] mt-0.5" style={{ color: C.textMuted }}>{context}</div>
     </div>
   );
 }
-
-// ── Risk Bar ───────────────────────────────────────────────
 
 function RiskBar({ icon, text }: { icon: string; text: string }) {
   return (
-    <div
-      className="mx-5 mb-4 px-3.5 py-2.5 rounded-md flex items-start gap-2"
-      style={{ background: 'rgba(255,193,7,0.04)', border: '1px solid rgba(255,193,7,0.12)' }}
-    >
+    <div className="mx-5 mb-4 px-3.5 py-2.5 rounded-md flex items-start gap-2" style={{ background: 'rgba(255,193,7,0.04)', border: '1px solid rgba(255,193,7,0.12)' }}>
       <span className="text-sm flex-shrink-0 mt-0.5">{icon}</span>
-      <p className="text-[11.5px] leading-[1.6]" style={{ color: 'rgba(255,255,255,0.7)' }}>
-        {text}
-      </p>
+      <p className="text-[11.5px] leading-[1.6]" style={{ color: 'rgba(255,255,255,0.7)' }}>{text}</p>
     </div>
   );
 }
-
-// ── Closed / After-Hours Body ──────────────────────────────
 
 function ClosedBody({ thesis, ticker }: { thesis: ThesisV2Response; ticker: string }) {
   return (
     <div className="px-5 py-4">
-      {/* Session Recap */}
       {thesis.sessionRecap && (
         <div className="mb-4">
-          <div className="text-[9px] font-bold uppercase tracking-[2px] mb-2" style={{ color: C.textMuted }}>
-            Today's Session
-          </div>
+          <div className="text-[9px] font-bold uppercase tracking-[2px] mb-2" style={{ color: C.textMuted }}>Today's Session</div>
           <ThesisText text={thesis.sessionRecap} />
-
-          {/* Stat chips */}
           {thesis.stats && thesis.stats.length > 0 && (
             <div className="flex gap-3 mt-3 flex-wrap">
               {thesis.stats.map((stat, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px]"
-                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
-                >
-                  <span className="text-[9px] font-semibold uppercase tracking-[1px]" style={{ color: C.textMuted }}>
-                    {stat.label}
-                  </span>
-                  <span
-                    className="font-bold font-mono"
-                    style={{
-                      color: stat.color === 'green' ? C.green
-                        : stat.color === 'red' ? C.red
-                        : stat.color === 'cyan' ? C.cyan
-                        : C.textPrimary,
-                    }}
-                  >
-                    {stat.value}
-                  </span>
+                <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px]" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <span className="text-[9px] font-semibold uppercase tracking-[1px]" style={{ color: C.textMuted }}>{stat.label}</span>
+                  <span className="font-bold font-mono" style={{ color: stat.color === 'green' ? C.green : stat.color === 'red' ? C.red : stat.color === 'cyan' ? C.cyan : C.textPrimary }}>{stat.value}</span>
                 </div>
               ))}
             </div>
           )}
         </div>
       )}
-
-      {/* After-hours note */}
       {thesis.afterHoursNote && (
-        <div
-          className="px-3.5 py-2.5 rounded-md mb-4"
-          style={{ background: `${C.purple}08`, border: `1px solid ${C.purple}15` }}
-        >
-          <div className="text-[9px] font-bold uppercase tracking-[1.5px] mb-1" style={{ color: C.purple }}>
-            📡 After-Hours Activity
-          </div>
-          <p className="text-[12px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.75)' }}>
-            {thesis.afterHoursNote}
-          </p>
+        <div className="px-3.5 py-2.5 rounded-md mb-4" style={{ background: `${C.purple}08`, border: `1px solid ${C.purple}15` }}>
+          <div className="text-[9px] font-bold uppercase tracking-[1.5px] mb-1" style={{ color: C.purple }}>📡 After-Hours Activity</div>
+          <p className="text-[12px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.75)' }}>{thesis.afterHoursNote}</p>
         </div>
       )}
-
-      {/* Divider */}
       {thesis.tomorrowPlan && (
         <>
           <div className="h-px my-4" style={{ background: C.cardBorder }} />
@@ -585,51 +455,29 @@ function ClosedBody({ thesis, ticker }: { thesis: ThesisV2Response; ticker: stri
           <ThesisText text={thesis.tomorrowPlan} />
         </>
       )}
-
-      {/* Setups for tomorrow */}
       {thesis.bullSetup && (
         <div className="mt-3">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <SetupItem label="Breakout" price={thesis.bullSetup.entry.price} context={thesis.bullSetup.entry.context} color={C.green} />
-            {thesis.bullSetup.targets.map((t, i) => (
-              <SetupItem key={i} label={i === 0 ? 'Upside Target' : 'Support'} price={t.price} context={t.context} color={i === 0 ? C.green : C.cyan} />
-            ))}
+            {thesis.bullSetup.targets.map((t, i) => <SetupItem key={i} label={i === 0 ? 'Upside Target' : 'Support'} price={t.price} context={t.context} color={i === 0 ? C.green : C.cyan} />)}
             <SetupItem label="Risk Level" price={thesis.bullSetup.stop.price} context={thesis.bullSetup.stop.context} color={C.red} />
           </div>
         </div>
       )}
-
-      {/* Risk */}
-      {thesis.risk && (
-        <div className="mt-3">
-          <RiskBar icon={thesis.risk.icon} text={thesis.risk.text} />
-        </div>
-      )}
+      {thesis.risk && <div className="mt-3"><RiskBar icon={thesis.risk.icon} text={thesis.risk.text} /></div>}
     </div>
   );
 }
-
-// ── Loading State ──────────────────────────────────────────
 
 function LoadingState() {
   return (
     <div className="px-5 py-6 flex items-center gap-4">
       <div className="flex gap-1">
         {[0, 1, 2].map(i => (
-          <div
-            key={i}
-            className="w-1.5 h-1.5 rounded-full"
-            style={{
-              background: C.cyan,
-              animation: `bounce-dot 1.2s ease-in-out infinite ${i * 0.15}s`,
-            }}
-          />
+          <div key={i} className="w-1.5 h-1.5 rounded-full" style={{ background: C.cyan, animation: `bounce-dot 1.2s ease-in-out infinite ${i * 0.15}s` }} />
         ))}
       </div>
-      <span className="text-xs" style={{ color: C.textSecondary }}>
-        Yodha is analyzing 7 data streams + ML model...
-      </span>
-
+      <span className="text-xs" style={{ color: C.textSecondary }}>Yodha is analyzing 7 data streams + ML model...</span>
       <style jsx>{`
         @keyframes bounce-dot {
           0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
@@ -640,8 +488,6 @@ function LoadingState() {
   );
 }
 
-// ── Error State ────────────────────────────────────────────
-
 function ErrorState({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
     <div className="px-5 py-4 flex items-center gap-3">
@@ -650,50 +496,25 @@ function ErrorState({ error, onRetry }: { error: string; onRetry: () => void }) 
         <p className="text-xs" style={{ color: C.red }}>Thesis generation failed</p>
         <p className="text-[10px] mt-0.5" style={{ color: C.textMuted }}>{error}</p>
       </div>
-      <button
-        onClick={onRetry}
-        className="text-[10px] font-semibold px-3 py-1.5 rounded-md transition-colors hover:bg-white/5"
-        style={{ color: C.cyan, border: `1px solid ${C.cyan}30` }}
-      >
-        Retry
-      </button>
+      <button onClick={onRetry} className="text-[10px] font-semibold px-3 py-1.5 rounded-md transition-colors hover:bg-white/5" style={{ color: C.cyan, border: `1px solid ${C.cyan}30` }}>Retry</button>
     </div>
   );
 }
 
-// ── Footer ─────────────────────────────────────────────────
-
 function Footer({ thesis, secondsSinceUpdate, onRefresh, isLoading }: {
-  thesis: ThesisV2Response;
-  secondsSinceUpdate: number;
-  onRefresh: () => void;
-  isLoading: boolean;
+  thesis: ThesisV2Response; secondsSinceUpdate: number; onRefresh: () => void; isLoading: boolean;
 }) {
-  const timeLabel = secondsSinceUpdate < 60
-    ? `Updated ${secondsSinceUpdate}s ago`
-    : `Updated ${Math.floor(secondsSinceUpdate / 60)}m ago`;
-
+  const timeLabel = secondsSinceUpdate < 60 ? `Updated ${secondsSinceUpdate}s ago` : `Updated ${Math.floor(secondsSinceUpdate / 60)}m ago`;
   return (
-    <div
-      className="flex items-center justify-between px-5 py-2.5"
-      style={{ borderTop: `1px solid ${C.cardBorder}` }}
-    >
+    <div className="flex items-center justify-between px-5 py-2.5" style={{ borderTop: `1px solid ${C.cardBorder}` }}>
       <div className="flex items-center gap-3 text-[9px]" style={{ color: C.textMuted }}>
         <span>{thesis.footer}</span>
         <div className="w-[3px] h-[3px] rounded-full" style={{ background: C.textMuted }} />
         <span>{timeLabel}</span>
       </div>
-      <button
-        onClick={onRefresh}
-        disabled={isLoading}
+      <button onClick={onRefresh} disabled={isLoading}
         className="flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-md transition-all hover:border-cyan-600"
-        style={{
-          color: C.textMuted,
-          background: 'rgba(255,255,255,0.03)',
-          border: '1px solid rgba(255,255,255,0.06)',
-          fontFamily: "'JetBrains Mono', monospace",
-        }}
-      >
+        style={{ color: C.textMuted, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', fontFamily: "'JetBrains Mono', monospace" }}>
         <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
         Refresh
       </button>
