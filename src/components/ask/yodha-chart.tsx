@@ -88,7 +88,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
   const isInitialLoadRef = useRef(true);
   const isAtRealTimeRef = useRef(true);
   const barCountRef = useRef(0);
-  const marketOpenTimesRef = useRef<number[]>([]);
+  const sessionRangesRef = useRef<{ preStart: number; rthOpen: number; postStart: number | null }[]>([]);
 
   const [bars, setBars] = useState<Bar[]>([]);
   const [activeTF, setActiveTF] = useState(timeframe || '5m');
@@ -123,7 +123,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     } catch (e) { console.error('[YodhaChart] fetch error:', e); }
   }, [ticker]);
 
-  // ── Draw session separator lines on overlay canvas ──
+  // ── Draw session separator lines + background tints on overlay canvas ──
   const drawSessionLines = useCallback(() => {
     const chart = chartRef.current;
     const canvas = overlayCanvasRef.current;
@@ -150,19 +150,55 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     ctx.clearRect(0, 0, w, h);
 
     const timeScale = chart.timeScale();
-    for (const openTime of marketOpenTimesRef.current) {
-      const x = timeScale.timeToCoordinate(openTime as any);
-      if (x === null || x < 0 || x > w) continue;
+    const PRE_MARKET_TINT = 'rgba(99,102,241,0.04)';   // ★ Subtle indigo tint for pre-market
+    const AFTER_HOURS_TINT = 'rgba(99,102,241,0.04)';  // ★ Same tint for after-hours
 
-      // Dashed vertical line
-      ctx.strokeStyle = SESSION_LINE_COLOR;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.moveTo(Math.round(x) + 0.5, 0);
-      ctx.lineTo(Math.round(x) + 0.5, h);
-      ctx.stroke();
-      ctx.setLineDash([]);
+    const ranges = sessionRangesRef.current;
+    for (let i = 0; i < ranges.length; i++) {
+      const range = ranges[i];
+      const nextRange = ranges[i + 1] ?? null;
+      const openX = timeScale.timeToCoordinate(range.rthOpen as any);
+      const preX = timeScale.timeToCoordinate(range.preStart as any);
+
+      // ★ Paint pre-market background tint
+      if (preX !== null && openX !== null && openX > preX) {
+        ctx.fillStyle = PRE_MARKET_TINT;
+        ctx.fillRect(preX, 0, openX - preX, h);
+      } else if (preX !== null && openX === null) {
+        // Open is off-screen right — tint from preStart to right edge
+        ctx.fillStyle = PRE_MARKET_TINT;
+        ctx.fillRect(preX, 0, w - preX, h);
+      } else if (preX === null && openX !== null && openX > 0) {
+        // PreStart is off-screen left — tint from left edge to open
+        ctx.fillStyle = PRE_MARKET_TINT;
+        ctx.fillRect(0, 0, openX, h);
+      }
+
+      // ★ Paint after-hours background tint (stop at next day's preStart)
+      if (range.postStart !== null) {
+        const postX = timeScale.timeToCoordinate(range.postStart as any);
+        if (postX !== null && postX < w) {
+          let endX = w; // default: right edge
+          if (nextRange) {
+            const nextPreX = timeScale.timeToCoordinate(nextRange.preStart as any);
+            if (nextPreX !== null) endX = nextPreX;
+          }
+          ctx.fillStyle = AFTER_HOURS_TINT;
+          ctx.fillRect(postX, 0, endX - postX, h);
+        }
+      }
+
+      // ★ Vertical dashed line at market open
+      if (openX !== null && openX >= 0 && openX <= w) {
+        ctx.strokeStyle = SESSION_LINE_COLOR;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(Math.round(openX) + 0.5, 0);
+        ctx.lineTo(Math.round(openX) + 0.5, h);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
   }, []);
 
@@ -333,18 +369,39 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     } catch (e) { if (String(e).indexOf('disposed') === -1) console.error('[YodhaChart] setData:', e); }
   }, [bars, groupVis, levels, camLevels, prevDayHLC]);
 
-  // ── Collect 9:30 AM ET timestamps for vertical session lines ──
+  // ── Collect session boundaries for background tints + vertical lines ──
   const collectSessionTimes = useCallback((candleData: any[]) => {
-    const openTimes: number[] = [];
-    let lastDay = '';
+    // Build per-day session ranges: { preStart, rthOpen, postStart }
+    const dayMap = new Map<string, { preStart: number; rthOpen: number; postStart: number | null }>();
+
     for (const candle of candleData) {
       const { hour, minute, dayStr } = getETTime(candle.time);
-      if (dayStr !== lastDay && hour === 9 && minute >= 30 && minute < 35) {
-        openTimes.push(candle.time);
-        lastDay = dayStr;
+
+      if (!dayMap.has(dayStr)) {
+        dayMap.set(dayStr, { preStart: candle.time, rthOpen: 0, postStart: null });
+      }
+
+      const entry = dayMap.get(dayStr)!;
+
+      // Track earliest bar as preStart (will be overridden if we find pre-market bars)
+      if (candle.time < entry.preStart) {
+        entry.preStart = candle.time;
+      }
+
+      // 9:30 AM ET = RTH open
+      if (hour === 9 && minute >= 30 && minute < 35 && entry.rthOpen === 0) {
+        entry.rthOpen = candle.time;
+      }
+
+      // 4:00 PM ET = after-hours start
+      if (hour === 16 && minute >= 0 && minute < 5 && entry.postStart === null) {
+        entry.postStart = candle.time;
       }
     }
-    marketOpenTimesRef.current = openTimes;
+
+    // Filter to days that have a valid rthOpen
+    const ranges = Array.from(dayMap.values()).filter(r => r.rthOpen > 0);
+    sessionRangesRef.current = ranges;
   }, []);
 
   // ── Draw levels ──
