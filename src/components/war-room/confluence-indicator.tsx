@@ -10,6 +10,8 @@ import { COLORS } from '@/lib/echarts-theme';
    
    Each signal: green (bullish), yellow (neutral), red (bearish), dim (no data).
    Overall verdict computed from signal count.
+   
+   v2: Improved sizing & contrast for readability
    ════════════════════════════════════════════════════════════════ */
 
 interface Signal {
@@ -36,7 +38,7 @@ const DOT_COLORS: Record<string, string> = {
   bullish: '#26a69a',
   bearish: '#ef5350',
   neutral: '#ffc107',
-  no_data: '#333',
+  no_data: '#444',
 };
 
 export function ConfluenceIndicator({
@@ -139,37 +141,41 @@ export function ConfluenceIndicator({
 
   return (
     <div
-      className="overflow-hidden flex items-center gap-1 px-4 py-2"
+      className="overflow-hidden flex items-center gap-1.5 px-4 py-2.5"
       style={{ background: COLORS.cardBg, borderBottom: `1px solid ${COLORS.cardBorder}` }}
     >
       {/* Overall verdict badge */}
-      <div className="flex items-center gap-2 mr-2 px-3 py-1.5 rounded-md flex-shrink-0"
-        style={{ background: `${score.color}15`, border: `1px solid ${score.color}30` }}>
+      <div className="flex items-center gap-2 mr-2 px-3.5 py-2 rounded-lg flex-shrink-0"
+        style={{ background: `${score.color}18`, border: `1px solid ${score.color}35` }}>
         <div className="w-2.5 h-2.5 rounded-full animate-pulse"
-          style={{ background: score.color, boxShadow: `0 0 6px ${score.color}60` }} />
-        <span className="text-[11px] font-bold tracking-wide" style={{ color: score.color }}>
+          style={{ background: score.color, boxShadow: `0 0 8px ${score.color}70` }} />
+        <span className="text-xs font-bold tracking-wide" style={{ color: score.color }}>
           {score.label}
         </span>
       </div>
 
-      <div className="w-px h-7 mx-1 flex-shrink-0" style={{ background: 'rgba(42,46,57,0.6)' }} />
+      <div className="w-px h-8 mx-1.5 flex-shrink-0" style={{ background: 'rgba(42,46,57,0.8)' }} />
 
       {/* Signal lights */}
-      <div className="flex items-center gap-3 flex-1 justify-center">
+      <div className="flex items-center gap-4 flex-1 justify-center">
         {signals.map((signal: Signal, i: number) => {
           const dotColor = DOT_COLORS[signal.status];
           const isActive = signal.status !== 'no_data';
           return (
-            <div key={i} className="flex items-center gap-1.5 group" title={`${signal.name}: ${signal.value}`}>
-              <div className="w-3 h-3 rounded-full flex-shrink-0 transition-all"
-                style={{ background: dotColor, opacity: isActive ? 1 : 0.25, boxShadow: isActive ? `0 0 6px ${dotColor}50` : 'none' }} />
+            <div key={i} className="flex items-center gap-2 group" title={`${signal.name}: ${signal.value}`}>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0 transition-all"
+                style={{
+                  background: dotColor,
+                  opacity: isActive ? 1 : 0.3,
+                  boxShadow: isActive ? `0 0 8px ${dotColor}60` : 'none',
+                }} />
               <div className="flex flex-col leading-none">
-                <span className="text-[10px] font-bold uppercase tracking-wider"
-                  style={{ color: isActive ? 'rgba(209,212,220,0.8)' : 'rgba(209,212,220,0.3)' }}>
+                <span className="text-[11px] font-semibold uppercase tracking-wide"
+                  style={{ color: isActive ? 'rgba(230,233,240,0.95)' : 'rgba(209,212,220,0.35)' }}>
                   {signal.shortName}
                 </span>
-                <span className="text-[9px] font-medium mt-0.5"
-                  style={{ color: isActive ? `${dotColor}cc` : 'rgba(209,212,220,0.2)' }}>
+                <span className="text-[10.5px] font-medium mt-0.5"
+                  style={{ color: isActive ? dotColor : 'rgba(209,212,220,0.25)' }}>
                   {signal.value}
                 </span>
               </div>
@@ -178,20 +184,20 @@ export function ConfluenceIndicator({
         })}
       </div>
 
-      <div className="w-px h-7 mx-1 flex-shrink-0" style={{ background: 'rgba(42,46,57,0.6)' }} />
+      <div className="w-px h-8 mx-1.5 flex-shrink-0" style={{ background: 'rgba(42,46,57,0.8)' }} />
 
       {/* Score summary */}
-      <div className="flex items-center gap-3 flex-shrink-0 ml-1">
+      <div className="flex items-center gap-3.5 flex-shrink-0 ml-1">
         <div className="flex items-center gap-1">
-          <span className="text-xs font-bold" style={{ color: '#26a69a' }}>{score.bullish}</span>
-          <span className="text-[9px]" style={{ color: 'rgba(209,212,220,0.3)' }}>bull</span>
+          <span className="text-sm font-bold" style={{ color: '#26a69a' }}>{score.bullish}</span>
+          <span className="text-[11px] font-medium" style={{ color: 'rgba(209,212,220,0.5)' }}>bull</span>
         </div>
         <div className="flex items-center gap-1">
-          <span className="text-xs font-bold" style={{ color: '#ef5350' }}>{score.bearish}</span>
-          <span className="text-[9px]" style={{ color: 'rgba(209,212,220,0.3)' }}>bear</span>
+          <span className="text-sm font-bold" style={{ color: '#ef5350' }}>{score.bearish}</span>
+          <span className="text-[11px] font-medium" style={{ color: 'rgba(209,212,220,0.5)' }}>bear</span>
         </div>
         {isClosed && (
-          <span className="text-[9px] font-medium px-1.5 py-0.5 rounded" style={{ color: '#ffc107', background: 'rgba(255,193,7,0.1)' }}>
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded" style={{ color: '#ffc107', background: 'rgba(255,193,7,0.12)' }}>
             CLOSED
           </span>
         )}
