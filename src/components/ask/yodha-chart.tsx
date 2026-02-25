@@ -24,12 +24,24 @@ interface YodhaChartProps {
   todayOHL?: any;
 }
 
-const CANDLE_UP = '#26a69a';
-const CANDLE_DOWN = '#ef5350';
-const CANDLE_UP_EXT = 'rgba(38,166,154,0.35)';
-const CANDLE_DOWN_EXT = 'rgba(239,83,80,0.35)';
-const CANDLE_UP_WICK_EXT = 'rgba(38,166,154,0.5)';
-const CANDLE_DOWN_WICK_EXT = 'rgba(239,83,80,0.5)';
+// ── NEW COLOR SYSTEM — v2 redesign ──
+const CANDLE_UP = '#00dc82';
+const CANDLE_DOWN = '#ff4757';
+const CANDLE_UP_EXT = 'rgba(0,220,130,0.35)';
+const CANDLE_DOWN_EXT = 'rgba(255,71,87,0.35)';
+const CANDLE_UP_WICK_EXT = 'rgba(0,220,130,0.5)';
+const CANDLE_DOWN_WICK_EXT = 'rgba(255,71,87,0.5)';
+
+const BG_CHART = '#0d1117';
+const BG_TOOLBAR = '#0a0e14';
+const BORDER = 'rgba(255,255,255,0.06)';
+const GRID_COLOR = 'rgba(255,255,255,0.025)';
+const VWAP_COLOR = '#4da6ff';
+const CW_COLOR = '#f97316';    // Call wall — orange
+const PW_COLOR = '#c084fc';    // Put wall — purple
+const CAM_BULL = '#22d3ee';    // R3, R4 — cyan
+const CAM_BEAR = '#fb923c';    // S3, S4 — orange
+const PREV_DAY = 'rgba(255,255,255,0.25)';  // Muted white
 
 function fmtET(utcMs: number): string {
   return new Date(utcMs).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' });
@@ -55,6 +67,7 @@ const TF_MAP: Record<string, { apiTf: string; label: string; barMins: number }> 
   '1h': { apiTf: '1h', label: '1H', barMins: 60 }, '1d': { apiTf: '1d', label: '1D', barMins: 1440 },
 };
 const FONT = "'JetBrains Mono', 'SF Mono', monospace";
+const FONT_BRAND = "'Oxanium', 'JetBrains Mono', monospace";
 
 interface LevelDef { price: number; label: string; color: string; style: number; width?: number; group: string; }
 
@@ -114,26 +127,26 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
       const chart = createChart(el, {
         width: el.clientWidth, height: el.clientHeight,
         layout: {
-          background: { type: ColorType.Solid, color: '#131722' },
-          textColor: 'rgba(209,212,220,0.85)',  // ★ Brighter axis text
+          background: { type: ColorType.Solid, color: BG_CHART },
+          textColor: 'rgba(255,255,255,0.5)',
           fontFamily: FONT,
-          fontSize: 12,  // ★ Larger axis labels (was 11)
+          fontSize: 11,
         },
         grid: {
-          vertLines: { color: 'rgba(42,46,57,0.4)' },  // ★ Slightly more visible grid
-          horzLines: { color: 'rgba(42,46,57,0.4)' },
+          vertLines: { color: GRID_COLOR },
+          horzLines: { color: GRID_COLOR },
         },
         crosshair: {
           mode: CrosshairMode.Normal,
-          vertLine: { color: 'rgba(120,123,134,0.5)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#2a2e39' },
-          horzLine: { color: 'rgba(120,123,134,0.5)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#2a2e39' },
+          vertLine: { color: 'rgba(255,255,255,0.12)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#161b22' },
+          horzLine: { color: 'rgba(255,255,255,0.12)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#161b22' },
         },
         rightPriceScale: {
-          borderColor: 'rgba(42,46,57,0.6)',
+          borderColor: 'rgba(255,255,255,0.04)',
           scaleMargins: { top: 0.04, bottom: 0.18 },
         },
         timeScale: {
-          borderColor: 'rgba(42,46,57,0.6)',
+          borderColor: 'rgba(255,255,255,0.04)',
           timeVisible: true, secondsVisible: false,
           rightOffset: 8,  // ★ More room on the right
           barSpacing: 9,   // ★ Slightly wider bars
@@ -162,8 +175,8 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
       volumeSeriesRef.current = volSeries;
 
       const vwap = chart.addLineSeries({
-        color: '#2962ff',
-        lineWidth: 2,  // ★ Thicker VWAP line (was 1)
+        color: VWAP_COLOR,
+        lineWidth: 2,
         lineStyle: LineStyle.Solid,
         crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false,
       });
@@ -177,12 +190,13 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
         const p = pressureMapRef.current[param.time as number];
         if (p) {
           const sp = Math.round((p.bp || 0) - (p.brp || 0));
-          const sessionLabel = p.s === 'pre' ? '<span style="color:#ffc107;margin-right:8px">PRE</span>' : p.s === 'post' ? '<span style="color:#ffc107;margin-right:8px">AH</span>' : '';
+          const sessionLabel = p.s === 'pre' ? '<span style="color:#ffc107;margin-right:8px;font-size:9px;letter-spacing:0.5px">PRE</span>' : p.s === 'post' ? '<span style="color:#ffc107;margin-right:8px;font-size:9px;letter-spacing:0.5px">AH</span>' : '';
+          const sep = '<span style="width:1px;height:12px;background:rgba(255,255,255,0.08);display:inline-block;margin:0 8px;vertical-align:middle"></span>';
           el.innerHTML = sessionLabel +
-            `<span style="color:#26a69a;font-weight:700">▲ ${Math.round(p.bp || 0)}</span><span style="color:rgba(209,212,220,0.2);margin:0 6px">|</span>` +
-            `<span style="color:#ef5350;font-weight:700">▼ ${Math.round(p.brp || 0)}</span><span style="color:rgba(209,212,220,0.2);margin:0 6px">|</span>` +
-            `<span style="color:${sp >= 0 ? '#26a69a' : '#ef5350'};font-weight:700">Δ${sp >= 0 ? '+' : ''}${sp}</span><span style="color:rgba(209,212,220,0.2);margin:0 6px">|</span>` +
-            `<span style="color:rgba(209,212,220,0.6);font-weight:600">Vol ${formatVolume(p.v || 0)}</span>`;
+            `<span style="color:#00dc82;font-weight:700">▲ ${Math.round(p.bp || 0)}</span>${sep}` +
+            `<span style="color:#ff4757;font-weight:700">▼ ${Math.round(p.brp || 0)}</span>${sep}` +
+            `<span style="color:${sp >= 0 ? '#00dc82' : '#ff4757'};font-weight:700">Δ${sp >= 0 ? '+' : ''}${sp}</span>${sep}` +
+            `<span style="color:rgba(255,255,255,0.45);font-weight:600">Vol ${formatVolume(p.v || 0)}</span>`;
         } else { el.innerHTML = ''; }
       });
 
@@ -216,7 +230,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
         candleByTime.set(timeSec, { time: timeSec, open: bar.o, high: bar.h, low: bar.l, close: bar.c });
       }
       if (!isExt) vwapByTime.set(timeSec, bar.vw);
-      volumeByTime.set(timeSec, { time: timeSec, value: bar.v, color: isExt ? (isUp ? 'rgba(38,166,154,0.15)' : 'rgba(239,83,80,0.15)') : (isUp ? 'rgba(38,166,154,0.35)' : 'rgba(239,83,80,0.35)') });
+      volumeByTime.set(timeSec, { time: timeSec, value: bar.v, color: isExt ? (isUp ? 'rgba(0,220,130,0.18)' : 'rgba(255,71,87,0.18)') : (isUp ? 'rgba(0,220,130,0.45)' : 'rgba(255,71,87,0.45)') });
       pressureMap[timeSec] = { bp: bar.bp ?? 0, brp: bar.brp ?? 0, v: bar.v, s: bar.s };
       const { dayStr } = getETTime(timeSec);
       if (dayStr === todayStr) { totalVol += bar.v; barCount++; }
@@ -252,10 +266,10 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
       if (dayStr !== lastDay && hour === 9 && minute >= 30 && minute < 35) {
         markers.push({
           time: candle.time, position: 'aboveBar',
-          color: 'rgba(255,255,255,0.5)',  // ★ Brighter marker
+          color: 'rgba(255,255,255,0.35)',
           shape: 'arrowDown',
           text: `OPEN ${dayStr.slice(5)}`,
-          size: 1,  // ★ Bigger marker (was 0.5)
+          size: 1,
         });
         lastDay = dayStr;
       }
@@ -273,21 +287,25 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     const allLevels: Record<string, LevelDef> = {};
     const lastBar = bars[bars.length - 1];
     const vwapPrice = levels.vwap || lastBar?.vw;
-    if (vwapPrice && groupVis.vwap) allLevels.vwap = { price: vwapPrice, label: 'VWAP', color: '#2962ff', style: LineStyle.Solid, group: 'vwap' };
+    // VWAP — dominant, lighter blue
+    if (vwapPrice && groupVis.vwap) allLevels.vwap = { price: vwapPrice, label: 'VWAP', color: VWAP_COLOR, style: LineStyle.Solid, width: 2, group: 'vwap' };
+    // Walls — orange CW, purple PW
     if (groupVis.walls) {
-      if (levels.callWall) allLevels.cw = { price: levels.callWall, label: 'CW', color: '#ff9800', style: LineStyle.Dashed, group: 'walls' };
-      if (levels.putWall) allLevels.pw = { price: levels.putWall, label: 'PW', color: '#e040fb', style: LineStyle.Dashed, group: 'walls' };
+      if (levels.callWall) allLevels.cw = { price: levels.callWall, label: 'CW', color: CW_COLOR, style: LineStyle.Dashed, group: 'walls' };
+      if (levels.putWall) allLevels.pw = { price: levels.putWall, label: 'PW', color: PW_COLOR, style: LineStyle.Dashed, group: 'walls' };
     }
+    // Cam — cyan for bull, orange for bear
     if (groupVis.cam && camLevels) {
-      allLevels.r4 = { price: camLevels.r4, label: 'R4', color: '#00bcd4', style: LineStyle.Dotted, group: 'cam' };
-      allLevels.r3 = { price: camLevels.r3, label: 'R3', color: '#00bcd4', style: LineStyle.Dashed, group: 'cam' };
-      allLevels.s3 = { price: camLevels.s3, label: 'S3', color: '#ff7043', style: LineStyle.Dashed, group: 'cam' };
-      allLevels.s4 = { price: camLevels.s4, label: 'S4', color: '#ff7043', style: LineStyle.Dotted, group: 'cam' };
+      allLevels.r4 = { price: camLevels.r4, label: 'R4', color: CAM_BULL, style: LineStyle.Dotted, group: 'cam' };
+      allLevels.r3 = { price: camLevels.r3, label: 'R3', color: CAM_BULL, style: LineStyle.Dashed, group: 'cam' };
+      allLevels.s3 = { price: camLevels.s3, label: 'S3', color: CAM_BEAR, style: LineStyle.Dashed, group: 'cam' };
+      allLevels.s4 = { price: camLevels.s4, label: 'S4', color: CAM_BEAR, style: LineStyle.Dotted, group: 'cam' };
     }
+    // Prev day — muted white (demoted)
     if (groupVis.prevDay && prevDayHLC) {
-      allLevels.prevClose = { price: prevDayHLC.c, label: 'PC', color: '#ffeb3b', style: LineStyle.Dashed, width: 1, group: 'prevDay' };
-      allLevels.prevHigh = { price: prevDayHLC.h, label: 'PH', color: '#ffeb3b', style: LineStyle.Dotted, width: 1, group: 'prevDay' };  // ★ Brighter (was 0.45 alpha)
-      allLevels.prevLow = { price: prevDayHLC.l, label: 'PL', color: '#ffeb3b', style: LineStyle.Dotted, width: 1, group: 'prevDay' };   // ★ Brighter
+      allLevels.prevClose = { price: prevDayHLC.c, label: 'PC', color: PREV_DAY, style: LineStyle.Dashed, width: 1, group: 'prevDay' };
+      allLevels.prevHigh = { price: prevDayHLC.h, label: 'PH', color: PREV_DAY, style: LineStyle.Dotted, width: 1, group: 'prevDay' };
+      allLevels.prevLow = { price: prevDayHLC.l, label: 'PL', color: PREV_DAY, style: LineStyle.Dotted, width: 1, group: 'prevDay' };
     }
     // ★ Cleaner level labels: just the abbreviation, price shown on axis
     Object.entries(allLevels).forEach(([key, lv]) => {
@@ -295,12 +313,12 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
         price: lv.price, color: lv.color,
         lineWidth: lv.width || 1, lineStyle: lv.style,
         axisLabelVisible: true,
-        title: lv.label,  // ★ Just "VWAP" not "VWAP 685.87" — price is on the axis
+        title: lv.label,
       });
     });
   }, [bars, groupVis, levels, camLevels, prevDayHLC]);
 
-  const handleTFChange = useCallback(async (tf: string) => { setActiveTF(tf); isInitialLoadRef.current = true; setLoading(true); await fetchCandles(tf); setLoading(false); }, [fetchCandles]);
+  // (TF controlled by page-level selector, chart just receives prop)
 
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -315,90 +333,76 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
 
   const toggleGroup = useCallback((group: string) => { setGroupVis(prev => ({ ...prev, [group]: !prev[group as keyof typeof prev] })); }, []);
   const isUp = changePercent >= 0;
-  const priceColor = isUp ? '#26a69a' : '#ef5350';
+  const priceColor = isUp ? CANDLE_UP : CANDLE_DOWN;
+
+  // Chip config matches new level colors
+  const chipConfig = [
+    { group: 'vwap', label: 'VWAP', color: VWAP_COLOR },
+    { group: 'walls', label: 'CW / PW', color: CW_COLOR },
+    ...(camLevels ? [{ group: 'cam', label: 'Cam', color: CAM_BULL }] : []),
+    ...(prevDayHLC ? [{ group: 'prevDay', label: 'Prev Day', color: 'rgba(255,255,255,0.4)' }] : []),
+  ];
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#131722', overflow: 'hidden', fontFamily: FONT }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: BG_CHART, overflow: 'hidden', fontFamily: FONT }}>
 
-      {/* ── TOOLBAR ── ★ Taller, bigger fonts ★ */}
+      {/* ── TOOLBAR — simplified, no TF buttons ── */}
       <div style={{
         display: 'flex', alignItems: 'center',
-        height: 44,  // ★ Was 38
-        padding: '0 16px',  // ★ More breathing room
-        background: '#131722', borderBottom: '1px solid rgba(42,46,57,0.6)',
-        gap: 12,  // ★ Was 10
+        height: 40,
+        padding: '0 14px',
+        background: BG_TOOLBAR, borderBottom: `1px solid rgba(255,255,255,0.04)`,
+        gap: 10,
         flexShrink: 0,
       }}>
-        <span style={{ fontSize: 16, fontWeight: 700, color: '#fff', letterSpacing: 0.3 }}>{ticker}</span>
-        <span style={{ fontSize: 15, fontWeight: 600, color: priceColor }}>${price.toFixed(2)}</span>
+        <span style={{ fontSize: 14, fontWeight: 800, color: '#fff', letterSpacing: 0.3, fontFamily: FONT_BRAND }}>{ticker}</span>
+        <span style={{ fontSize: 14, fontWeight: 700, color: priceColor }}>${price.toFixed(2)}</span>
         <span style={{
-          fontSize: 12, fontWeight: 600, padding: '3px 8px', borderRadius: 4,  // ★ Was 10px
-          background: isUp ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)', color: priceColor,
+          fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+          background: isUp ? 'rgba(0,220,130,0.1)' : 'rgba(255,71,87,0.1)',
+          color: priceColor,
+          border: `1px solid ${isUp ? 'rgba(0,220,130,0.12)' : 'rgba(255,71,87,0.12)'}`,
         }}>
           {isUp ? '+' : ''}{changePercent.toFixed(2)}%
         </span>
 
         {sessionStats && (
           <>
-            <div style={{ width: 1, height: 20, background: 'rgba(42,46,57,0.6)' }} />
-            <span style={{ fontSize: 11, color: 'rgba(209,212,220,0.55)', letterSpacing: 0.3 }}>
-              Vol {formatVolume(sessionStats.totalVol)}
-            </span>
+            <div style={{ width: 1, height: 18, background: BORDER }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ fontSize: 8, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase' as const, color: 'rgba(255,255,255,0.25)' }}>Vol</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>{formatVolume(sessionStats.totalVol)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ fontSize: 8, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase' as const, color: 'rgba(255,255,255,0.25)' }}>Bars</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>{sessionStats.barCount}</span>
+            </div>
           </>
         )}
 
-        <div style={{ width: 1, height: 20, background: 'rgba(42,46,57,0.6)' }} />
+        <div style={{ width: 1, height: 18, background: BORDER }} />
 
-        {/* TF buttons */}
-        <div style={{ display: 'flex', gap: 2 }}>
-          {Object.entries(TF_MAP).map(([key, cfg]) => (
-            <button key={key} onClick={() => handleTFChange(key)}
-              style={{
-                background: activeTF === key ? 'rgba(41,98,255,0.25)' : 'transparent',
-                color: activeTF === key ? '#fff' : 'rgba(209,212,220,0.5)',
-                border: activeTF === key ? '1px solid rgba(41,98,255,0.4)' : '1px solid transparent',
-                fontFamily: 'inherit',
-                fontSize: 12,  // ★ Was 10.5
-                fontWeight: activeTF === key ? 700 : 500,
-                padding: '4px 10px',
-                borderRadius: 4,
-                cursor: 'pointer',
-                transition: 'all 0.12s',
-              }}
-            >
-              {cfg.label}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ width: 1, height: 20, background: 'rgba(42,46,57,0.6)' }} />
-
-        {/* Level toggle chips */}
-        <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
-          {[
-            { group: 'vwap', label: 'VWAP', color: '#2962ff' },
-            { group: 'walls', label: 'CW / PW', color: '#ff9800' },
-            ...(camLevels ? [{ group: 'cam', label: 'Cam', color: '#00bcd4' }] : []),
-            ...(prevDayHLC ? [{ group: 'prevDay', label: 'Prev Day', color: '#ffeb3b' }] : []),
-          ].map(chip => {
+        {/* Level toggle chips — updated colors */}
+        <div style={{ display: 'flex', gap: 5, marginLeft: 'auto' }}>
+          {chipConfig.map(chip => {
             const vis = groupVis[chip.group as keyof typeof groupVis];
             return (
               <div key={chip.group} onClick={() => toggleGroup(chip.group)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 4,
-                  fontSize: 11,  // ★ Was 9
+                  fontSize: 9,
                   fontWeight: 600,
-                  padding: '3px 8px',  // ★ More padding
+                  padding: '2px 8px',
                   borderRadius: 4,
                   cursor: 'pointer', userSelect: 'none',
                   transition: 'opacity 0.15s',
                   color: chip.color,
-                  borderColor: chip.color + '50',
-                  borderWidth: 1, borderStyle: 'solid',
+                  border: `1px solid ${chip.color}33`,
+                  background: vis ? `${chip.color}0F` : 'transparent',
                   opacity: vis ? 1 : 0.25,
                 }}
               >
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: chip.color }} />
+                <span style={{ width: 4, height: 4, borderRadius: '50%', background: chip.color }} />
                 {chip.label}
               </div>
             );
@@ -408,26 +412,28 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
 
       {/* ── CHART AREA ── */}
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-        {/* Pressure readout overlay */}
+        {/* Pressure readout overlay — blur backdrop */}
         <div style={{ position: 'absolute', top: 8, left: 12, zIndex: 5, pointerEvents: 'none', fontFamily: FONT }}>
           <div
             id="yodha-pressure-readout"
             style={{
-              background: 'rgba(19,23,34,0.92)',
+              background: 'rgba(10,14,20,0.92)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
               padding: '5px 12px',
               borderRadius: 5,
-              border: '1px solid rgba(42,46,57,0.5)',
-              fontSize: 12,  // ★ Was 10
-              minHeight: 22,
+              border: `1px solid ${BORDER}`,
+              fontSize: 10,
+              minHeight: 20,
             }}
           />
         </div>
 
         {loading && (
-          <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(19,23,34,0.7)' }}>
+          <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(13,17,23,0.7)' }}>
             <div style={{ textAlign: 'center' }}>
-              <div style={{ width: 28, height: 28, border: '2px solid rgba(38,166,154,0.3)', borderTopColor: '#26a69a', borderRadius: '50%', animation: 'yodha-spin 0.8s linear infinite', margin: '0 auto 8px' }} />
-              <span style={{ color: 'rgba(209,212,220,0.5)', fontSize: 13, fontFamily: FONT }}>Loading {ticker}...</span>
+              <div style={{ width: 28, height: 28, border: '2px solid rgba(0,220,130,0.2)', borderTopColor: CANDLE_UP, borderRadius: '50%', animation: 'yodha-spin 0.8s linear infinite', margin: '0 auto 8px' }} />
+              <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontFamily: FONT }}>Loading {ticker}...</span>
               <style>{`@keyframes yodha-spin { to { transform: rotate(360deg); } }`}</style>
             </div>
           </div>
