@@ -354,7 +354,9 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     try {
       barCountRef.current = candleData.length;
       cs.setData(candleData);
-      if (vwapSeriesRef.current) vwapSeriesRef.current.setData(vwapData);
+      if (vwapSeriesRef.current) {
+        vwapSeriesRef.current.setData(groupVis.vwap ? vwapData : []);
+      }
       if (volumeSeriesRef.current) volumeSeriesRef.current.setData(volumeData);
       drawLevels();
       collectSessionTimes(candleData);
@@ -412,10 +414,8 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     Object.values(activeLevelsRef.current).forEach((pl) => { try { cs.removePriceLine(pl); } catch {} });
     activeLevelsRef.current = {};
     const allLevels: Record<string, LevelDef> = {};
-    const lastBar = bars[bars.length - 1];
-    const vwapPrice = levels.vwap || lastBar?.vw;
-    // VWAP — dominant, lighter blue
-    if (vwapPrice && groupVis.vwap) allLevels.vwap = { price: vwapPrice, label: 'VWAP', color: VWAP_COLOR, style: LineStyle.Solid, width: 2, group: 'vwap' };
+    // VWAP is handled by the dynamic vwapSeriesRef line series (sloping line from bar.vw)
+    // No static horizontal price line needed — it conflicts with the real VWAP curve
     // Walls — orange CW, purple PW
     if (groupVis.walls) {
       if (levels.callWall) allLevels.cw = { price: levels.callWall, label: 'CW', color: CW_COLOR, style: LineStyle.Dashed, group: 'walls' };
