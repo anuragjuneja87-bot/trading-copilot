@@ -46,7 +46,7 @@ export const getDataConfig = () => DATA_CONFIG[getDataMode()];
 // WATCHLIST STORE (with hydration recovery)
 // ============================================================================
 
-const DEFAULT_WATCHLIST = ['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA', 'AMD', 'META', 'MSFT'];
+const DEFAULT_WATCHLIST = ['SPY', 'QQQ', 'NVDA', 'META', 'AAPL', 'GOOG', 'AMD', 'TSLA'];
 const MAX_WATCHLIST_SIZE = 20;
 
 // Validate that a watchlist is reasonable

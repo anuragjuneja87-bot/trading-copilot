@@ -539,6 +539,7 @@ interface AskYodhaChatProps {
   relativeStrength?: YodhaAnalysisProps['relativeStrength'];
   mlPrediction?: MLPrediction | null;
   volumePressure?: number;
+  sidebarMode?: boolean;
 }
 
 /** Build a comprehensive context string from all war room data */
@@ -752,26 +753,35 @@ function getContextSuggestions(
 }
 
 export function AskYodhaChat(props: AskYodhaChatProps) {
-  const { ticker, price, levels, marketSession, changePercent } = props;
+  const { ticker, price, levels, marketSession, changePercent, sidebarMode } = props;
   const [query, setQuery] = useState('');
-  const [answer, setAnswer] = useState('');
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; text: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const suggestions = useMemo(
     () => getContextSuggestions(ticker, marketSession, levels, changePercent),
     [ticker, marketSession, levels, changePercent]
   );
 
-  // Reset answer when ticker changes
-  useEffect(() => { setAnswer(''); }, [ticker]);
+  // Reset messages when ticker changes
+  useEffect(() => { setMessages([]); }, [ticker]);
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, loading]);
 
   const handleAsk = useCallback(async (q?: string) => {
     const question = q || query.trim();
     if (!question) return;
     setLoading(true);
-    setAnswer('');
+    setMessages(prev => [...prev, { role: 'user', text: question }]);
+    setQuery('');
     try {
       const warRoomContext = buildWarRoomContext(props);
       const res = await fetch('/api/ai/ask', {
@@ -782,20 +792,155 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
         }),
       });
       const data = await res.json();
-      if (!res.ok || !data.success) {
-        setAnswer(`Error: ${data.error || `HTTP ${res.status}`}`);
-      } else {
-        setAnswer(data.data?.message || data.answer || data.data?.answer || data.fullResponse || 'No response received.');
-      }
+      const answer = (!res.ok || !data.success)
+        ? `Error: ${data.error || `HTTP ${res.status}`}`
+        : (data.data?.message || data.answer || data.data?.answer || data.fullResponse || 'No response received.');
+      setMessages(prev => [...prev, { role: 'assistant', text: answer }]);
     } catch (err: any) {
-      setAnswer(`Error: ${err.message}`);
+      setMessages(prev => [...prev, { role: 'assistant', text: `Error: ${err.message}` }]);
     } finally {
       setLoading(false);
-      setQuery('');
     }
   }, [query, props]);
 
   const borderColor = focused || loading ? COLORS.cyan : 'rgba(0,229,255,0.15)';
+
+  // ── SIDEBAR MODE — full-height chat panel ──
+  if (sidebarMode) {
+    return (
+      <div className="flex flex-col h-full" style={{ background: 'transparent' }}>
+        {/* Header */}
+        <div className="px-4 py-3 flex items-center gap-2.5 border-b flex-shrink-0" style={{ borderColor: COLORS.cardBorder }}>
+          <YodhaGlowIcon size={22} pulse={messages.length === 0 && !loading} />
+          <div className="flex-1">
+            <span className="text-xs font-bold tracking-wide" style={{ color: COLORS.cyan, fontFamily: "'Oxanium', monospace" }}>
+              ASK YODHA
+            </span>
+            <span className="text-[11px] ml-1.5" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              AI Analysis
+            </span>
+          </div>
+          {messages.length > 0 && (
+            <button
+              onClick={() => setMessages([])}
+              className="text-xs text-gray-400 hover:text-white transition-colors px-2 py-0.5 rounded"
+              style={{ background: 'rgba(255,255,255,0.04)' }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {/* Scrollable message area */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar px-3 py-3 space-y-3">
+          {/* Welcome + suggestions when no messages */}
+          {messages.length === 0 && !loading && (
+            <div className="space-y-3">
+              <div className="text-center py-6">
+                <div className="text-sm text-gray-400 mb-4">
+                  Ask anything about <span className="font-bold text-white">{ticker}</span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {suggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleAsk(s)}
+                    className="text-left px-3 py-2.5 rounded-lg text-sm transition-all duration-200"
+                    style={{
+                      color: 'rgba(255,255,255,0.75)',
+                      background: 'rgba(0,229,255,0.05)',
+                      border: `1px solid ${COLORS.cyan}20`,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = `${COLORS.cyan}60`;
+                      e.currentTarget.style.background = `${COLORS.cyan}12`;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = `${COLORS.cyan}20`;
+                      e.currentTarget.style.background = 'rgba(0,229,255,0.05)';
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Message history */}
+          {messages.map((msg, i) => (
+            <div key={i} className={msg.role === 'user' ? 'flex justify-end' : ''}>
+              {msg.role === 'user' ? (
+                <div
+                  className="max-w-[85%] px-3 py-2 rounded-lg text-sm text-white font-medium"
+                  style={{ background: `${COLORS.cyan}18`, border: `1px solid ${COLORS.cyan}25` }}
+                >
+                  {msg.text}
+                </div>
+              ) : (
+                <div
+                  className="px-3 py-2.5 rounded-lg text-sm text-gray-200 leading-relaxed whitespace-pre-wrap"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
+                >
+                  {msg.text}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Loading indicator */}
+          {loading && (
+            <div className="flex items-center gap-2 px-1">
+              <div className="flex gap-1">
+                <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: COLORS.cyan, animationDelay: '0ms' }} />
+                <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: COLORS.cyan, animationDelay: '150ms' }} />
+                <div className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: COLORS.cyan, animationDelay: '300ms' }} />
+              </div>
+              <span className="text-xs text-gray-400">Analyzing {ticker}...</span>
+            </div>
+          )}
+        </div>
+
+        {/* Pinned input at bottom */}
+        <div className="px-3 py-3 border-t flex-shrink-0" style={{ borderColor: COLORS.cardBorder }}>
+          <div
+            className="flex items-center gap-2 px-3 py-2.5 rounded-lg transition-all"
+            style={{
+              background: 'rgba(0,229,255,0.04)',
+              border: `1px solid ${focused ? COLORS.cyan : `${COLORS.cyan}20`}`,
+            }}
+          >
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAsk()}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder={`Ask about ${ticker}...`}
+              className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 focus:outline-none"
+              style={{ fontFamily: "'Oxanium', monospace" }}
+              disabled={loading}
+            />
+            <button
+              onClick={() => handleAsk()}
+              disabled={loading || !query.trim()}
+              className="p-1.5 rounded-md transition-all duration-200 disabled:opacity-20"
+              style={{ color: COLORS.cyan }}
+            >
+              {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── INLINE MODE — original compact card (fallback) ──
+  const latestAnswer = messages.length > 0 ? messages[messages.length - 1] : null;
+  const answer = latestAnswer?.role === 'assistant' ? latestAnswer.text : '';
 
   return (
     <div
@@ -808,14 +953,10 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
           : `0 0 10px ${COLORS.cyan}06`,
       }}
     >
-      {/* Header with glowing icon */}
       <div className="px-4 pt-3.5 pb-1 flex items-center gap-2.5">
         <YodhaGlowIcon size={24} pulse={!answer && !loading} />
         <div className="flex-1">
-          <span
-            className="text-xs font-bold tracking-wide"
-            style={{ color: COLORS.cyan, fontFamily: "'Oxanium', monospace" }}
-          >
+          <span className="text-xs font-bold tracking-wide" style={{ color: COLORS.cyan, fontFamily: "'Oxanium', monospace" }}>
             ASK YODHA
           </span>
           <span className="text-[11px] ml-2" style={{ color: 'rgba(255,255,255,0.45)' }}>
@@ -824,7 +965,7 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
         </div>
         {answer && (
           <button
-            onClick={() => setAnswer('')}
+            onClick={() => setMessages([])}
             className="text-[11px] text-gray-300 hover:text-white transition-colors px-2 py-0.5 rounded"
             style={{ background: 'rgba(255,255,255,0.04)' }}
           >
@@ -833,46 +974,25 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
         )}
       </div>
 
-      {/* Answer area */}
       {answer && (
         <div className="px-4 pt-2 pb-3">
           <div
             className="rounded-lg px-4 py-3"
-            style={{
-              background: `linear-gradient(135deg, ${COLORS.cyan}08, ${COLORS.purple}05)`,
-              border: `1px solid ${COLORS.cyan}15`,
-            }}
+            style={{ background: `linear-gradient(135deg, ${COLORS.cyan}08, ${COLORS.purple}05)`, border: `1px solid ${COLORS.cyan}15` }}
           >
             <p className="text-sm text-gray-100 leading-relaxed whitespace-pre-wrap">{answer}</p>
           </div>
         </div>
       )}
 
-      {/* Suggestions — only show when no answer */}
       {!answer && !loading && (
         <div className="px-4 pt-1 pb-1 flex flex-wrap gap-1.5">
           {suggestions.map((s, i) => (
-            <button
-              key={i}
-              onClick={() => { setQuery(s); handleAsk(s); }}
+            <button key={i} onClick={() => handleAsk(s)}
               className="group px-3 py-1.5 rounded-full text-[11px] transition-all duration-200"
-              style={{
-                color: 'rgba(255,255,255,0.85)',
-                background: 'rgba(0,229,255,0.08)',
-                border: `1px solid ${COLORS.cyan}30`,
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = COLORS.cyan;
-                e.currentTarget.style.color = '#fff';
-                e.currentTarget.style.background = `${COLORS.cyan}20`;
-                e.currentTarget.style.boxShadow = `0 0 10px ${COLORS.cyan}25`;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = `${COLORS.cyan}30`;
-                e.currentTarget.style.color = 'rgba(255,255,255,0.85)';
-                e.currentTarget.style.background = 'rgba(0,229,255,0.08)';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
+              style={{ color: 'rgba(255,255,255,0.85)', background: 'rgba(0,229,255,0.08)', border: `1px solid ${COLORS.cyan}30` }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = COLORS.cyan; e.currentTarget.style.background = `${COLORS.cyan}20`; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = `${COLORS.cyan}30`; e.currentTarget.style.background = 'rgba(0,229,255,0.08)'; }}
             >
               {s}
             </button>
@@ -880,7 +1000,6 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
         </div>
       )}
 
-      {/* Loading state */}
       {loading && !answer && (
         <div className="px-4 pt-2 pb-1 flex items-center gap-2">
           <div className="flex gap-1">
@@ -892,31 +1011,19 @@ export function AskYodhaChat(props: AskYodhaChatProps) {
         </div>
       )}
 
-      {/* Input bar */}
       <div className="px-4 py-3 flex items-center gap-2">
-        <input
-          ref={inputRef}
-          type="text"
-          value={query}
+        <input ref={inputRef} type="text" value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAsk()}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
           placeholder={`Ask about ${ticker}...`}
           className="flex-1 bg-transparent text-sm text-white placeholder-gray-400 focus:outline-none"
           style={{ fontFamily: "'Oxanium', monospace" }}
           disabled={loading}
         />
-        <button
-          onClick={() => handleAsk()}
-          disabled={loading || !query.trim()}
+        <button onClick={() => handleAsk()} disabled={loading || !query.trim()}
           className="p-2 rounded-lg transition-all duration-200 disabled:opacity-20"
-          style={{
-            background: query.trim() ? `${COLORS.cyan}20` : 'transparent',
-            color: COLORS.cyan,
-            boxShadow: query.trim() ? `0 0 8px ${COLORS.cyan}20` : 'none',
-          }}
-        >
+          style={{ background: query.trim() ? `${COLORS.cyan}20` : 'transparent', color: COLORS.cyan }}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </button>
       </div>

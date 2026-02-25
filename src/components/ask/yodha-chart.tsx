@@ -1,15 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 
 /* ════════════════════════════════════════════════════════════════
    YODHA CHART — Professional candlestick chart
    
-   Standard green/red candles (close > open = green).
-   Pre/post market bars rendered with lower opacity.
-   Volume sub-pane at bottom.
-   Pressure overlay on crosshair hover (supplementary info).
-   X-axis zoom fix: fitContent only on initial load, not polls.
+   Readability-focused: larger fonts, better contrast, clear levels.
+   Standard green/red candles. Pre/post market dimmed.
+   Volume sub-pane. X-axis zoom preserved across polls.
    ════════════════════════════════════════════════════════════════ */
 
 interface Bar {
@@ -23,6 +21,7 @@ interface YodhaChartProps {
   marketSession: 'pre-market' | 'open' | 'after-hours' | 'closed';
   levels: { callWall: number | null; putWall: number | null; gexFlip: number | null; maxPain?: number | null; vwap?: number | null; };
   prevDayHLC?: { h: number; l: number; c: number };
+  todayOHL?: any;
 }
 
 const CANDLE_UP = '#26a69a';
@@ -77,10 +76,14 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
   const [sessionStats, setSessionStats] = useState<{ totalVol: number; barCount: number } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const camLevels = prevDayHLC ? (() => {
-    const R = prevDayHLC.h - prevDayHLC.l;
-    return { r4: +(prevDayHLC.c + R * 1.1 / 2).toFixed(2), r3: +(prevDayHLC.c + R * 1.1 / 4).toFixed(2), s3: +(prevDayHLC.c - R * 1.1 / 4).toFixed(2), s4: +(prevDayHLC.c - R * 1.1 / 2).toFixed(2) };
-  })() : (levels as any)?.r3 ? { r4: (levels as any).r4, r3: (levels as any).r3, s3: (levels as any).s3, s4: (levels as any).s4 } : null;
+  const camLevels = useMemo(() => {
+    if (prevDayHLC) {
+      const R = prevDayHLC.h - prevDayHLC.l;
+      return { r4: +(prevDayHLC.c + R * 1.1 / 2).toFixed(2), r3: +(prevDayHLC.c + R * 1.1 / 4).toFixed(2), s3: +(prevDayHLC.c - R * 1.1 / 4).toFixed(2), s4: +(prevDayHLC.c - R * 1.1 / 2).toFixed(2) };
+    }
+    if ((levels as any)?.r3 != null) return { r4: (levels as any).r4, r3: (levels as any).r3, s3: (levels as any).s3, s4: (levels as any).s4 };
+    return null;
+  }, [prevDayHLC, (levels as any)?.r3, (levels as any)?.r4, (levels as any)?.s3, (levels as any)?.s4]);
 
   useEffect(() => {
     const mapped = timeframe?.toLowerCase().replace(/\s/g, '') || '5m';
@@ -98,6 +101,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     } catch (e) { console.error('[YodhaChart] fetch error:', e); }
   }, [ticker]);
 
+  // ── Initialize chart ──
   useEffect(() => {
     if (!mainRef.current) return;
     let destroyed = false;
@@ -109,27 +113,63 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
       const el = mainRef.current!;
       const chart = createChart(el, {
         width: el.clientWidth, height: el.clientHeight,
-        layout: { background: { type: ColorType.Solid, color: '#131722' }, textColor: 'rgba(209,212,220,0.65)', fontFamily: FONT, fontSize: 11 },
-        grid: { vertLines: { color: 'rgba(42,46,57,0.3)' }, horzLines: { color: 'rgba(42,46,57,0.3)' } },
-        crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(120,123,134,0.4)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: 'rgba(42,46,57,0.95)' }, horzLine: { color: 'rgba(120,123,134,0.4)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: 'rgba(42,46,57,0.95)' } },
-        rightPriceScale: { borderColor: 'rgba(42,46,57,0.6)', scaleMargins: { top: 0.04, bottom: 0.18 } },
-        timeScale: { borderColor: 'rgba(42,46,57,0.6)', timeVisible: true, secondsVisible: false, rightOffset: 5, barSpacing: 8, minBarSpacing: 2, visible: true, tickMarkFormatter: (time: number, type: number) => { const ms = (time as number) * 1000; return type <= 2 ? fmtDateET(ms) : fmtET(ms); } },
+        layout: {
+          background: { type: ColorType.Solid, color: '#131722' },
+          textColor: 'rgba(209,212,220,0.85)',  // ★ Brighter axis text
+          fontFamily: FONT,
+          fontSize: 12,  // ★ Larger axis labels (was 11)
+        },
+        grid: {
+          vertLines: { color: 'rgba(42,46,57,0.4)' },  // ★ Slightly more visible grid
+          horzLines: { color: 'rgba(42,46,57,0.4)' },
+        },
+        crosshair: {
+          mode: CrosshairMode.Normal,
+          vertLine: { color: 'rgba(120,123,134,0.5)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#2a2e39' },
+          horzLine: { color: 'rgba(120,123,134,0.5)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#2a2e39' },
+        },
+        rightPriceScale: {
+          borderColor: 'rgba(42,46,57,0.6)',
+          scaleMargins: { top: 0.04, bottom: 0.18 },
+        },
+        timeScale: {
+          borderColor: 'rgba(42,46,57,0.6)',
+          timeVisible: true, secondsVisible: false,
+          rightOffset: 8,  // ★ More room on the right
+          barSpacing: 9,   // ★ Slightly wider bars
+          minBarSpacing: 3,
+          visible: true,
+          tickMarkFormatter: (time: number, type: number) => {
+            const ms = (time as number) * 1000;
+            return type <= 2 ? fmtDateET(ms) : fmtET(ms);
+          },
+        },
         localization: { timeFormatter: (t: number) => fmtET((t as number) * 1000) + ' ET' },
         handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
         handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
       });
       chartRef.current = chart;
 
-      const cs = chart.addCandlestickSeries({ upColor: CANDLE_UP, downColor: CANDLE_DOWN, borderUpColor: CANDLE_UP, borderDownColor: CANDLE_DOWN, wickUpColor: CANDLE_UP, wickDownColor: CANDLE_DOWN });
+      const cs = chart.addCandlestickSeries({
+        upColor: CANDLE_UP, downColor: CANDLE_DOWN,
+        borderUpColor: CANDLE_UP, borderDownColor: CANDLE_DOWN,
+        wickUpColor: CANDLE_UP, wickDownColor: CANDLE_DOWN,
+      });
       candleSeriesRef.current = cs;
 
       const volSeries = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'volume' });
       volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
       volumeSeriesRef.current = volSeries;
 
-      const vwap = chart.addLineSeries({ color: '#2962ff', lineWidth: 1, lineStyle: LineStyle.Solid, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false });
+      const vwap = chart.addLineSeries({
+        color: '#2962ff',
+        lineWidth: 2,  // ★ Thicker VWAP line (was 1)
+        lineStyle: LineStyle.Solid,
+        crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false,
+      });
       vwapSeriesRef.current = vwap;
 
+      // Crosshair data overlay
       chart.subscribeCrosshairMove((param: any) => {
         const el = document.getElementById('yodha-pressure-readout');
         if (!el) return;
@@ -137,12 +177,12 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
         const p = pressureMapRef.current[param.time as number];
         if (p) {
           const sp = Math.round((p.bp || 0) - (p.brp || 0));
-          const sessionLabel = p.s === 'pre' ? '<span style="color:#ffc107;margin-right:6px;font-size:9px">PRE</span>' : p.s === 'post' ? '<span style="color:#ffc107;margin-right:6px;font-size:9px">AH</span>' : '';
+          const sessionLabel = p.s === 'pre' ? '<span style="color:#ffc107;margin-right:8px">PRE</span>' : p.s === 'post' ? '<span style="color:#ffc107;margin-right:8px">AH</span>' : '';
           el.innerHTML = sessionLabel +
-            `<span style="color:#26a69a;font-weight:700">▲ ${Math.round(p.bp || 0)}</span><span style="color:rgba(209,212,220,0.15);margin:0 5px">|</span>` +
-            `<span style="color:#ef5350;font-weight:700">▼ ${Math.round(p.brp || 0)}</span><span style="color:rgba(209,212,220,0.15);margin:0 5px">|</span>` +
-            `<span style="color:${sp >= 0 ? '#26a69a' : '#ef5350'};font-weight:700">Δ${sp >= 0 ? '+' : ''}${sp}</span><span style="color:rgba(209,212,220,0.15);margin:0 5px">|</span>` +
-            `<span style="color:rgba(209,212,220,0.45);font-weight:600">Vol ${formatVolume(p.v || 0)}</span>`;
+            `<span style="color:#26a69a;font-weight:700">▲ ${Math.round(p.bp || 0)}</span><span style="color:rgba(209,212,220,0.2);margin:0 6px">|</span>` +
+            `<span style="color:#ef5350;font-weight:700">▼ ${Math.round(p.brp || 0)}</span><span style="color:rgba(209,212,220,0.2);margin:0 6px">|</span>` +
+            `<span style="color:${sp >= 0 ? '#26a69a' : '#ef5350'};font-weight:700">Δ${sp >= 0 ? '+' : ''}${sp}</span><span style="color:rgba(209,212,220,0.2);margin:0 6px">|</span>` +
+            `<span style="color:rgba(209,212,220,0.6);font-weight:600">Vol ${formatVolume(p.v || 0)}</span>`;
         } else { el.innerHTML = ''; }
       });
 
@@ -156,6 +196,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     return () => { destroyed = true; candleSeriesRef.current = null; volumeSeriesRef.current = null; vwapSeriesRef.current = null; if (chartRef.current) { try { chartRef.current.remove(); } catch {} chartRef.current = null; } };
   }, [ticker]);
 
+  // ── Update chart data ──
   useEffect(() => {
     if (!bars.length || !chartRef.current || !candleSeriesRef.current || !lcRef.current) return;
     const cs = candleSeriesRef.current;
@@ -180,7 +221,12 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
       const { dayStr } = getETTime(timeSec);
       if (dayStr === todayStr) { totalVol += bar.v; barCount++; }
     }
-    setSessionStats(barCount > 0 ? { totalVol, barCount } : null);
+    setSessionStats(prev => {
+      const next = barCount > 0 ? { totalVol, barCount } : null;
+      if (prev && next && prev.totalVol === next.totalVol && prev.barCount === next.barCount) return prev;
+      if (!prev && !next) return prev;
+      return next;
+    });
     const candleData = Array.from(candleByTime.entries()).sort((a, b) => a[0] - b[0]).map(([, d]) => d);
     const vwapData = Array.from(vwapByTime.entries()).sort((a, b) => a[0] - b[0]).map(([time, value]) => ({ time, value }));
     const volumeData = Array.from(volumeByTime.entries()).sort((a, b) => a[0] - b[0]).map(([, d]) => d);
@@ -195,6 +241,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     } catch (e) { if (String(e).indexOf('disposed') === -1) console.error('[YodhaChart] setData:', e); }
   }, [bars, groupVis, levels, camLevels, prevDayHLC]);
 
+  // ── Session markers ──
   const addSessionMarkers = useCallback((candleData: any[]) => {
     const cs = candleSeriesRef.current;
     if (!cs || !candleData.length) return;
@@ -203,13 +250,20 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     for (const candle of candleData) {
       const { hour, minute, dayStr } = getETTime(candle.time);
       if (dayStr !== lastDay && hour === 9 && minute >= 30 && minute < 35) {
-        markers.push({ time: candle.time, position: 'aboveBar', color: 'rgba(255,255,255,0.3)', shape: 'arrowDown', text: `OPEN ${dayStr.slice(5)}`, size: 0.5 });
+        markers.push({
+          time: candle.time, position: 'aboveBar',
+          color: 'rgba(255,255,255,0.5)',  // ★ Brighter marker
+          shape: 'arrowDown',
+          text: `OPEN ${dayStr.slice(5)}`,
+          size: 1,  // ★ Bigger marker (was 0.5)
+        });
         lastDay = dayStr;
       }
     }
     if (markers.length > 0) { try { cs.setMarkers(markers); } catch {} }
   }, []);
 
+  // ── Draw levels ──
   const drawLevels = useCallback(() => {
     const cs = candleSeriesRef.current; const LC = lcRef.current;
     if (!cs || !LC) return;
@@ -232,10 +286,18 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     }
     if (groupVis.prevDay && prevDayHLC) {
       allLevels.prevClose = { price: prevDayHLC.c, label: 'PC', color: '#ffeb3b', style: LineStyle.Dashed, width: 1, group: 'prevDay' };
-      allLevels.prevHigh = { price: prevDayHLC.h, label: 'PH', color: 'rgba(255,235,59,0.45)', style: LineStyle.Dotted, width: 1, group: 'prevDay' };
-      allLevels.prevLow = { price: prevDayHLC.l, label: 'PL', color: 'rgba(255,235,59,0.45)', style: LineStyle.Dotted, width: 1, group: 'prevDay' };
+      allLevels.prevHigh = { price: prevDayHLC.h, label: 'PH', color: '#ffeb3b', style: LineStyle.Dotted, width: 1, group: 'prevDay' };  // ★ Brighter (was 0.45 alpha)
+      allLevels.prevLow = { price: prevDayHLC.l, label: 'PL', color: '#ffeb3b', style: LineStyle.Dotted, width: 1, group: 'prevDay' };   // ★ Brighter
     }
-    Object.entries(allLevels).forEach(([key, lv]) => { activeLevelsRef.current[key] = cs.createPriceLine({ price: lv.price, color: lv.color, lineWidth: lv.width || 1, lineStyle: lv.style, axisLabelVisible: true, title: `${lv.label} ${lv.price.toFixed(2)}` }); });
+    // ★ Cleaner level labels: just the abbreviation, price shown on axis
+    Object.entries(allLevels).forEach(([key, lv]) => {
+      activeLevelsRef.current[key] = cs.createPriceLine({
+        price: lv.price, color: lv.color,
+        lineWidth: lv.width || 1, lineStyle: lv.style,
+        axisLabelVisible: true,
+        title: lv.label,  // ★ Just "VWAP" not "VWAP 685.87" — price is on the axis
+      });
+    });
   }, [bars, groupVis, levels, camLevels, prevDayHLC]);
 
   const handleTFChange = useCallback(async (tf: string) => { setActiveTF(tf); isInitialLoadRef.current = true; setLoading(true); await fetchCandles(tf); setLoading(false); }, [fetchCandles]);
@@ -256,29 +318,121 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
   const priceColor = isUp ? '#26a69a' : '#ef5350';
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#131722', borderRadius: 6, overflow: 'hidden', fontFamily: FONT }}>
-      <div style={{ display: 'flex', alignItems: 'center', height: 38, padding: '0 12px', background: '#131722', borderBottom: '1px solid rgba(42,46,57,0.6)', gap: 10, flexShrink: 0 }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: '#fff', letterSpacing: 0.3 }}>{ticker}</span>
-        <span style={{ fontSize: 13, fontWeight: 600, color: priceColor }}>${price.toFixed(2)}</span>
-        <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 3, background: isUp ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)', color: priceColor }}>{isUp ? '+' : ''}{changePercent.toFixed(2)}%</span>
-        {sessionStats && (<><div style={{ width: 1, height: 18, background: 'rgba(42,46,57,0.6)' }} /><span style={{ fontSize: 9, color: 'rgba(209,212,220,0.4)', letterSpacing: 0.3 }}>Vol {formatVolume(sessionStats.totalVol)}</span></>)}
-        <div style={{ width: 1, height: 18, background: 'rgba(42,46,57,0.6)' }} />
-        <div style={{ display: 'flex', gap: 1 }}>
-          {Object.entries(TF_MAP).map(([key, cfg]) => (<button key={key} onClick={() => handleTFChange(key)} style={{ background: activeTF === key ? 'rgba(41,98,255,0.22)' : 'transparent', color: activeTF === key ? '#fff' : 'rgba(209,212,220,0.4)', border: 'none', fontFamily: 'inherit', fontSize: '10.5px', fontWeight: 500, padding: '4px 9px', borderRadius: 3, cursor: 'pointer', transition: 'all 0.12s' }}>{cfg.label}</button>))}
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#131722', overflow: 'hidden', fontFamily: FONT }}>
+
+      {/* ── TOOLBAR ── ★ Taller, bigger fonts ★ */}
+      <div style={{
+        display: 'flex', alignItems: 'center',
+        height: 44,  // ★ Was 38
+        padding: '0 16px',  // ★ More breathing room
+        background: '#131722', borderBottom: '1px solid rgba(42,46,57,0.6)',
+        gap: 12,  // ★ Was 10
+        flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 16, fontWeight: 700, color: '#fff', letterSpacing: 0.3 }}>{ticker}</span>
+        <span style={{ fontSize: 15, fontWeight: 600, color: priceColor }}>${price.toFixed(2)}</span>
+        <span style={{
+          fontSize: 12, fontWeight: 600, padding: '3px 8px', borderRadius: 4,  // ★ Was 10px
+          background: isUp ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)', color: priceColor,
+        }}>
+          {isUp ? '+' : ''}{changePercent.toFixed(2)}%
+        </span>
+
+        {sessionStats && (
+          <>
+            <div style={{ width: 1, height: 20, background: 'rgba(42,46,57,0.6)' }} />
+            <span style={{ fontSize: 11, color: 'rgba(209,212,220,0.55)', letterSpacing: 0.3 }}>
+              Vol {formatVolume(sessionStats.totalVol)}
+            </span>
+          </>
+        )}
+
+        <div style={{ width: 1, height: 20, background: 'rgba(42,46,57,0.6)' }} />
+
+        {/* TF buttons */}
+        <div style={{ display: 'flex', gap: 2 }}>
+          {Object.entries(TF_MAP).map(([key, cfg]) => (
+            <button key={key} onClick={() => handleTFChange(key)}
+              style={{
+                background: activeTF === key ? 'rgba(41,98,255,0.25)' : 'transparent',
+                color: activeTF === key ? '#fff' : 'rgba(209,212,220,0.5)',
+                border: activeTF === key ? '1px solid rgba(41,98,255,0.4)' : '1px solid transparent',
+                fontFamily: 'inherit',
+                fontSize: 12,  // ★ Was 10.5
+                fontWeight: activeTF === key ? 700 : 500,
+                padding: '4px 10px',
+                borderRadius: 4,
+                cursor: 'pointer',
+                transition: 'all 0.12s',
+              }}
+            >
+              {cfg.label}
+            </button>
+          ))}
         </div>
-        <div style={{ width: 1, height: 18, background: 'rgba(42,46,57,0.6)' }} />
-        <div style={{ display: 'flex', gap: 5, marginLeft: 'auto' }}>
-          {[{ group: 'vwap', label: 'VWAP', color: '#2962ff' }, { group: 'walls', label: 'CW / PW', color: '#ff9800' }, ...(camLevels ? [{ group: 'cam', label: 'Camarilla', color: '#00bcd4' }] : []), ...(prevDayHLC ? [{ group: 'prevDay', label: 'Prev Day', color: '#ffeb3b' }] : [])].map(chip => {
+
+        <div style={{ width: 1, height: 20, background: 'rgba(42,46,57,0.6)' }} />
+
+        {/* Level toggle chips */}
+        <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+          {[
+            { group: 'vwap', label: 'VWAP', color: '#2962ff' },
+            { group: 'walls', label: 'CW / PW', color: '#ff9800' },
+            ...(camLevels ? [{ group: 'cam', label: 'Cam', color: '#00bcd4' }] : []),
+            ...(prevDayHLC ? [{ group: 'prevDay', label: 'Prev Day', color: '#ffeb3b' }] : []),
+          ].map(chip => {
             const vis = groupVis[chip.group as keyof typeof groupVis];
-            return (<div key={chip.group} onClick={() => toggleGroup(chip.group)} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 9, padding: '2px 6px', borderRadius: 3, cursor: 'pointer', userSelect: 'none', transition: 'opacity 0.15s', color: chip.color, borderColor: chip.color + '40', borderWidth: 1, borderStyle: 'solid', opacity: vis ? 1 : 0.2 }}><span style={{ width: 5, height: 5, borderRadius: '50%', background: chip.color }} />{chip.label}</div>);
+            return (
+              <div key={chip.group} onClick={() => toggleGroup(chip.group)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  fontSize: 11,  // ★ Was 9
+                  fontWeight: 600,
+                  padding: '3px 8px',  // ★ More padding
+                  borderRadius: 4,
+                  cursor: 'pointer', userSelect: 'none',
+                  transition: 'opacity 0.15s',
+                  color: chip.color,
+                  borderColor: chip.color + '50',
+                  borderWidth: 1, borderStyle: 'solid',
+                  opacity: vis ? 1 : 0.25,
+                }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: chip.color }} />
+                {chip.label}
+              </div>
+            );
           })}
         </div>
       </div>
+
+      {/* ── CHART AREA ── */}
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-        <div style={{ position: 'absolute', top: 6, left: 10, zIndex: 5, pointerEvents: 'none', fontFamily: FONT }}>
-          <div id="yodha-pressure-readout" style={{ background: 'rgba(19,23,34,0.9)', padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(42,46,57,0.4)', fontSize: 10, minHeight: 20 }} />
+        {/* Pressure readout overlay */}
+        <div style={{ position: 'absolute', top: 8, left: 12, zIndex: 5, pointerEvents: 'none', fontFamily: FONT }}>
+          <div
+            id="yodha-pressure-readout"
+            style={{
+              background: 'rgba(19,23,34,0.92)',
+              padding: '5px 12px',
+              borderRadius: 5,
+              border: '1px solid rgba(42,46,57,0.5)',
+              fontSize: 12,  // ★ Was 10
+              minHeight: 22,
+            }}
+          />
         </div>
-        {loading && (<div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(19,23,34,0.7)' }}><div style={{ textAlign: 'center' }}><div style={{ width: 24, height: 24, border: '2px solid rgba(38,166,154,0.3)', borderTopColor: '#26a69a', borderRadius: '50%', animation: 'yodha-spin 0.8s linear infinite', margin: '0 auto 8px' }} /><span style={{ color: 'rgba(209,212,220,0.4)', fontSize: 11, fontFamily: FONT }}>Loading {ticker}...</span><style>{`@keyframes yodha-spin { to { transform: rotate(360deg); } }`}</style></div></div>)}
+
+        {loading && (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(19,23,34,0.7)' }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ width: 28, height: 28, border: '2px solid rgba(38,166,154,0.3)', borderTopColor: '#26a69a', borderRadius: '50%', animation: 'yodha-spin 0.8s linear infinite', margin: '0 auto 8px' }} />
+              <span style={{ color: 'rgba(209,212,220,0.5)', fontSize: 13, fontFamily: FONT }}>Loading {ticker}...</span>
+              <style>{`@keyframes yodha-spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+          </div>
+        )}
+
         <div ref={mainRef} style={{ width: '100%', height: '100%' }} />
       </div>
     </div>

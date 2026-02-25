@@ -10,9 +10,10 @@ import { RefreshCw, Search, ChevronDown, ChevronRight, Sparkles, Building2, BarC
 import { YodhaLogo, YodhaWordmark } from '@/components/brand/yodha-logo';
 
 // Components
-import { LiveTickerBar } from '@/components/layout/live-ticker-bar';
+// LiveTickerBar removed — scrolling prices are noise for focused analysis
 import { ConfluenceIndicator } from '@/components/war-room/confluence-indicator';
-import { YodhaAnalysis, AskYodhaChat } from '@/components/ask/yodha-analysis';
+import { AskYodhaChat } from '@/components/ask/yodha-analysis';
+import { YodhaThesis } from '@/components/ask/yodha-thesis';
 import { YodhaChart } from '@/components/ask/yodha-chart';
 import { OptionsFlowPanel } from '@/components/ask/options-flow-panel';
 import { DarkPoolPanel } from '@/components/ask/dark-pool-panel';
@@ -324,48 +325,27 @@ function AskPageContent() {
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: COLORS.bg }}>
       <DesktopViewport />
-      <LiveTickerBar />
 
       <div className="flex-1 flex overflow-hidden">
-        {/* ── LEFT SIDEBAR ───────────────────────────────── */}
+        {/* ── LEFT SIDEBAR — Ask Yodha Chat ───────────────────────────────── */}
         <aside
-          className="w-[240px] flex-shrink-0 flex flex-col border-r overflow-hidden"
-          style={{ borderColor: COLORS.cardBorder, background: 'rgba(0,0,0,0.2)' }}
+          className="w-[360px] flex-shrink-0 flex flex-col border-r overflow-hidden"
+          style={{ borderColor: COLORS.cardBorder, background: 'rgba(0,0,0,0.15)' }}
         >
-          {/* ── TODAY'S SESSION ── */}
-          <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
-            <div className="text-[10px] font-bold text-gray-200 uppercase tracking-wider mb-2">Today&apos;s Session</div>
-            <div className="space-y-1">
-              {todayOHL?.o ? (
-                <LevelRow label="Open" value={todayOHL.o} color="rgba(255,255,255,0.6)" currentPrice={data.price} />
-              ) : null}
-              {todayOHL?.h ? (
-                <LevelRow label="High" value={todayOHL.h} color="#26a69a" currentPrice={data.price} />
-              ) : null}
-              {todayOHL?.l ? (
-                <LevelRow label="Low" value={todayOHL.l} color="#ef5350" currentPrice={data.price} />
-              ) : null}
-              {data.levels?.prevClose && (
-                <LevelRow label="Prev Close" value={data.levels.prevClose} color="#ffeb3b" currentPrice={data.price} />
-              )}
-              {data.levels?.vwap && <LevelRow label="VWAP" value={data.levels.vwap} color={COLORS.cyan} currentPrice={data.price} />}
-            </div>
-          </div>
-
-          {/* ── GAMMA LEVELS ── */}
-          <div className="p-3 border-b" style={{ borderColor: COLORS.cardBorder }}>
-            <div className="text-[10px] font-bold text-gray-200 uppercase tracking-wider mb-2">Gamma Levels</div>
-            <div className="space-y-1">
-              <LevelRow label="Call Wall" value={data.levels?.callWall || null} color={COLORS.green} currentPrice={data.price} />
-              <LevelRow label="Put Wall" value={data.levels?.putWall || null} color={COLORS.red} currentPrice={data.price} />
-              <LevelRow label="GEX Flip" value={data.levels?.gexFlip || null} color="#a855f7" currentPrice={data.price} />
-              {data.levels?.maxPain && <LevelRow label="Max Pain" value={data.levels.maxPain} color="#ff9800" currentPrice={data.price} />}
-            </div>
-            <GexContext price={data.price} gexFlip={data.levels?.gexFlip || null} />
-          </div>
-
-          {/* Sidebar spacer */}
-          <div className="flex-1" />
+          <AskYodhaChat
+            ticker={selectedTicker}
+            price={data.price}
+            levels={data.levels}
+            marketSession={data.marketSession}
+            changePercent={data.changePercent}
+            flowStats={data.flow?.stats || null}
+            darkPoolStats={data.darkpool?.stats || null}
+            newsItems={data.news.items}
+            relativeStrength={data.relativeStrength}
+            mlPrediction={mlResult.prediction}
+            volumePressure={volumePressure}
+            sidebarMode
+          />
         </aside>
 
         {/* ── MAIN CONTENT ───────────────────────────────── */}
@@ -395,7 +375,7 @@ function AskPageContent() {
 
               <div className="h-5 w-px bg-white/10 mr-1" />
 
-              {watchlist.slice(0, 5).map((ticker) => (
+              {watchlist.slice(0, 8).map((ticker) => (
                 <button
                   key={ticker}
                   onClick={() => handleSelectTicker(ticker)}
@@ -415,7 +395,7 @@ function AskPageContent() {
                   {ticker}
                 </button>
               ))}
-              {watchlist.length > 5 && <span className="text-xs text-gray-400 font-bold">+{watchlist.length - 5}</span>}
+              {watchlist.length > 8 && <span className="text-xs text-gray-400 font-bold">+{watchlist.length - 8}</span>}
 
               <SymbolSearch onSelect={handleSelectTicker} />
               <div className="flex-1" />
@@ -453,7 +433,7 @@ function AskPageContent() {
 
           {/* ── SCROLLABLE CONTENT ───────────────────────── */}
           <div className="flex-1 overflow-y-auto custom-scrollbar">
-            <div className="p-3 space-y-3 max-w-[1200px] mx-auto">
+            <div className="pr-3 pb-3 pt-3 space-y-3">
 
               {/* ★ TRAFFIC LIGHT BAR — Signal overview at a glance ★ */}
               <ConfluenceIndicator
@@ -461,12 +441,16 @@ function AskPageContent() {
                 darkPoolStats={data.darkpool?.stats}
                 volumePressure={volumePressure || 0}
                 priceVsGexFlip={data.price > (data.levels?.gexFlip || 0) ? 'above' : 'below'}
-                priceChange={data.changePercent}
+                currentPrice={data.price}
+                vwap={data.levels?.vwap || null}
+                relativeStrength={data.relativeStrength}
+                mlPrediction={mlResult.prediction}
+                ticker={selectedTicker}
                 marketSession={data.marketSession}
               />
 
               {/* ★ CHART FIRST — The centerpiece, no scrolling needed ★ */}
-              <div className="h-[580px] rounded overflow-hidden" style={{ border: '1px solid rgba(42,46,57,0.5)' }}>
+              <div className="h-[580px] overflow-hidden">
                 <YodhaChart
                   ticker={selectedTicker}
                   timeframe={timeframe}
@@ -479,43 +463,22 @@ function AskPageContent() {
                     l: data.levels.prevLow,
                     c: data.levels.prevClose,
                   } : undefined}
-                  todayOHL={todayOHL}
                 />
               </div>
 
-              {/* ★ ASK YODHA — CHAT INPUT (right after chart) ★ */}
-              <AskYodhaChat
-                ticker={selectedTicker}
-                price={data.price}
-                levels={data.levels}
-                marketSession={data.marketSession}
-                changePercent={data.changePercent}
-                flowStats={data.flow?.stats || null}
-                darkPoolStats={data.darkpool?.stats || null}
-                newsItems={data.news.items}
-                relativeStrength={data.relativeStrength}
-                mlPrediction={mlResult.prediction}
-                volumePressure={volumePressure}
-              />
-
-              {/* ★ YODHA ANALYSIS — Below chart ★ */}
-              <YodhaAnalysis
+              {/* ★ YODHA THESIS — Below chart ★ */}
+              <YodhaThesis
                 ticker={selectedTicker}
                 price={data.price}
                 changePercent={data.changePercent}
                 flowStats={data.flow?.stats || null}
                 darkPoolStats={data.darkpool?.stats || null}
-                newsItems={data.news.items}
                 relativeStrength={data.relativeStrength}
                 levels={data.levels}
                 marketSession={data.marketSession}
                 volumePressure={volumePressure}
                 mlPrediction={mlResult.prediction}
                 mlLoading={mlResult.isLoading}
-                mlError={mlResult.error}
-                mlMeta={mlResult.meta}
-                mlRefresh={mlResult.refresh}
-                confidenceHistory={mlResult.confidenceHistory}
               />
 
               {/* DETAILED DATA PANELS (collapsible, default collapsed) */}
