@@ -107,13 +107,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, data: { ticker, buckets: [], bucketMinutes: 1, summary: { totalBuy: 0, totalSell: 0 } } });
     }
 
-    // Bucket size
+    // Bucket size — CVD-only chart can handle fine granularity
+    // ★ 1min default for anything up to a full session (390min), 5min for multi-day
     const bucketParam = searchParams.get('bucketMinutes');
     const rangeMs = toTs - fromTs;
     const rangeMinutes = rangeMs / (60 * 1000);
     const bucketSize = bucketParam ? parseInt(bucketParam, 10)
-      : rangeMinutes <= 5 ? 1 : rangeMinutes <= 15 ? 1 : rangeMinutes <= 30 ? 2
-      : rangeMinutes <= 60 ? 5 : rangeMinutes <= 240 ? 5 : rangeMinutes <= 480 ? 15 : 60;
+      : rangeMinutes <= 480 ? 1 : 5;
 
     // ★ Filter to RTH (9:30 AM - 4:00 PM ET) AND within the requested time range
     const filteredBars = bars.filter((bar: any) => {

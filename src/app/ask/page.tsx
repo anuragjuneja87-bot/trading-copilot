@@ -276,9 +276,11 @@ function AskPageContent() {
         const res = await fetch(`/api/market/volume-pressure?ticker=${selectedTicker}`);
         const json = await res.json();
         if (json.success && json.data?.buckets?.length > 0) {
-          const recentBuckets = json.data.buckets.slice(-5);
-          const avgPressure = recentBuckets.reduce((sum: number, b: any) => sum + (b.pressure || 0), 0) / recentBuckets.length;
-          setVolumePressure(Math.round(avgPressure));
+          // ★ Use session-wide totals (matches panel's calculation)
+          const { totalBuy, totalSell } = json.data.summary;
+          const totalVol = totalBuy + totalSell;
+          const sessionPressure = totalVol > 0 ? Math.round(((totalBuy - totalSell) / totalVol) * 100) : 0;
+          setVolumePressure(sessionPressure);
         }
       } catch (err) {
         console.error('[AskPage] Volume pressure error:', err);
