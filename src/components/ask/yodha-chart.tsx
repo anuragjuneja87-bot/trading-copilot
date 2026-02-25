@@ -3,16 +3,14 @@
 import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 
 /* ════════════════════════════════════════════════════════════════
-   YODHA CHART v2 — Redesigned for readability & contrast
+   YODHA CHART v2.1 — Session separator + background refinement
    
-   v2 changes:
-   - Candles: #00dc82 / #ff4757 (vivid, high contrast vs #0d1117 bg)
-   - Background: #0d1117 (deeper black), grid 2.5% white
-   - VWAP: #4da6ff (lighter blue, visible), levels: unified color system
-   - Volume: 45% RTH / 18% ext opacity
-   - TF buttons removed (controlled by page-level selector)
-   - Auto-scroll to latest bars on load + poll
-   - Snap-to-now button when user scrolls away
+   v2.1 changes:
+   - Vertical dashed line at 9:30 AM ET (pre-market / RTH separator)
+   - Removed "OPEN" text marker (cleaner chart)
+   - Background: #0b0f19 (deep navy-black, richer depth)
+   - Toolbar: #080c16 (matches new bg)
+   - Canvas overlay for session lines (synced with scroll/zoom)
    ════════════════════════════════════════════════════════════════ */
 
 interface Bar {
@@ -29,7 +27,7 @@ interface YodhaChartProps {
   todayOHL?: any;
 }
 
-// ── NEW COLOR SYSTEM — v2 redesign ──
+// ── COLOR SYSTEM — v2.1 ──
 const CANDLE_UP = '#00dc82';
 const CANDLE_DOWN = '#ff4757';
 const CANDLE_UP_EXT = 'rgba(0,220,130,0.35)';
@@ -37,8 +35,8 @@ const CANDLE_DOWN_EXT = 'rgba(255,71,87,0.35)';
 const CANDLE_UP_WICK_EXT = 'rgba(0,220,130,0.5)';
 const CANDLE_DOWN_WICK_EXT = 'rgba(255,71,87,0.5)';
 
-const BG_CHART = '#0d1117';
-const BG_TOOLBAR = '#0a0e14';
+const BG_CHART = '#0b0f19';       // ★ Deep navy-black (was #0d1117)
+const BG_TOOLBAR = '#080c16';     // ★ Darker toolbar to match
 const BORDER = 'rgba(255,255,255,0.06)';
 const GRID_COLOR = 'rgba(255,255,255,0.025)';
 const VWAP_COLOR = '#4da6ff';
@@ -47,6 +45,7 @@ const PW_COLOR = '#c084fc';    // Put wall — purple
 const CAM_BULL = '#22d3ee';    // R3, R4 — cyan
 const CAM_BEAR = '#fb923c';    // S3, S4 — orange
 const PREV_DAY = 'rgba(255,255,255,0.25)';  // Muted white
+const SESSION_LINE_COLOR = 'rgba(255,255,255,0.12)';  // ★ Vertical session separator
 
 function fmtET(utcMs: number): string {
   return new Date(utcMs).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' });
@@ -78,6 +77,7 @@ interface LevelDef { price: number; label: string; color: string; style: number;
 
 function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSession, levels, prevDayHLC }: YodhaChartProps) {
   const mainRef = useRef<HTMLDivElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const chartRef = useRef<any>(null);
   const candleSeriesRef = useRef<any>(null);
   const volumeSeriesRef = useRef<any>(null);
@@ -88,6 +88,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
   const isInitialLoadRef = useRef(true);
   const isAtRealTimeRef = useRef(true);
   const barCountRef = useRef(0);
+  const marketOpenTimesRef = useRef<number[]>([]);
 
   const [bars, setBars] = useState<Bar[]>([]);
   const [activeTF, setActiveTF] = useState(timeframe || '5m');
@@ -121,6 +122,49 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
       if (data.bars?.length > 0) setBars(data.bars);
     } catch (e) { console.error('[YodhaChart] fetch error:', e); }
   }, [ticker]);
+
+  // ── Draw session separator lines on overlay canvas ──
+  const drawSessionLines = useCallback(() => {
+    const chart = chartRef.current;
+    const canvas = overlayCanvasRef.current;
+    if (!chart || !canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Match canvas size to actual pixel dimensions
+    const rect = canvas.parentElement?.getBoundingClientRect();
+    if (!rect) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = rect.width;
+    const h = rect.height;
+
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    ctx.clearRect(0, 0, w, h);
+
+    const timeScale = chart.timeScale();
+    for (const openTime of marketOpenTimesRef.current) {
+      const x = timeScale.timeToCoordinate(openTime as any);
+      if (x === null || x < 0 || x > w) continue;
+
+      // Dashed vertical line
+      ctx.strokeStyle = SESSION_LINE_COLOR;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x) + 0.5, 0);
+      ctx.lineTo(Math.round(x) + 0.5, h);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }, []);
 
   // ── Initialize chart ──
   useEffect(() => {
@@ -156,8 +200,8 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
         timeScale: {
           borderColor: 'rgba(255,255,255,0.04)',
           timeVisible: true, secondsVisible: false,
-          rightOffset: 8,  // ★ More room on the right
-          barSpacing: 9,   // ★ Slightly wider bars
+          rightOffset: 8,
+          barSpacing: 9,
           minBarSpacing: 3,
           visible: true,
           tickMarkFormatter: (time: number, type: number) => {
@@ -208,10 +252,14 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
         } else { el.innerHTML = ''; }
       });
 
-      const ro = new ResizeObserver(() => { chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }); });
+      const ro = new ResizeObserver(() => {
+        chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+        // ★ Redraw session lines on resize
+        requestAnimationFrame(drawSessionLines);
+      });
       ro.observe(el);
 
-      // Track if user is scrolled to the latest bars (for auto-scroll on poll)
+      // ★ Redraw session lines on scroll/zoom
       chart.timeScale().subscribeVisibleLogicalRangeChange((range: any) => {
         if (!range) return;
         try {
@@ -220,6 +268,8 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
           isAtRealTimeRef.current = atEnd;
           setShowSnapBtn(!atEnd);
         } catch { /* ignore during init */ }
+        // Redraw vertical session lines when view changes
+        requestAnimationFrame(drawSessionLines);
       });
 
       isInitialLoadRef.current = true;
@@ -271,38 +321,30 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
       if (vwapSeriesRef.current) vwapSeriesRef.current.setData(vwapData);
       if (volumeSeriesRef.current) volumeSeriesRef.current.setData(volumeData);
       drawLevels();
-      addSessionMarkers(candleData);
+      collectSessionTimes(candleData);
       if (isInitialLoadRef.current && chartRef.current) {
-        // scrollToRealTime shows latest bars at right edge (not fitContent which squishes everything)
         chartRef.current.timeScale().scrollToRealTime();
         isInitialLoadRef.current = false;
       } else if (isAtRealTimeRef.current && chartRef.current) {
-        // On poll updates, keep latest bars visible if user hasn't scrolled away
         chartRef.current.timeScale().scrollToRealTime();
       }
+      // Draw session lines after data is set and chart has rendered
+      requestAnimationFrame(drawSessionLines);
     } catch (e) { if (String(e).indexOf('disposed') === -1) console.error('[YodhaChart] setData:', e); }
   }, [bars, groupVis, levels, camLevels, prevDayHLC]);
 
-  // ── Session markers ──
-  const addSessionMarkers = useCallback((candleData: any[]) => {
-    const cs = candleSeriesRef.current;
-    if (!cs || !candleData.length) return;
-    const markers: any[] = [];
+  // ── Collect 9:30 AM ET timestamps for vertical session lines ──
+  const collectSessionTimes = useCallback((candleData: any[]) => {
+    const openTimes: number[] = [];
     let lastDay = '';
     for (const candle of candleData) {
       const { hour, minute, dayStr } = getETTime(candle.time);
       if (dayStr !== lastDay && hour === 9 && minute >= 30 && minute < 35) {
-        markers.push({
-          time: candle.time, position: 'aboveBar',
-          color: 'rgba(255,255,255,0.35)',
-          shape: 'arrowDown',
-          text: `OPEN ${dayStr.slice(5)}`,
-          size: 1,
-        });
+        openTimes.push(candle.time);
         lastDay = dayStr;
       }
     }
-    if (markers.length > 0) { try { cs.setMarkers(markers); } catch {} }
+    marketOpenTimesRef.current = openTimes;
   }, []);
 
   // ── Draw levels ──
@@ -453,7 +495,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
           <div
             id="yodha-pressure-readout"
             style={{
-              background: 'rgba(10,14,20,0.92)',
+              background: 'rgba(8,12,22,0.92)',
               backdropFilter: 'blur(8px)',
               WebkitBackdropFilter: 'blur(8px)',
               padding: '5px 12px',
@@ -466,7 +508,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
         </div>
 
         {loading && (
-          <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(13,17,23,0.7)' }}>
+          <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(11,15,25,0.7)' }}>
             <div style={{ textAlign: 'center' }}>
               <div style={{ width: 28, height: 28, border: '2px solid rgba(0,220,130,0.2)', borderTopColor: CANDLE_UP, borderRadius: '50%', animation: 'yodha-spin 0.8s linear infinite', margin: '0 auto 8px' }} />
               <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontFamily: FONT }}>Loading {ticker}...</span>
@@ -482,7 +524,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
             style={{
               position: 'absolute', bottom: 32, right: 88, zIndex: 8,
               width: 32, height: 32,
-              background: 'rgba(10,14,20,0.9)',
+              background: 'rgba(8,12,22,0.9)',
               backdropFilter: 'blur(8px)',
               border: `1px solid rgba(0,220,130,0.25)`,
               borderRadius: 6,
@@ -496,11 +538,23 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
             }}
             title="Snap to latest"
             onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,220,130,0.15)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(10,14,20,0.9)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(8,12,22,0.9)'; }}
           >
             ⟫
           </button>
         )}
+
+        {/* ★ Session separator overlay canvas */}
+        <canvas
+          ref={overlayCanvasRef}
+          style={{
+            position: 'absolute',
+            top: 0, left: 0,
+            width: '100%', height: '100%',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        />
 
         <div ref={mainRef} style={{ width: '100%', height: '100%' }} />
       </div>
