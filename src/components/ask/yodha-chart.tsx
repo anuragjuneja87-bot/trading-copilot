@@ -3,11 +3,16 @@
 import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 
 /* ════════════════════════════════════════════════════════════════
-   YODHA CHART — Professional candlestick chart
+   YODHA CHART v2 — Redesigned for readability & contrast
    
-   Readability-focused: larger fonts, better contrast, clear levels.
-   Standard green/red candles. Pre/post market dimmed.
-   Volume sub-pane. X-axis zoom preserved across polls.
+   v2 changes:
+   - Candles: #00dc82 / #ff4757 (vivid, high contrast vs #0d1117 bg)
+   - Background: #0d1117 (deeper black), grid 2.5% white
+   - VWAP: #4da6ff (lighter blue, visible), levels: unified color system
+   - Volume: 45% RTH / 18% ext opacity
+   - TF buttons removed (controlled by page-level selector)
+   - Auto-scroll to latest bars on load + poll
+   - Snap-to-now button when user scrolls away
    ════════════════════════════════════════════════════════════════ */
 
 interface Bar {
@@ -81,12 +86,15 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
   const pressureMapRef = useRef<Record<number, { bp: number; brp: number; v: number; s?: string }>>({});
   const lcRef = useRef<any>(null);
   const isInitialLoadRef = useRef(true);
+  const isAtRealTimeRef = useRef(true);
+  const barCountRef = useRef(0);
 
   const [bars, setBars] = useState<Bar[]>([]);
   const [activeTF, setActiveTF] = useState(timeframe || '5m');
   const [groupVis, setGroupVis] = useState({ vwap: true, walls: true, cam: true, prevDay: true });
   const [loading, setLoading] = useState(true);
   const [sessionStats, setSessionStats] = useState<{ totalVol: number; barCount: number } | null>(null);
+  const [showSnapBtn, setShowSnapBtn] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const camLevels = useMemo(() => {
@@ -101,7 +109,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
   useEffect(() => {
     const mapped = timeframe?.toLowerCase().replace(/\s/g, '') || '5m';
     const valid = TF_MAP[mapped] ? mapped : '5m';
-    if (valid !== activeTF) { setActiveTF(valid); isInitialLoadRef.current = true; setLoading(true); fetchCandles(valid).then(() => setLoading(false)); }
+    if (valid !== activeTF) { setActiveTF(valid); isInitialLoadRef.current = true; isAtRealTimeRef.current = true; setShowSnapBtn(false); setLoading(true); fetchCandles(valid).then(() => setLoading(false)); }
   }, [timeframe]);
 
   const fetchCandles = useCallback(async (tf: string) => {
@@ -202,6 +210,18 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
 
       const ro = new ResizeObserver(() => { chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }); });
       ro.observe(el);
+
+      // Track if user is scrolled to the latest bars (for auto-scroll on poll)
+      chart.timeScale().subscribeVisibleLogicalRangeChange((range: any) => {
+        if (!range) return;
+        try {
+          const total = barCountRef.current || 200;
+          const atEnd = range.to >= total - 8;
+          isAtRealTimeRef.current = atEnd;
+          setShowSnapBtn(!atEnd);
+        } catch { /* ignore during init */ }
+      });
+
       isInitialLoadRef.current = true;
       setLoading(true);
       await fetchCandles(activeTF);
@@ -246,12 +266,20 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     const volumeData = Array.from(volumeByTime.entries()).sort((a, b) => a[0] - b[0]).map(([, d]) => d);
     pressureMapRef.current = pressureMap;
     try {
+      barCountRef.current = candleData.length;
       cs.setData(candleData);
       if (vwapSeriesRef.current) vwapSeriesRef.current.setData(vwapData);
       if (volumeSeriesRef.current) volumeSeriesRef.current.setData(volumeData);
       drawLevels();
       addSessionMarkers(candleData);
-      if (isInitialLoadRef.current && chartRef.current) { chartRef.current.timeScale().fitContent(); isInitialLoadRef.current = false; }
+      if (isInitialLoadRef.current && chartRef.current) {
+        // scrollToRealTime shows latest bars at right edge (not fitContent which squishes everything)
+        chartRef.current.timeScale().scrollToRealTime();
+        isInitialLoadRef.current = false;
+      } else if (isAtRealTimeRef.current && chartRef.current) {
+        // On poll updates, keep latest bars visible if user hasn't scrolled away
+        chartRef.current.timeScale().scrollToRealTime();
+      }
     } catch (e) { if (String(e).indexOf('disposed') === -1) console.error('[YodhaChart] setData:', e); }
   }, [bars, groupVis, levels, camLevels, prevDayHLC]);
 
@@ -330,6 +358,14 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     pollRef.current = setInterval(() => fetchCandles(activeTF), interval);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [activeTF, marketSession, fetchCandles]);
+
+  const snapToNow = useCallback(() => {
+    if (chartRef.current) {
+      chartRef.current.timeScale().scrollToRealTime();
+      isAtRealTimeRef.current = true;
+      setShowSnapBtn(false);
+    }
+  }, []);
 
   const toggleGroup = useCallback((group: string) => { setGroupVis(prev => ({ ...prev, [group]: !prev[group as keyof typeof prev] })); }, []);
   const isUp = changePercent >= 0;
@@ -437,6 +473,33 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
               <style>{`@keyframes yodha-spin { to { transform: rotate(360deg); } }`}</style>
             </div>
           </div>
+        )}
+
+        {/* Snap to latest button — shows when user scrolls away */}
+        {showSnapBtn && (
+          <button
+            onClick={snapToNow}
+            style={{
+              position: 'absolute', bottom: 32, right: 88, zIndex: 8,
+              width: 32, height: 32,
+              background: 'rgba(10,14,20,0.9)',
+              backdropFilter: 'blur(8px)',
+              border: `1px solid rgba(0,220,130,0.25)`,
+              borderRadius: 6,
+              color: CANDLE_UP,
+              fontSize: 16,
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.15s',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            }}
+            title="Snap to latest"
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,220,130,0.15)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(10,14,20,0.9)'; }}
+          >
+            ⟫
+          </button>
         )}
 
         <div ref={mainRef} style={{ width: '100%', height: '100%' }} />
