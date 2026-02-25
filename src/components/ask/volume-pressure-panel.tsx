@@ -6,14 +6,14 @@ import { COLORS } from '@/lib/echarts-theme';
 import { isMarketClosed, getLastTradingDay, formatTradingDay, getMarketStatus } from '@/lib/market-utils';
 
 /* ════════════════════════════════════════════════════════════════
-   VOLUME PRESSURE PANEL v2.1 — Color-changing CVD
+   VOLUME PRESSURE PANEL v2.2 — Extended hours CVD
    
-   v2.1 changes:
-   - CVD line changes color at zero crossing (green > 0, red < 0)
-   - Auto-scroll to latest data (dataZoom end: 100)
-   - Session pressure = total buy / total sell across ALL buckets
-   - Rolling pressure = last 15 buckets (trend indicator)
-   - Zero reference line for visual clarity
+   v2.2 changes:
+   - Pre-market + after-hours included in CVD (continuous line)
+   - Session markers: vertical dashed lines at 9:30 AM + 4:00 PM
+   - Background tint for pre-market / after-hours regions
+   - Session pressure computed across all sessions
+   - Bold 3px CVD line with 35% area fill
    ════════════════════════════════════════════════════════════════ */
 
 interface VolumePressurePanelProps {
@@ -34,6 +34,7 @@ interface TickBucket {
   sellVolume: number;
   totalVolume: number;
   pressure: number;
+  session?: 'pre' | 'rth' | 'post';
 }
 
 const ROLLING_WINDOW = 15;
@@ -42,7 +43,8 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
   const [data, setData] = useState<TickBucket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [bucketLabel, setBucketLabel] = useState('15min buckets');
+  const [bucketLabel, setBucketLabel] = useState('1min buckets');
+  const [sessionBounds, setSessionBounds] = useState<{ rthOpenIdx: number; rthCloseIdx: number }>({ rthOpenIdx: -1, rthCloseIdx: -1 });
   
   const marketStatus = getMarketStatus();
   const isClosed = isMarketClosed();
@@ -70,6 +72,9 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
           setData(json.data.buckets || []);
           if (json.data.bucketMinutes) {
             setBucketLabel(`${json.data.bucketMinutes}min buckets`);
+          }
+          if (json.data.sessionBoundaries) {
+            setSessionBounds(json.data.sessionBoundaries);
           }
         } else {
           setError(json.error || 'Failed to load');
@@ -104,13 +109,11 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
       totalSell += d.sellVolume;
     });
     
-    // Session-wide pressure
     const totalVol = totalBuy + totalSell;
     const sessionPressure = totalVol > 0 
       ? Math.round(((totalBuy - totalSell) / totalVol) * 100) 
       : 0;
     
-    // Rolling pressure (last N buckets)
     const recentBuckets = data.slice(-ROLLING_WINDOW);
     const recentBuy = recentBuckets.reduce((s, d) => s + d.buyVolume, 0);
     const recentSell = recentBuckets.reduce((s, d) => s + d.sellVolume, 0);
@@ -153,15 +156,67 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
     return v.toString();
   };
 
-  // ── CVD chart with color change at zero ──
+  // ── CVD chart with session markers ──
   const chartOption = useMemo(() => {
     if (!metrics) return null;
     
-    // ★ Dynamic area fill based on CVD direction
     const lastCvd = metrics.cvdData[metrics.cvdData.length - 1] || 0;
     const isPositiveCvd = lastCvd >= 0;
-    const fillTop = isPositiveCvd ? 'rgba(0,220,130,0.22)' : 'rgba(255,71,87,0.22)';
-    const fillBottom = isPositiveCvd ? 'rgba(0,220,130,0.02)' : 'rgba(255,71,87,0.02)';
+    const fillTop = isPositiveCvd ? 'rgba(0,220,130,0.35)' : 'rgba(255,71,87,0.35)';
+    const fillBottom = isPositiveCvd ? 'rgba(0,220,130,0.03)' : 'rgba(255,71,87,0.03)';
+    const lineColor = isPositiveCvd ? '#00dc82' : '#ff4757';
+
+    // ★ Build session boundary markLines and markAreas
+    const markLineData: any[] = [];
+    const markAreaData: any[] = [];
+
+    // RTH open line (9:30 AM)
+    if (sessionBounds.rthOpenIdx >= 0 && sessionBounds.rthOpenIdx < metrics.timeLabels.length) {
+      markLineData.push({
+        xAxis: metrics.timeLabels[sessionBounds.rthOpenIdx],
+        label: {
+          show: true,
+          formatter: 'OPEN',
+          position: 'start',
+          fontSize: 9,
+          color: 'rgba(255,255,255,0.4)',
+          fontWeight: 'bold',
+        },
+        lineStyle: { color: 'rgba(255,255,255,0.15)', type: 'dashed', width: 1 },
+      });
+    }
+
+    // RTH close line (4:00 PM)
+    if (sessionBounds.rthCloseIdx >= 0 && sessionBounds.rthCloseIdx < metrics.timeLabels.length) {
+      markLineData.push({
+        xAxis: metrics.timeLabels[sessionBounds.rthCloseIdx],
+        label: {
+          show: true,
+          formatter: 'CLOSE',
+          position: 'start',
+          fontSize: 9,
+          color: 'rgba(255,255,255,0.4)',
+          fontWeight: 'bold',
+        },
+        lineStyle: { color: 'rgba(255,255,255,0.15)', type: 'dashed', width: 1 },
+      });
+    }
+
+    // ★ Pre-market tint (start of data to RTH open)
+    if (sessionBounds.rthOpenIdx > 0) {
+      markAreaData.push([
+        { xAxis: metrics.timeLabels[0], itemStyle: { color: 'rgba(99,102,241,0.05)' } },
+        { xAxis: metrics.timeLabels[sessionBounds.rthOpenIdx] },
+      ]);
+    }
+
+    // ★ After-hours tint (RTH close to end of data)
+    if (sessionBounds.rthCloseIdx >= 0 && sessionBounds.rthCloseIdx < metrics.timeLabels.length - 1) {
+      markAreaData.push([
+        { xAxis: metrics.timeLabels[sessionBounds.rthCloseIdx], itemStyle: { color: 'rgba(99,102,241,0.05)' } },
+        { xAxis: metrics.timeLabels[metrics.timeLabels.length - 1] },
+      ]);
+    }
 
     return {
       tooltip: {
@@ -172,23 +227,16 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
         formatter: (params: any) => {
           const time = params[0]?.axisValue || '';
           const cvd = params[0]?.value || 0;
+          const idx = params[0]?.dataIndex || 0;
+          const bucket = data[idx];
+          const sessionTag = bucket?.session === 'pre' ? ' <span style="color:#818cf8;font-size:10px">PRE</span>' 
+                           : bucket?.session === 'post' ? ' <span style="color:#818cf8;font-size:10px">AH</span>' : '';
           const color = cvd >= 0 ? '#00dc82' : '#ff4757';
-          return `<div style="font-weight:bold;margin-bottom:4px">${time}</div>` +
+          return `<div style="font-weight:bold;margin-bottom:4px">${time}${sessionTag}</div>` +
             `<div style="color:${color}">CVD: ${formatVol(cvd)}</div>`;
         },
       },
-      // ★ Color-changing CVD: green above zero, red below zero
-      visualMap: {
-        show: false,
-        type: 'piecewise',
-        dimension: 1,
-        pieces: [
-          { gte: 0, color: '#00dc82' },
-          { lt: 0, color: '#ff4757' },
-        ],
-        seriesIndex: 0,
-      },
-      grid: { top: 16, right: 55, bottom: 45, left: 55 },
+      grid: { top: 20, right: 55, bottom: 45, left: 55 },
       dataZoom: [
         {
           type: 'inside',
@@ -210,8 +258,8 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
           handleStyle: { color: '#00dc82', borderColor: '#00dc82' },
           textStyle: { color: '#666', fontSize: 9 },
           dataBackground: {
-            lineStyle: { color: 'rgba(0,220,130,0.3)' },
-            areaStyle: { color: 'rgba(0,220,130,0.05)' },
+            lineStyle: { color: `${lineColor}50` },
+            areaStyle: { color: `${lineColor}0A` },
           },
         },
       ],
@@ -224,8 +272,6 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
       },
       yAxis: {
         type: 'value',
-        // ★ Scale to actual data range, not anchored to 0
-        // This makes CVD movements visible instead of a flat line at the top
         min: 'dataMin',
         max: 'dataMax',
         axisLine: { show: false },
@@ -240,7 +286,7 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
           data: metrics.cvdData,
           smooth: 0.3,
           symbol: 'none',
-          lineStyle: { width: 2.5 },
+          lineStyle: { width: 3, color: lineColor },
           areaStyle: {
             color: {
               type: 'linear',
@@ -251,23 +297,22 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
               ],
             },
           },
-          // ★ Zero reference line
+          itemStyle: { color: lineColor },
+          // ★ Session boundary markers
           markLine: {
             silent: true,
             symbol: 'none',
-            label: { show: false },
-            lineStyle: {
-              color: 'rgba(255,255,255,0.1)',
-              type: 'dashed',
-              width: 1,
-            },
-            data: [{ yAxis: 0 }],
+            data: markLineData,
+          },
+          markArea: {
+            silent: true,
+            data: markAreaData,
           },
           z: 10,
         },
       ],
     };
-  }, [metrics]);
+  }, [metrics, data, sessionBounds]);
 
   return (
     <div 
@@ -295,7 +340,7 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
         </div>
       </div>
 
-      {/* ── Pressure Summary — compact row ── */}
+      {/* ── Pressure Summary ── */}
       <div className="flex items-center gap-4 mb-3 py-2 px-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
         <div className="flex items-center gap-2">
           <span className="text-2xl font-black font-mono" style={{ color: pressureColor }}>
