@@ -107,25 +107,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, data: { ticker, buckets: [], bucketMinutes: 1, summary: { totalBuy: 0, totalSell: 0 } } });
     }
 
-    // Bucket size — CVD-only chart can handle fine granularity
-    // ★ 1min default for anything up to a full session (390min), 5min for multi-day
-    const bucketParam = searchParams.get('bucketMinutes');
-    const rangeMs = toTs - fromTs;
-    const rangeMinutes = rangeMs / (60 * 1000);
-    const bucketSize = bucketParam ? parseInt(bucketParam, 10)
-      : rangeMinutes <= 480 ? 1 : 5;
-
-    // ★ Filter to RTH (9:30 AM - 4:00 PM ET) AND within the requested time range
+    // ★ Filter to RTH (9:30 AM - 4:00 PM ET) using per-bar ET conversion
+    // Note: fromTs/toTs have timezone issues on UTC servers (Vercel), so we only
+    // use the time-of-day check which correctly converts each bar to ET
     const filteredBars = bars.filter((bar: any) => {
       const barDate = new Date(bar.t);
       const barET = new Date(barDate.toLocaleString('en-US', { timeZone: 'America/New_York' }));
       const barMinutes = barET.getHours() * 60 + barET.getMinutes();
-      // Must be within RTH
-      if (barMinutes < 570 || barMinutes >= 960) return false;
-      // ★ Must be within requested time range
-      if (bar.t < fromTs || bar.t > toTs) return false;
-      return true;
+      return barMinutes >= 570 && barMinutes < 960;
     });
+
+    // Bucket size — CVD-only chart can handle fine granularity
+    // ★ Use actual bar count to determine appropriate bucket size
+    const bucketParam = searchParams.get('bucketMinutes');
+    const bucketSize = bucketParam ? parseInt(bucketParam, 10)
+      : filteredBars.length <= 480 ? 1 : 5;
 
     const buckets: Record<string, { buyVolume: number; sellVolume: number; timeMs: number }> = {};
 
