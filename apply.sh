@@ -1,2 +1,2 @@
 cp ~/Downloads/yodha-chart.tsx src/components/ask/yodha-chart.tsx
-git add -A && git commit -m "fix: chart no longer hijacks scroll — Ctrl+scroll to zoom, regular scroll passes to page" && git push origin main
+git add -A && git commit -m "feat: zoom +/−/fit buttons on chart, Ctrl+scroll hint" && git push origin main

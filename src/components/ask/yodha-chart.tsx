@@ -488,6 +488,22 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
     }
   }, []);
 
+  const zoomChart = useCallback((direction: 'in' | 'out' | 'fit') => {
+    if (!chartRef.current) return;
+    const ts = chartRef.current.timeScale();
+    if (direction === 'fit') {
+      ts.fitContent();
+      return;
+    }
+    const range = ts.getVisibleLogicalRange();
+    if (!range) return;
+    const factor = direction === 'in' ? -0.25 : 0.25; // in = shrink range, out = expand
+    const rangeSize = range.to - range.from;
+    const newSize = Math.max(rangeSize * (1 + factor), 10); // min 10 bars visible
+    const center = (range.from + range.to) / 2;
+    ts.setVisibleLogicalRange({ from: center - newSize / 2, to: center + newSize / 2 });
+  }, []);
+
   const toggleGroup = useCallback((group: string) => { setGroupVis(prev => ({ ...prev, [group]: !prev[group as keyof typeof prev] })); }, []);
   const isUp = changePercent >= 0;
   const priceColor = isUp ? CANDLE_UP : CANDLE_DOWN;
@@ -622,6 +638,50 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
             ⟫
           </button>
         )}
+
+        {/* ★ Zoom controls — bottom-left */}
+        <div style={{
+          position: 'absolute', bottom: 32, left: 60, zIndex: 8,
+          display: 'flex', gap: 4,
+        }}>
+          {[
+            { label: '+', action: 'in' as const, title: 'Zoom in' },
+            { label: '−', action: 'out' as const, title: 'Zoom out' },
+            { label: '⊡', action: 'fit' as const, title: 'Fit all data' },
+          ].map(btn => (
+            <button
+              key={btn.action}
+              onClick={() => zoomChart(btn.action)}
+              title={btn.title}
+              style={{
+                width: 28, height: 28,
+                background: 'rgba(8,12,22,0.85)',
+                backdropFilter: 'blur(8px)',
+                border: `1px solid rgba(255,255,255,0.1)`,
+                borderRadius: 5,
+                color: 'rgba(255,255,255,0.5)',
+                fontSize: 15,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.15s',
+                fontFamily: FONT,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+                e.currentTarget.style.color = 'rgba(255,255,255,0.8)';
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(8,12,22,0.85)';
+                e.currentTarget.style.color = 'rgba(255,255,255,0.5)';
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+              }}
+            >
+              {btn.label}
+            </button>
+          ))}
+        </div>
 
         {/* ★ Session separator overlay canvas */}
         <canvas
