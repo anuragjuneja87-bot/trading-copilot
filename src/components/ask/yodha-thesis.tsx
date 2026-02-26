@@ -459,7 +459,7 @@ function ClosedBody({ thesis, ticker }: { thesis: ThesisV2Response; ticker: stri
         <div className="mt-3">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <SetupItem label="Breakout" price={thesis.bullSetup.entry.price} context={thesis.bullSetup.entry.context} color={C.green} />
-            {thesis.bullSetup.targets.map((t, i) => <SetupItem key={i} label={i === 0 ? 'Upside Target' : 'Support'} price={t.price} context={t.context} color={i === 0 ? C.green : C.cyan} />)}
+            {thesis.bullSetup.targets.map((t, i) => <SetupItem key={i} label={`Upside Target ${i + 1}`} price={t.price} context={t.context} color={C.green} />)}
             <SetupItem label="Risk Level" price={thesis.bullSetup.stop.price} context={thesis.bullSetup.stop.context} color={C.red} />
           </div>
         </div>
