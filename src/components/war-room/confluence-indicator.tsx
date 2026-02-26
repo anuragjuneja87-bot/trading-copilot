@@ -75,8 +75,8 @@ const DOT_COLORS: Record<string, string> = {
 
 const FLOW_MIN_TRADES = 5, FLOW_MIN_PREMIUM = 50000, FLOW_HIGH_TRADES = 20, FLOW_HIGH_PREMIUM = 500000;
 const DP_MIN_PRINTS = 5, DP_HIGH_PRINTS = 10, DP_HIGH_VALUE = 5000000;
-const ACTIVITY_MIN_PREMIUM = 50000;
-const ACTIVITY_MIN_DP_VALUE = 100000;
+const ACTIVITY_MIN_PREMIUM = 10000;   // $10K — Polygon returns small per-contract trades
+const ACTIVITY_MIN_DP_VALUE = 50000;   // $50K — lower to show more prints
 const WHALE_SIZE = 500;
 const WHALE_PREMIUM = 500000;
 
@@ -263,7 +263,7 @@ export function ConfluenceIndicator({
         const isSweep = t.tradeType === 'SWEEP' || t.tradeType === 'INTERMARKET_SWEEP' || t.isSweep;
         const isWhale = (t.size >= WHALE_SIZE) || (premium >= WHALE_PREMIUM);
         const isUnusualOI = t.isUnusual || (t.openInterest > 0 && t.size > t.openInterest * 5);
-        const isBlock = premium >= 100000 && !isSweep;
+        const isBlock = premium >= 15000 && !isSweep;  // $15K+ non-sweep = block
 
         let type: ActivityAlert['type'];
         if (isSweep)            type = 'SWEEP';
