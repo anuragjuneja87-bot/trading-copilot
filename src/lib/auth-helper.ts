@@ -49,20 +49,4 @@ export async function getUser(request?: NextRequest): Promise<AuthUser | null> {
   return null;
 }
 
-// NextAuth type augmentation (so session.user.id works)
-declare module 'next-auth' {
-  interface Session {
-    user: {
-      id: string;
-      name?: string | null;
-      email?: string | null;
-      image?: string | null;
-    };
-  }
-}
-
-declare module 'next-auth/jwt' {
-  interface JWT {
-    id?: string;
-  }
-}
+// NextAuth type augmentation (Session.user.id) lives in src/types/next-auth.d.ts

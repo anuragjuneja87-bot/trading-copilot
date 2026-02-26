@@ -80,13 +80,13 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   userId: null,
-  tier: 'FREE',
+  tier: 'free',
   setAuth: (userId, tier) => set({
     isAuthenticated: !!userId,
     userId,
-    tier: tier || 'FREE',
+    tier: tier || 'free',
   }),
-  clearAuth: () => set({ isAuthenticated: false, userId: null, tier: 'FREE' }),
+  clearAuth: () => set({ isAuthenticated: false, userId: null, tier: 'free' }),
 }));
 
 // ============================================================================
