@@ -1,2 +1,2 @@
-cp ~/Downloads/confluence-indicator.tsx src/components/war-room/confluence-indicator.tsx
-git add -A && git commit -m "feat: aggregated unusual signals replace raw prints — sweep clusters, DP accumulation, premium spikes" && git push origin main
+cp ~/Downloads/yodha-chart.tsx src/components/ask/yodha-chart.tsx
+git add -A && git commit -m "fix: chart no longer hijacks scroll — Ctrl+scroll to zoom, regular scroll passes to page" && git push origin main

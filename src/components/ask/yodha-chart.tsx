@@ -85,6 +85,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
   const activeLevelsRef = useRef<Record<string, any>>({});
   const pressureMapRef = useRef<Record<number, { bp: number; brp: number; v: number; s?: string }>>({});
   const lcRef = useRef<any>(null);
+  const wheelHandlerRef = useRef<((e: WheelEvent) => void) | null>(null);
   const isInitialLoadRef = useRef(true);
   const isAtRealTimeRef = useRef(true);
   const barCountRef = useRef(0);
@@ -246,10 +247,31 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
           },
         },
         localization: { timeFormatter: (t: number) => fmtET((t as number) * 1000) + ' ET' },
-        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
-        handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+        handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+        handleScale: { axisPressedMouseMove: true, mouseWheel: false, pinch: true },
       });
       chartRef.current = chart;
+
+      // ★ Ctrl+Scroll to zoom chart, regular scroll passes to page
+      const handleWheel = (e: WheelEvent) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault(); // prevent page zoom
+          const ts = chart.timeScale();
+          const range = ts.getVisibleLogicalRange();
+          if (!range) return;
+          const zoomFactor = e.deltaY > 0 ? 0.1 : -0.1; // scroll down = zoom out
+          const rangeSize = range.to - range.from;
+          const newSize = rangeSize * (1 + zoomFactor);
+          const center = (range.from + range.to) / 2;
+          ts.setVisibleLogicalRange({
+            from: center - newSize / 2,
+            to: center + newSize / 2,
+          });
+        }
+        // No ctrl/meta → event bubbles to page naturally (chart mouseWheel disabled)
+      };
+      el.addEventListener('wheel', handleWheel, { passive: false });
+      wheelHandlerRef.current = handleWheel;
 
       const cs = chart.addCandlestickSeries({
         upColor: CANDLE_UP, downColor: CANDLE_DOWN,
@@ -313,7 +335,7 @@ function YodhaChartInner({ ticker, timeframe, price, changePercent, marketSessio
       await fetchCandles(activeTF);
       setLoading(false);
     })();
-    return () => { destroyed = true; candleSeriesRef.current = null; volumeSeriesRef.current = null; vwapSeriesRef.current = null; if (chartRef.current) { try { chartRef.current.remove(); } catch {} chartRef.current = null; } };
+    return () => { destroyed = true; candleSeriesRef.current = null; volumeSeriesRef.current = null; vwapSeriesRef.current = null; if (wheelHandlerRef.current && mainRef.current) { mainRef.current.removeEventListener('wheel', wheelHandlerRef.current); wheelHandlerRef.current = null; } if (chartRef.current) { try { chartRef.current.remove(); } catch {} chartRef.current = null; } };
   }, [ticker]);
 
   // ── Update chart data ──
