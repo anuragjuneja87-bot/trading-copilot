@@ -1,2 +1,2 @@
-cp ~/Downloads/yodha-chart.tsx src/components/ask/yodha-chart.tsx
-git add -A && git commit -m "feat: zoom +/−/fit buttons on chart, Ctrl+scroll hint" && git push origin main
+cp ~/Downloads/options-flow-panel.tsx src/components/ask/options-flow-panel.tsx
+git add -A && git commit -m "feat: options flow v4 - both line+bar charts, full session fetch" && git push origin main
