@@ -9,12 +9,11 @@ import {
 } from '@/lib/panel-design-system';
 
 /* ════════════════════════════════════════════════════════════════
-   DARK POOL PANEL v3 — Canvas Scatter + Top Prints Table
+   DARK POOL PANEL v3.1 — Canvas Scatter + Top Prints Table
    
-   Metrics strip: Regime | Block Value | Avg vs VWAP | Largest
-   Chart: Scatter (bubble size = value, green above VWAP, red below)
-   Table: Top 5 prints by value
-   Insight: Accumulation/distribution clustering
+   v3.1 fixes:
+   - ★ Y-axis dynamic decimal precision (was showing "$201" x5)
+   - ★ Scatter dot minimum size increased for visibility
    ════════════════════════════════════════════════════════════════ */
 
 interface DarkPoolPanelProps {
@@ -67,16 +66,12 @@ export function DarkPoolPanel({
   const regimeColor = regime === 'ACCUMULATION' ? C.green : regime === 'DISTRIBUTION' ? C.red : C.yellow;
   const regimeBg = regime === 'ACCUMULATION' ? C.greenDim : regime === 'DISTRIBUTION' ? C.redDim : C.yellowDim;
 
-  // ── Computed metrics ──
   const computed = useMemo(() => {
     if (!prints.length) return null;
-
     const totalValue = prints.reduce((sum: number, p: any) => sum + (p.value || p.price * (p.size || 0)), 0);
     const totalShares = prints.reduce((sum: number, p: any) => sum + (p.size || 0), 0);
     const avgPrice = totalShares > 0 ? totalValue / totalShares : 0;
     const dpVsVwap = vwap && avgPrice ? (avgPrice > vwap ? 'ABOVE' : 'BELOW') : null;
-
-    // Largest print
     const largest = prints.reduce((best: any, p: any) => {
       const v = p.value || p.price * (p.size || 0);
       const bv = best.value || best.price * (best.size || 0);
@@ -84,21 +79,14 @@ export function DarkPoolPanel({
     }, prints[0]);
     const largestValue = largest.value || largest.price * (largest.size || 0);
     const largestTs = largest.timestamp || largest.timestampMs;
-
-    // % above VWAP
     const aboveVwapValue = vwap ? prints.reduce((sum: number, p: any) => {
       if (p.price >= vwap) return sum + (p.value || p.price * (p.size || 0));
       return sum;
     }, 0) : 0;
     const aboveVwapPct = totalValue > 0 ? Math.round((aboveVwapValue / totalValue) * 100) : 50;
-
-    return {
-      totalValue, avgPrice, dpVsVwap, largest, largestValue, largestTs,
-      aboveVwapPct, printCount: prints.length,
-    };
+    return { totalValue, avgPrice, dpVsVwap, largest, largestValue, largestTs, aboveVwapPct, printCount: prints.length };
   }, [prints, vwap]);
 
-  // ── Top 5 prints by value ──
   const topPrints = useMemo(() => {
     return [...prints]
       .map(p => ({ ...p, _value: p.value || p.price * (p.size || 0) }))
@@ -106,7 +94,6 @@ export function DarkPoolPanel({
       .slice(0, 5);
   }, [prints]);
 
-  // ── Draw scatter chart ──
   const drawChart = useCallback(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -116,24 +103,20 @@ export function DarkPoolPanel({
     if (!r) return;
     const { ctx, W, H } = r;
 
-    const PAD = { top: 12, right: 50, bottom: 24, left: 50 };
+    const PAD = { top: 12, right: 60, bottom: 24, left: 55 };
     const cW = W - PAD.left - PAD.right;
     const cH = H - PAD.top - PAD.bottom;
 
-    // Compute price/time ranges
     const validPrints = prints.filter((p: any) => p.price > 0 && (p.timestamp || p.timestampMs));
-    if (validPrints.length < 2) return;
+    if (validPrints.length < 1) return;
 
     const prices = validPrints.map((p: any) => p.price);
     const minPrice = Math.min(...prices);
     const maxPrice = Math.max(...prices);
     const priceRange = maxPrice - minPrice || 1;
-    const pricePad = priceRange * 0.08;
+    const pricePad = Math.max(priceRange * 0.12, 0.50); // ★ Min $0.50 padding so dots don't touch edges
 
-    const timestamps = validPrints.map((p: any) => {
-      const ts = p.timestampMs || new Date(p.timestamp).getTime();
-      return ts;
-    });
+    const timestamps = validPrints.map((p: any) => p.timestampMs || new Date(p.timestamp).getTime());
     const minTime = Math.min(...timestamps);
     const maxTime = Math.max(...timestamps);
     const timeRange = maxTime - minTime || 1;
@@ -147,7 +130,7 @@ export function DarkPoolPanel({
     ctx.clearRect(0, 0, W, H);
     drawGridLines(ctx, PAD, W, H);
 
-    // ── VWAP line ──
+    // VWAP line
     if (vwap && vwap >= minPrice - pricePad && vwap <= maxPrice + pricePad) {
       const vwapY = yPos(vwap);
       ctx.strokeStyle = 'rgba(0,229,255,0.3)';
@@ -158,14 +141,13 @@ export function DarkPoolPanel({
       ctx.lineTo(W - PAD.right, Math.round(vwapY) + 0.5);
       ctx.stroke();
       ctx.setLineDash([]);
-
       ctx.fillStyle = 'rgba(0,229,255,0.5)';
       ctx.font = `600 9px ${FONT_MONO}`;
       ctx.textAlign = 'left';
       ctx.fillText(`VWAP $${vwap.toFixed(2)}`, W - PAD.right + 4, vwapY + 3);
     }
 
-    // ── Current price line ──
+    // Current price line
     if (currentPrice && currentPrice >= minPrice - pricePad && currentPrice <= maxPrice + pricePad) {
       const priceY = yPos(currentPrice);
       ctx.strokeStyle = 'rgba(255,255,255,0.15)';
@@ -178,13 +160,13 @@ export function DarkPoolPanel({
       ctx.setLineDash([]);
     }
 
-    // ── Scatter dots ──
+    // Scatter dots
     validPrints.forEach((p: any) => {
       const ts = p.timestampMs || new Date(p.timestamp).getTime();
       const val = p.value || p.price * (p.size || 0);
       const x = xPos(ts);
       const y = yPos(p.price);
-      const radius = Math.max(2, Math.min(12, Math.sqrt(val / maxVal) * 12));
+      const radius = Math.max(3.5, Math.min(14, Math.sqrt(val / maxVal) * 14)); // ★ min 3.5px
       const aboveVwap = vwap ? p.price >= vwap : true;
 
       ctx.beginPath();
@@ -192,11 +174,11 @@ export function DarkPoolPanel({
       ctx.fillStyle = aboveVwap ? 'rgba(0,220,130,0.25)' : 'rgba(255,71,87,0.25)';
       ctx.fill();
       ctx.strokeStyle = aboveVwap ? 'rgba(0,220,130,0.5)' : 'rgba(255,71,87,0.5)';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.5;
       ctx.stroke();
     });
 
-    // ── X-axis labels ──
+    // X-axis labels
     ctx.fillStyle = C.textMuted;
     ctx.font = `500 9px ${FONT_MONO}`;
     ctx.textAlign = 'center';
@@ -212,15 +194,17 @@ export function DarkPoolPanel({
       ctx.fillText(h, x, H - PAD.bottom + 14);
     }
 
-    // ── Y-axis labels ──
+    // ★ Y-axis labels with DYNAMIC PRECISION
     ctx.textAlign = 'right';
     const pMin = minPrice - pricePad;
     const pMax = maxPrice + pricePad;
     const pRange = pMax - pMin;
+    // If price range < $2, show 2 decimals. If < $10, show 1. Otherwise show 0.
+    const decimals = pRange < 2 ? 2 : pRange < 10 ? 1 : 0;
     for (let i = 0; i <= 4; i++) {
       const price = pMax - (i / 4) * pRange;
       const y = PAD.top + (i / 4) * cH;
-      ctx.fillText(`$${price.toFixed(0)}`, PAD.left - 6, y + 3);
+      ctx.fillText(`$${price.toFixed(decimals)}`, PAD.left - 4, y + 3);
     }
   }, [prints, vwap, currentPrice]);
 
@@ -233,7 +217,6 @@ export function DarkPoolPanel({
     return () => ro.disconnect();
   }, [drawChart]);
 
-  // ── Loading / Error / Empty ──
   if (loading && !stats) {
     return <div style={S.panel}><div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textSecondary, fontSize: 13 }}>Loading dark pool data...</div></div>;
   }
@@ -243,7 +226,6 @@ export function DarkPoolPanel({
 
   return (
     <div style={S.panel}>
-      {/* ── METRICS STRIP ── */}
       <div style={S.metricsStrip}>
         <div style={S.metricBlock()}>
           <span style={S.metricLabel}>Regime</span>
@@ -274,7 +256,6 @@ export function DarkPoolPanel({
         </div>
       </div>
 
-      {/* ── SCATTER CHART ── */}
       <div ref={containerRef} style={{ ...S.chartArea, minHeight: 100 }}>
         {isClosed && (
           <div style={S.staleTag}>
@@ -286,7 +267,6 @@ export function DarkPoolPanel({
         <canvas ref={canvasRef} style={S.canvas} />
       </div>
 
-      {/* ── TOP PRINTS TABLE ── */}
       {topPrints.length > 0 && (
         <div style={{ ...S.scrollArea, maxHeight: 108, borderTop: `1px solid ${C.border}` }}>
           <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', fontFamily: FONT_MONO }}>
@@ -319,7 +299,6 @@ export function DarkPoolPanel({
         </div>
       )}
 
-      {/* ── BOTTOM INSIGHT ── */}
       <div style={S.bottomStrip}>
         <div style={S.dot(regimeColor)} />
         <span style={{ fontSize: 11, color: C.textSecondary, lineHeight: 1.3, flex: 1 }}>

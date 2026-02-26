@@ -1,11 +1,10 @@
 /* ════════════════════════════════════════════════════════════════
-   PANEL DESIGN SYSTEM v3 — Shared constants for all panels
+   PANEL DESIGN SYSTEM v3.1 — Shared constants for all panels
    
-   All 6 panels use this consistent design language:
-   - Same metrics strip layout
-   - Same color vocabulary
-   - Same font stacks
-   - Same badge/bar components
+   v3.1 fixes:
+   - fmtPriceAxis: adaptive decimals (fixes "$201" repeated Y-axis)
+   - classifySentiment: client-side fallback (fixes 0 Bull / 0 Bear)
+   - insufficientData overlay style
    ════════════════════════════════════════════════════════════════ */
 
 export const PANEL_COLORS = {
@@ -50,6 +49,18 @@ export function fmtDollar(v: number): string {
   if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
   if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}K`;
   return `${sign}$${Math.round(abs)}`;
+}
+
+/**
+ * Adaptive price formatting — auto-adjusts decimals based on Y-axis range
+ * Fixes the "$201 $201 $201" repeated label bug when price range is < $1
+ */
+export function fmtPriceAxis(price: number, priceRange: number): string {
+  if (priceRange < 0.1) return `$${price.toFixed(4)}`;
+  if (priceRange < 0.5) return `$${price.toFixed(3)}`;
+  if (priceRange < 2) return `$${price.toFixed(2)}`;
+  if (priceRange < 20) return `$${price.toFixed(1)}`;
+  return `$${price.toFixed(0)}`;
 }
 
 export function fmtPrice(v: number): string {
@@ -105,7 +116,72 @@ export function drawGridLines(
   }
 }
 
-// Inline style helpers for the metrics strip
+/**
+ * Client-side sentiment classification — fixes "0 Bull / 0 Bear"
+ * Lower threshold than server: any single keyword match counts.
+ * Also handles context-specific patterns (e.g. "Blow To Nvidia" = bearish for NVDA)
+ */
+export function classifySentiment(
+  title: string,
+  ticker?: string
+): 'positive' | 'negative' | 'neutral' {
+  const t = (title || '').toLowerCase();
+
+  const bullWords = [
+    'surge', 'rally', 'gain', 'beat', 'exceed', 'outperform', 'upgrade',
+    'buy', 'bullish', 'growth', 'record', 'soar', 'jump', 'high',
+    'breakout', 'strong', 'robust', 'optimistic', 'boost', 'accelerat',
+    'partnership', 'deal', 'expand', 'launch', 'innovation', 'profit',
+    'raised guidance', 'price target raised', 'positive', 'crown', 'king',
+    'extend', 'close to', 'agreement',
+  ];
+  const bearWords = [
+    'drop', 'fall', 'crash', 'miss', 'disappoint', 'downgrade', 'sell',
+    'bearish', 'decline', 'plunge', 'weak', 'risk', 'concern', 'threat',
+    'selloff', 'correction', 'layoff', 'cut', 'loss', 'warning', 'blow',
+    'investigation', 'probe', 'fine', 'lawsuit', 'antitrust', 'fraud',
+    'recall', 'delay', 'shortage', 'ban', 'restrict', 'negative',
+  ];
+
+  let bull = 0, bear = 0;
+  bullWords.forEach(w => { if (t.includes(w)) bull++; });
+  bearWords.forEach(w => { if (t.includes(w)) bear++; });
+
+  // Context: "blow to Nvidia" is bearish for NVDA even though "blow" is generic
+  if (ticker) {
+    const tk = ticker.toLowerCase();
+    const companyVariants = [tk];
+    if (tk === 'nvda') companyVariants.push('nvidia');
+    else if (tk === 'aapl') companyVariants.push('apple');
+    else if (tk === 'msft') companyVariants.push('microsoft');
+    else if (tk === 'goog' || tk === 'googl') companyVariants.push('google', 'alphabet');
+    else if (tk === 'amzn') companyVariants.push('amazon');
+    else if (tk === 'meta') companyVariants.push('facebook', 'meta');
+    else if (tk === 'tsla') companyVariants.push('tesla');
+
+    // Check if negative language targets THIS ticker specifically
+    const negativePatterns = ['blow to', 'threat to', 'risk for', 'challenge for', 'lawsuit against', 'probe of', 'investigation into'];
+    for (const variant of companyVariants) {
+      for (const pattern of negativePatterns) {
+        if (t.includes(`${pattern} ${variant}`)) bear += 2;
+      }
+    }
+    // Check if positive language targets THIS ticker
+    const positivePatterns = ['upgrade', 'crown', 'king', 'leader', 'partnership with', 'agreement with'];
+    for (const variant of companyVariants) {
+      for (const pattern of positivePatterns) {
+        if (t.includes(`${variant} ${pattern}`) || t.includes(`${pattern} ${variant}`)) bull += 2;
+      }
+    }
+  }
+
+  // Lower threshold: any edge counts
+  if (bull > bear) return 'positive';
+  if (bear > bull) return 'negative';
+  return 'neutral';
+}
+
+// Inline style helpers
 export const panelStyles = {
   panel: {
     background: PANEL_COLORS.cardBg,
@@ -205,5 +281,16 @@ export const panelStyles = {
     display: 'flex' as const,
     justifyContent: 'center' as const,
     zIndex: 5,
+  },
+  insufficientData: {
+    position: 'absolute' as const,
+    inset: 0,
+    display: 'flex' as const,
+    flexDirection: 'column' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 6,
+    zIndex: 4,
+    background: 'rgba(12,16,24,0.88)',
   },
 };

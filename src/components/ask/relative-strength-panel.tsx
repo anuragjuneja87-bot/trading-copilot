@@ -7,12 +7,12 @@ import {
 } from '@/lib/panel-design-system';
 
 /* ════════════════════════════════════════════════════════════════
-   RELATIVE STRENGTH PANEL v3 — Canvas Overlaid Lines + RS Bars
+   RELATIVE STRENGTH PANEL v3.1
    
-   Metrics strip: Ticker Change | vs SPY | vs QQQ | Regime
-   Chart: 3 overlaid % change lines normalized to open
-   RS Bars: Horizontal spread bars vs SPY and QQQ
-   Insight: Leading/lagging detection
+   v3.1 fix:
+   - ★ Falls back to full session data when timeframe filter
+     returns empty/too-few points (was blank due to timezone bug)
+   - ★ Minimum 3 data points required to draw chart
    ════════════════════════════════════════════════════════════════ */
 
 interface RelativeStrengthPanelProps {
@@ -47,9 +47,28 @@ export function RelativeStrengthPanel({ ticker, timeframeRange }: RelativeStreng
     return () => clearInterval(iv);
   }, [ticker]);
 
+  // ★ Filter data to timeframe, but FALL BACK to full data if filter yields < 3 points
   const filteredData = useMemo(() => {
-    if (!data.length || !timeframeRange) return data;
-    return data.filter(d => d.timeMs >= timeframeRange.from && d.timeMs <= timeframeRange.to);
+    if (!data.length) return data;
+    if (!timeframeRange) return data;
+    
+    const filtered = data.filter(d => d.timeMs >= timeframeRange.from && d.timeMs <= timeframeRange.to);
+    
+    // ★ Fallback: if filter yields too few points (timezone mismatch, sparse data),
+    // use full session data. This prevents blank charts.
+    if (filtered.length < 3) {
+      console.warn(`[RS] Timeframe filter yielded ${filtered.length} points, falling back to full session (${data.length} points)`);
+      return data;
+    }
+    
+    return filtered;
+  }, [data, timeframeRange]);
+
+  // ★ Track whether we're showing filtered or full data
+  const isShowingFullData = useMemo(() => {
+    if (!timeframeRange || !data.length) return true;
+    const filtered = data.filter(d => d.timeMs >= timeframeRange.from && d.timeMs <= timeframeRange.to);
+    return filtered.length < 3;
   }, [data, timeframeRange]);
 
   const filteredSummary = useMemo((): RSSummary | null => {
@@ -85,20 +104,19 @@ export function RelativeStrengthPanel({ ticker, timeframeRange }: RelativeStreng
   const rsQqqBg = rsQqq >= 0 ? C.greenDim : C.redDim;
   const rsQqqLabel = rsQqq >= 0 ? 'OUTPERFORM' : 'UNDERPERFORM';
 
-  // ── Draw chart ──
   const drawChart = useCallback(() => {
     const canvas = canvasRef.current; const container = containerRef.current;
     if (!canvas || !container || !filteredData.length) return;
     const r = setupCanvas(canvas, container); if (!r) return;
     const { ctx, W, H } = r;
-    const PAD = { top: 12, right: 48, bottom: 24, left: 40 };
+    const PAD = { top: 12, right: 48, bottom: 24, left: 44 };
     const cW = W - PAD.left - PAD.right, cH = H - PAD.top - PAD.bottom;
     const N = filteredData.length; if (N < 2) return;
 
     const allVals = filteredData.flatMap(d => [d.tickerPct, d.spyPct, d.qqqPct]);
     const minVal = Math.min(...allVals), maxVal = Math.max(...allVals);
-    const valRange = maxVal - minVal || 1;
-    const padded = valRange * 0.1;
+    const valRange = maxVal - minVal || 0.01; // ★ Prevent zero range
+    const padded = Math.max(valRange * 0.15, 0.01); // ★ Min padding for very tight ranges
     const yMin = minVal - padded, yMax = maxVal + padded, yRange = yMax - yMin;
     const xPos = (i: number) => PAD.left + (i / (N - 1)) * cW;
     const yPos = (v: number) => PAD.top + (1 - (v - yMin) / yRange) * cH;
@@ -113,13 +131,13 @@ export function RelativeStrengthPanel({ ticker, timeframeRange }: RelativeStreng
       ctx.beginPath(); ctx.moveTo(PAD.left, Math.round(zeroY) + 0.5); ctx.lineTo(W - PAD.right, Math.round(zeroY) + 0.5); ctx.stroke(); ctx.setLineDash([]);
     }
 
-    // Draw line helper
     const drawLine = (getData: (d: RSDataPoint) => number, color: string, width: number) => {
       ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
       for (let i = 0; i < N; i++) { const y = yPos(getData(filteredData[i])); i === 0 ? ctx.moveTo(xPos(i), y) : ctx.lineTo(xPos(i), y); }
       ctx.stroke();
     };
 
+    // SPY (green, behind), QQQ (purple, behind), Ticker (white, front)
     drawLine(d => d.spyPct, 'rgba(0,220,130,0.5)', 1.5);
     drawLine(d => d.qqqPct, 'rgba(167,139,250,0.5)', 1.5);
     drawLine(d => d.tickerPct, 'rgba(232,234,240,0.9)', 2.5);
@@ -143,7 +161,7 @@ export function RelativeStrengthPanel({ ticker, timeframeRange }: RelativeStreng
     for (let i = 0; i <= 4; i++) {
       const val = yMax - (i / 4) * yRange;
       const y = PAD.top + (i / 4) * cH;
-      ctx.fillText(`${val >= 0 ? '+' : ''}${val.toFixed(1)}%`, PAD.left - 4, y + 3);
+      ctx.fillText(`${val >= 0 ? '+' : ''}${val.toFixed(2)}%`, PAD.left - 4, y + 3);
     }
   }, [filteredData, ticker]);
 
@@ -208,6 +226,7 @@ export function RelativeStrengthPanel({ ticker, timeframeRange }: RelativeStreng
         <span style={{ fontSize: 11, color: C.textSecondary, lineHeight: 1.3, flex: 1 }}>
           <strong style={{ color: C.textPrimary, fontWeight: 600 }}>{regimeLabel === 'LEADING' || regimeLabel === 'OUTPERFORM' ? `Leading ${rsSpy > rsQqq ? 'SPY' : 'QQQ'}` : regimeLabel === 'LAGGING' || regimeLabel === 'UNDERPERFORM' ? `Lagging ${Math.abs(rsSpy) > Math.abs(rsQqq) ? 'SPY' : 'QQQ'}` : 'Tracking inline'}</strong>{' '}
           — relative strength {rsSpy >= 0 ? 'expanding' : 'contracting'}
+          {isShowingFullData && timeframeRange ? ' (full session)' : ''}
         </span>
         <span style={{ fontSize: 10, color: C.textMuted, fontFamily: FONT_MONO, whiteSpace: 'nowrap' as const }}>{ticker}</span>
       </div>

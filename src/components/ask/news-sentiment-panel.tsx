@@ -8,11 +8,14 @@ import {
 } from '@/lib/panel-design-system';
 
 /* ════════════════════════════════════════════════════════════════
-   NEWS SENTIMENT PANEL v3 — Score Gauge + Headline List
+   NEWS SENTIMENT PANEL v3.1
    
-   Metrics strip: Sentiment | Score + gradient bar | Headlines
-   List: Chronological headlines with sentiment dots
-   Insight: Sentiment shift detection
+   v3.1 fix:
+   - ★ Sentiment detection now uses `sentimentLabel` field 
+     ('BULLISH'|'BEARISH'|'NEUTRAL') which is ALWAYS set by the API.
+   - Was checking `sentimentValue` (optional, rarely set) and 
+     `sentiment` (a NUMBER like 0.3 — String(0.3) never matches
+     'positive'/'bullish'). Result: everything showed as Neutral.
    ════════════════════════════════════════════════════════════════ */
 
 interface NewsSentimentPanelProps {
@@ -21,15 +24,45 @@ interface NewsSentimentPanelProps {
   loading: boolean;
 }
 
+/* ★ Robust sentiment extraction — checks ALL possible field names */
+function extractSentiment(item: any): 'bullish' | 'bearish' | 'neutral' {
+  // 1. sentimentLabel — set by our API, always available
+  const label = item?.sentimentLabel;
+  if (typeof label === 'string') {
+    const l = label.toUpperCase();
+    if (l === 'BULLISH' || l === 'POSITIVE') return 'bullish';
+    if (l === 'BEARISH' || l === 'NEGATIVE') return 'bearish';
+    if (l === 'NEUTRAL') return 'neutral';
+  }
+
+  // 2. sentimentValue — legacy optional field ('positive'|'negative'|'neutral')
+  const sv = item?.sentimentValue;
+  if (typeof sv === 'string') {
+    const s = sv.toLowerCase();
+    if (s === 'positive' || s.includes('bull')) return 'bullish';
+    if (s === 'negative' || s.includes('bear')) return 'bearish';
+    return 'neutral';
+  }
+
+  // 3. sentiment — numeric score (-1 to +1)
+  const score = item?.sentiment;
+  if (typeof score === 'number') {
+    if (score > 0.15) return 'bullish';
+    if (score < -0.15) return 'bearish';
+    return 'neutral';
+  }
+
+  return 'neutral';
+}
+
 export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentimentPanelProps) {
   const sentimentSummary = useMemo(() => {
     if (!news?.length) return null;
     let positive = 0, negative = 0, neutral = 0;
     news.forEach(item => {
-      const sv = item?.sentimentValue || item?.sentiment;
-      const s = typeof sv === 'string' ? sv.toLowerCase() : String(sv || '').toLowerCase();
-      if (s === 'positive' || s === 'bullish' || s.includes('bull')) positive++;
-      else if (s === 'negative' || s === 'bearish' || s.includes('bear')) negative++;
+      const s = extractSentiment(item);
+      if (s === 'bullish') positive++;
+      else if (s === 'bearish') negative++;
       else neutral++;
     });
     const total = positive + negative + neutral;
@@ -41,15 +74,14 @@ export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentime
   }, [news]);
 
   const getSentimentInfo = (item: any) => {
-    const sv = item?.sentimentValue || item?.sentiment;
-    const s = typeof sv === 'string' ? sv.toLowerCase() : String(sv || '').toLowerCase();
-    if (s === 'positive' || s === 'bullish' || s.includes('bull')) return { color: C.green, label: 'Bullish' };
-    if (s === 'negative' || s === 'bearish' || s.includes('bear')) return { color: C.red, label: 'Bearish' };
+    const s = extractSentiment(item);
+    if (s === 'bullish') return { color: C.green, label: 'Bullish' };
+    if (s === 'bearish') return { color: C.red, label: 'Bearish' };
     return { color: C.yellow, label: 'Neutral' };
   };
 
   const formatAge = (item: any) => {
-    const ts = item.publishedAt || item.timestamp || item.published_utc;
+    const ts = item.publishedUtc || item.publishedAt || item.timestamp || item.published_utc;
     if (!ts) return '';
     const ago = Date.now() - new Date(ts).getTime();
     if (ago < 60000) return 'now';
@@ -58,16 +90,15 @@ export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentime
     return `${Math.floor(ago / 86400000)}d ago`;
   };
 
-  // Detect sentiment shift (when majority sentiment changed)
+  // Detect sentiment shift
   const sentimentShift = useMemo(() => {
-    if (!news?.length || news.length < 3) return null;
+    if (!news?.length || news.length < 4) return null;
     const sorted = [...news].sort((a, b) => {
-      const tsA = new Date(a.publishedAt || a.timestamp || a.published_utc || 0).getTime();
-      const tsB = new Date(b.publishedAt || b.timestamp || b.published_utc || 0).getTime();
+      const tsA = new Date(a.publishedUtc || a.publishedAt || a.timestamp || a.published_utc || 0).getTime();
+      const tsB = new Date(b.publishedUtc || b.publishedAt || b.timestamp || b.published_utc || 0).getTime();
       return tsB - tsA;
     });
 
-    // Check if recent half differs from older half
     const mid = Math.floor(sorted.length / 2);
     const recentItems = sorted.slice(0, mid);
     const olderItems = sorted.slice(mid);
@@ -75,10 +106,9 @@ export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentime
     const countBias = (items: any[]) => {
       let p = 0, n = 0;
       items.forEach(item => {
-        const sv = item?.sentimentValue || item?.sentiment;
-        const s = typeof sv === 'string' ? sv.toLowerCase() : String(sv || '').toLowerCase();
-        if (s === 'positive' || s === 'bullish' || s.includes('bull')) p++;
-        else if (s === 'negative' || s === 'bearish' || s.includes('bear')) n++;
+        const s = extractSentiment(item);
+        if (s === 'bullish') p++;
+        else if (s === 'bearish') n++;
       });
       return p > n ? 'bullish' : n > p ? 'bearish' : 'mixed';
     };
@@ -92,7 +122,6 @@ export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentime
     return null;
   }, [news]);
 
-  // Score bar position (0 to 1 range from -1 to +1)
   const scoreBarPct = sentimentSummary ? Math.round(((sentimentSummary.score + 1) / 2) * 100) : 50;
 
   if (loading && !news.length) return <div style={S.panel}><div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textSecondary, fontSize: 13 }}>Loading news...</div></div>;
@@ -102,7 +131,6 @@ export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentime
 
   return (
     <div style={S.panel}>
-      {/* ── METRICS STRIP ── */}
       <div style={S.metricsStrip}>
         <div style={S.metricBlock()}>
           <span style={S.metricLabel}>Sentiment</span>
@@ -113,7 +141,6 @@ export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentime
           <span style={S.metricLabel}>Score</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={S.metricValue(ss.color, 15)}>{ss.score >= 0 ? '+' : ''}{ss.score.toFixed(2)}</span>
-            {/* Gradient bar */}
             <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.06)', position: 'relative', overflow: 'hidden', minWidth: 60 }}>
               <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '100%', borderRadius: 2, background: `linear-gradient(90deg, ${C.red}, ${C.yellow} 50%, ${C.green})`, opacity: 0.5 }} />
               <div style={{ position: 'absolute', top: -2, bottom: -2, left: `${scoreBarPct}%`, width: 3, borderRadius: 1, background: ss.color, boxShadow: `0 0 4px ${ss.color}60`, transform: 'translateX(-50%)' }} />
@@ -128,12 +155,11 @@ export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentime
         </div>
       </div>
 
-      {/* ── NEWS LIST ── */}
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {news.slice(0, 10).map((item, i) => {
           const si = getSentimentInfo(item);
           const title = decodeHTMLEntities(item.title || item.headline || '');
-          const source = item.source?.name || item.publisher?.name || item.source || '';
+          const source = item.publisher?.name || item.source?.name || item.source || '';
           const age = formatAge(item);
 
           return (
@@ -155,7 +181,6 @@ export function NewsSentimentPanel({ ticker, items: news, loading }: NewsSentime
         })}
       </div>
 
-      {/* ── BOTTOM INSIGHT ── */}
       <div style={S.bottomStrip}>
         <div style={S.dot(sentimentShift ? sentimentShift.color : ss.color)} />
         <span style={{ fontSize: 11, color: C.textSecondary, lineHeight: 1.3, flex: 1 }}>
