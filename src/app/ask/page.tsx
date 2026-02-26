@@ -29,6 +29,11 @@ import {
 } from '@/components/war-room/timeframe-selector';
 import { DataSourceBadge } from '@/components/war-room/data-source-badge';
 import { MarketClock } from '@/components/war-room/market-clock';
+import { AlertProvider } from '@/components/ask/alert-provider';
+import { AlertBell } from '@/components/ask/alert-bell';
+import { AlertToast } from '@/components/ask/alert-toast';
+import { AlertDetailModal } from '@/components/ask/alert-detail-modal';
+import { AlertSettingsModal } from '@/components/ask/alert-settings-modal';
 
 /* ──────────────────────────────────────────────────────────
    COLLAPSIBLE DATA PANEL WRAPPER
@@ -318,14 +323,22 @@ function AskPageContent() {
   };
 
   if (!selectedTicker) {
-    return <AskLandingView onSelectTicker={handleSelectTicker} watchlist={watchlist} />;
+    return (
+      <AlertProvider onTickerClick={handleSelectTicker}>
+        <AskLandingView onSelectTicker={handleSelectTicker} watchlist={watchlist} />
+        <AlertToast />
+        <AlertDetailModal />
+        <AlertSettingsModal />
+      </AlertProvider>
+    );
   }
 
   // Check if ticker is an index (SPY/QQQ) — hide RS for self-comparison
   const isIndex = ['SPY', 'QQQ', 'IWM', 'DIA'].includes(selectedTicker.toUpperCase());
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: COLORS.bg }}>
+    <AlertProvider onTickerClick={handleSelectTicker}>
+      <div className="h-screen flex flex-col overflow-hidden" style={{ background: COLORS.bg }}>
       <DesktopViewport />
 
       <div className="flex-1 flex overflow-hidden">
@@ -402,6 +415,7 @@ function AskPageContent() {
               <SymbolSearch onSelect={handleSelectTicker} />
               <div className="flex-1" />
 
+              <AlertBell />
               <DataSourceBadge lastUpdate={data.lastUpdate} />
               <div
                 className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
@@ -580,7 +594,10 @@ function AskPageContent() {
           </div>
         </main>
       </div>
-    </div>
+      <AlertToast />
+      <AlertDetailModal />
+      <AlertSettingsModal />
+    </AlertProvider>
   );
 }
 
