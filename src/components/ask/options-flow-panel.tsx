@@ -60,11 +60,10 @@ export function OptionsFlowPanel({
 
     const fetchFullSession = async () => {
       try {
-        // NO from/to params → gets full session data
-        // limit=10000 needed because high-volume tickers like NVDA
-        // trade thousands of options per minute (500 = ~1 min of NVDA data)
+        // fullSession=true triggers Polygon aggregates fetch for full day coverage
+        // Without this, high-volume tickers only get last few minutes of data
         const res = await fetch(
-          `/api/flow/options?tickers=${ticker}&limit=10000&_t=${Date.now()}`,
+          `/api/flow/options?tickers=${ticker}&fullSession=true&_t=${Date.now()}`,
           { cache: 'no-store' }
         );
         const json = await res.json();

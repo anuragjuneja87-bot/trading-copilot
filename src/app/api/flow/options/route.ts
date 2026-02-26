@@ -230,6 +230,7 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(parseInt(searchParams.get('limit') || '100'), 200);
   const filterUnusual = searchParams.get('unusual') === 'true';
   const filterSweeps = searchParams.get('sweeps') === 'true';
+  const fullSession = searchParams.get('fullSession') === 'true';
   
   // Date range filtering
   const from = searchParams.get('from'); // YYYY-MM-DD format
@@ -674,6 +675,121 @@ export async function GET(request: NextRequest) {
 
     // Sort by timestamp (newest first)
     allTrades.sort((a, b) => b.timestampMs - a.timestampMs);
+
+    /* ══════════════════════════════════════════════════════════════
+       FULL SESSION AGGREGATES — when fullSession=true
+       
+       Problem: Per-contract trades (limit=30, order=desc) only covers 
+       the last few minutes for high-volume tickers like NVDA/SPY.
+       
+       Solution: Use Polygon's 5-min aggregates endpoint per contract.
+       This gives volume bars spanning the ENTIRE trading day with just
+       one API call per contract.
+       
+       Premium per bar ≈ volume × vwap × 100
+       ══════════════════════════════════════════════════════════════ */
+    let fullSessionTimeSeries: FlowTimeSeries[] | null = null;
+    
+    if (fullSession && allTrades.length > 0) {
+      try {
+        // Get today's date in YYYY-MM-DD (ET timezone)
+        const now = new Date();
+        const etDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const today = `${etDate.getFullYear()}-${String(etDate.getMonth() + 1).padStart(2, '0')}-${String(etDate.getDate()).padStart(2, '0')}`;
+        
+        // Collect unique contracts with their type from existing trades
+        const contractMap = new Map<string, 'C' | 'P'>();
+        allTrades.forEach(t => {
+          if (t.optionTicker && !contractMap.has(t.optionTicker)) {
+            contractMap.set(t.optionTicker, t.callPut as 'C' | 'P');
+          }
+        });
+        
+        // Pick top 20 contracts by premium (10 call, 10 put)
+        const callContracts: string[] = [];
+        const putContracts: string[] = [];
+        // Group by contract and sum premium
+        const contractPremium = new Map<string, number>();
+        allTrades.forEach(t => {
+          if (t.optionTicker) {
+            contractPremium.set(t.optionTicker, (contractPremium.get(t.optionTicker) || 0) + t.premium);
+          }
+        });
+        
+        const sortedContracts = [...contractMap.entries()]
+          .sort((a, b) => (contractPremium.get(b[0]) || 0) - (contractPremium.get(a[0]) || 0));
+        
+        for (const [ticker, type] of sortedContracts) {
+          if (type === 'C' && callContracts.length < 10) callContracts.push(ticker);
+          else if (type === 'P' && putContracts.length < 10) putContracts.push(ticker);
+          if (callContracts.length >= 10 && putContracts.length >= 10) break;
+        }
+        
+        const aggContracts = [...callContracts, ...putContracts];
+        console.log(`[Flow API] Full session: fetching 5-min aggregates for ${aggContracts.length} contracts`);
+        
+        // Fetch 5-min aggregates for each contract
+        const aggResults = await Promise.allSettled(
+          aggContracts.map(async (optTicker) => {
+            const url = `https://api.polygon.io/v2/aggs/ticker/${optTicker}/range/5/minute/${today}/${today}?adjusted=true&sort=asc&apiKey=${POLYGON_API_KEY}`;
+            const res = await fetch(url, { 
+              next: { revalidate: 30 },
+              signal: AbortSignal.timeout(8000),
+            });
+            if (!res.ok) return null;
+            const data = await res.json();
+            return {
+              ticker: optTicker,
+              type: contractMap.get(optTicker) || 'C',
+              bars: data.results || [],
+            };
+          })
+        );
+        
+        // Build time series from aggregates
+        const timeBuckets = new Map<number, { time: string; timeMs: number; callPremium: number; putPremium: number; netFlow: number; cumulativeCDAF: number }>();
+        
+        aggResults.forEach(result => {
+          if (result.status !== 'fulfilled' || !result.value) return;
+          const { type, bars } = result.value;
+          
+          bars.forEach((bar: any) => {
+            const t = bar.t; // timestamp in ms
+            if (!t) return;
+            const volume = bar.v || 0;
+            const vwap = bar.vw || bar.c || 0; // prefer vwap, fallback to close
+            const estimatedPremium = Math.round(volume * vwap * 100);
+            
+            const existing = timeBuckets.get(t) || {
+              time: formatTimeET(t),
+              timeMs: t,
+              callPremium: 0,
+              putPremium: 0,
+              netFlow: 0,
+              cumulativeCDAF: 0,
+            };
+            
+            if (type === 'C') {
+              existing.callPremium += estimatedPremium;
+            } else {
+              existing.putPremium += estimatedPremium;
+            }
+            existing.netFlow = existing.callPremium - existing.putPremium;
+            
+            timeBuckets.set(t, existing);
+          });
+        });
+        
+        if (timeBuckets.size > 5) {
+          fullSessionTimeSeries = Array.from(timeBuckets.values())
+            .sort((a, b) => a.timeMs - b.timeMs);
+          console.log(`[Flow API] Full session: built ${fullSessionTimeSeries.length} time buckets spanning ${fullSessionTimeSeries[0]?.time || '?'} → ${fullSessionTimeSeries[fullSessionTimeSeries.length - 1]?.time || '?'}`);
+        }
+      } catch (err) {
+        console.error('[Flow API] Full session aggregates error:', err);
+        // Non-fatal — falls back to trade-based time series
+      }
+    }
     
     // Filter by date range if provided (before calculating stats)
     if (timestampGte !== null || timestampLte !== null) {
@@ -743,6 +859,12 @@ export async function GET(request: NextRequest) {
 
     // Calculate enhanced stats
     const enhancedStats = calculateEnhancedStats(allTrades);
+    
+    // Override flowTimeSeries with full-session aggregates if available
+    if (fullSessionTimeSeries && fullSessionTimeSeries.length > 5) {
+      enhancedStats.flowTimeSeries = fullSessionTimeSeries;
+      console.log(`[Flow API] Overriding flowTimeSeries with ${fullSessionTimeSeries.length} full-session aggregates buckets`);
+    }
 
     // BUG 2 FIX: Fix sweep detection in stats
     const sweepPremium = allTrades
