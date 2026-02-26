@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback } from 'react';
-import Link from 'next/link';
 import { useAlerts } from './alert-provider';
 import { PANEL_COLORS as C } from '@/lib/panel-design-system';
 import type { Alert, AlertTier } from './alert-types';
@@ -242,13 +241,12 @@ function AlertDropdown() {
         padding: '10px 16px', borderTop: `1px solid ${C.border}`,
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       }}>
-        <Link
-          href="/alerts"
-          onClick={() => setDropdownOpen(false)}
-          style={{ fontSize: 11, color: C.cyan, fontWeight: 600, cursor: 'pointer', textDecoration: 'none' }}
+        <span
+          onClick={() => { setDropdownOpen(false); window.location.href = '/alerts'; }}
+          style={{ fontSize: 11, color: C.cyan, fontWeight: 600, cursor: 'pointer' }}
         >
           View All Alerts →
-        </Link>
+        </span>
         <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>
           Last scan: 30s ago
         </span>
