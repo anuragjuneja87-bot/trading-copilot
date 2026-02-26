@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { useMemo, useRef, useEffect, useCallback } from 'react';
 import { COLORS } from '@/lib/echarts-theme';
 import type { EnhancedFlowStats, EnhancedOptionTrade, FlowTimeSeries } from '@/types/flow';
 import type { Timeframe } from '@/components/war-room/timeframe-selector';
@@ -10,15 +10,18 @@ import {
 } from '@/lib/panel-design-system';
 
 /* ════════════════════════════════════════════════════════════════
-   OPTIONS FLOW PANEL v3.1
+   OPTIONS FLOW PANEL v3.2
 
-   FIX: Cumulative chart fetches FULL SESSION data independently
-   so it always has 50+ data points regardless of timeframe.
-   Metrics strip + table use parent-provided (timeframe-filtered) data.
-   Chart dims region outside current timeframe for context.
+   KEY DESIGN: Polygon's options flow API returns limited time-series
+   (300 trades ≈ 2-5 min for active tickers). When <10 time points,
+   we show a PREMIUM BREAKDOWN BAR chart instead of cumulative lines.
+   When ≥10 points, cumulative call vs put lines with area fills.
+
+   Metrics strip + table always use parent data (timeframe-filtered).
    ════════════════════════════════════════════════════════════════ */
 
 interface FlowPanelProps {
+  ticker: string;                    // ★ REQUIRED — passed from page.tsx
   stats: EnhancedFlowStats | null;
   trades: EnhancedOptionTrade[];
   loading: boolean;
@@ -26,44 +29,20 @@ interface FlowPanelProps {
   avgDailyFlow?: number;
   timeframe?: Timeframe;
   timeframeRange?: {
-    from: number;
-    to: number;
-    label: string;
-    isMarketClosed: boolean;
-    tradingDay?: string;
+    from: number; to: number; label: string;
+    isMarketClosed: boolean; tradingDay?: string;
   };
   currentPrice?: number;
   vwap?: number | null;
 }
 
 export function OptionsFlowPanel({
-  stats, trades, loading, error,
+  ticker, stats, trades, loading, error,
   avgDailyFlow = 2_000_000, timeframe = '15m', timeframeRange,
   currentPrice, vwap,
 }: FlowPanelProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  /* ── Independent full-session fetch for cumulative chart ── */
-  const [fullSessionSeries, setFullSessionSeries] = useState<FlowTimeSeries[]>([]);
-
-  useEffect(() => {
-    const ticker = trades[0]?.ticker || '';
-    if (!ticker) return;
-    const fetchFullSession = async () => {
-      try {
-        const res = await fetch(`/api/flow/options?tickers=${ticker}&limit=500&_t=${Date.now()}`, { cache: 'no-store' });
-        const json = await res.json();
-        if (json.data?.stats?.flowTimeSeries?.length) setFullSessionSeries(json.data.stats.flowTimeSeries);
-      } catch { /* fall back to parent */ }
-    };
-    fetchFullSession();
-    const iv = setInterval(fetchFullSession, 60000);
-    return () => clearInterval(iv);
-  }, [trades[0]?.ticker]);
-
-  // Chart uses full session, metrics use parent (timeframe-filtered)
-  const chartTimeSeries = fullSessionSeries.length > 0 ? fullSessionSeries : (stats?.flowTimeSeries || []);
 
   /* ── Derived metrics (parent data — timeframe-filtered) ── */
   const metrics = useMemo(() => {
@@ -80,27 +59,47 @@ export function OptionsFlowPanel({
     const volumeLabel = ratio < 0.1 ? 'VERY LOW' : ratio < 0.5 ? 'LOW' : ratio < 1 ? 'MODERATE' : ratio < 2 ? 'HIGH' : 'VERY HIGH';
     const volumeColor = ratio < 0.5 ? C.red : ratio < 1 ? C.yellow : C.cyan;
     const volumeBg = ratio < 0.5 ? C.redDim : ratio < 1 ? C.yellowDim : C.cyanDim;
-    return { netFlow, callPrem, putPrem, callPct, flowBias, flowColor, flowBg, tradeCount: stats.tradeCount || 0, volumeLabel, volumeColor, volumeBg };
+    return { netFlow, callPrem, putPrem, totalPrem, callPct, flowBias, flowColor, flowBg, tradeCount: stats.tradeCount || 0, volumeLabel, volumeColor, volumeBg };
   }, [stats, avgDailyFlow]);
 
   const topTrade = useMemo(() => trades.length ? [...trades].sort((a, b) => (b.premium || 0) - (a.premium || 0))[0] : null, [trades]);
   const topTrades = useMemo(() => [...trades].sort((a, b) => (b.premium || 0) - (a.premium || 0)).slice(0, 5), [trades]);
 
-  /* ── Cumulative chart data (full session) ── */
+  /* ── Chart data ── */
+  const chartTimeSeries = stats?.flowTimeSeries || [];
+  const hasEnoughPoints = chartTimeSeries.length >= 10;
+
   const chartData = useMemo(() => {
     if (!chartTimeSeries.length) return null;
     let cumCall = 0, cumPut = 0;
-    const calls: number[] = [], puts: number[] = [], times: string[] = [], timeMs: number[] = [];
+    const calls: number[] = [], puts: number[] = [], times: string[] = [];
     chartTimeSeries.forEach(d => {
       cumCall += d.callPremium || 0; cumPut += d.putPremium || 0;
-      calls.push(cumCall); puts.push(cumPut); times.push(d.time || ''); timeMs.push(d.timeMs || 0);
+      calls.push(cumCall); puts.push(cumPut); times.push(d.time || '');
     });
     let crossIdx = -1;
     for (let i = chartTimeSeries.length - 1; i >= 1; i--) {
       if ((calls[i - 1] > puts[i - 1]) !== (calls[i] > puts[i])) { crossIdx = i; break; }
     }
-    return { calls, puts, times, timeMs, crossIdx };
+    return { calls, puts, times, crossIdx };
   }, [chartTimeSeries]);
+
+  /* ── Strike breakdown for bar chart fallback ── */
+  const strikeBreakdown = useMemo(() => {
+    if (hasEnoughPoints || !trades.length) return null;
+    const byStrike: Record<string, { callPrem: number; putPrem: number; count: number }> = {};
+    trades.forEach(t => {
+      const key = `$${t.strike}`;
+      if (!byStrike[key]) byStrike[key] = { callPrem: 0, putPrem: 0, count: 0 };
+      if (t.callPut === 'C') byStrike[key].callPrem += t.premium || 0;
+      else byStrike[key].putPrem += t.premium || 0;
+      byStrike[key].count++;
+    });
+    return Object.entries(byStrike)
+      .map(([strike, data]) => ({ strike, ...data, total: data.callPrem + data.putPrem }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 8);
+  }, [trades, hasEnoughPoints]);
 
   /* ── Sweep insight ── */
   const sweepInsight = useMemo(() => {
@@ -119,28 +118,78 @@ export function OptionsFlowPanel({
   /* ── Draw chart ── */
   const drawChart = useCallback(() => {
     const canvas = canvasRef.current, container = containerRef.current;
-    if (!canvas || !container || !chartData) return;
+    if (!canvas || !container) return;
     const r = setupCanvas(canvas, container); if (!r) return;
     const { ctx, W, H } = r;
     const PAD = { top: 14, right: 54, bottom: 26, left: 52 };
     const cW = W - PAD.left - PAD.right, cH = H - PAD.top - PAD.bottom;
+
+    ctx.clearRect(0, 0, W, H);
+
+    /* ══ FALLBACK: Strike Premium Bars when < 10 time points ══ */
+    if (!hasEnoughPoints && strikeBreakdown && strikeBreakdown.length > 0) {
+      const N = strikeBreakdown.length;
+      const maxPrem = Math.max(...strikeBreakdown.map(s => s.total), 1);
+      const barH = Math.min(cH / N - 6, 28);
+      const gapY = (cH - barH * N) / (N + 1);
+
+      // Title
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.font = `600 9px ${FONT_MONO}`;
+      ctx.textAlign = 'center';
+      ctx.fillText('PREMIUM BY STRIKE', W / 2, PAD.top - 2);
+
+      strikeBreakdown.forEach((s, i) => {
+        const y = PAD.top + gapY + i * (barH + gapY);
+        const totalW = (s.total / maxPrem) * cW * 0.85;
+        const callW = s.total > 0 ? (s.callPrem / s.total) * totalW : 0;
+        const putW = totalW - callW;
+
+        // Call portion (green, from left)
+        if (callW > 0) {
+          const g = ctx.createLinearGradient(PAD.left, 0, PAD.left + callW, 0);
+          g.addColorStop(0, 'rgba(0,220,130,0.2)'); g.addColorStop(1, 'rgba(0,220,130,0.45)');
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.roundRect(PAD.left, y, callW, barH, 3); ctx.fill();
+        }
+        // Put portion (red, continues after call)
+        if (putW > 0) {
+          const g = ctx.createLinearGradient(PAD.left + callW, 0, PAD.left + callW + putW, 0);
+          g.addColorStop(0, 'rgba(255,71,87,0.2)'); g.addColorStop(1, 'rgba(255,71,87,0.45)');
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.roundRect(PAD.left + callW, y, putW, barH, 3); ctx.fill();
+        }
+
+        // Strike label (left)
+        ctx.fillStyle = C.textSecondary;
+        ctx.font = `600 11px ${FONT_MONO}`;
+        ctx.textAlign = 'right';
+        ctx.fillText(s.strike, PAD.left - 6, y + barH / 2 + 4);
+
+        // Premium label (right of bar)
+        ctx.fillStyle = C.textMuted;
+        ctx.font = `500 10px ${FONT_MONO}`;
+        ctx.textAlign = 'left';
+        const premLabel = s.total >= 1e6 ? `$${(s.total / 1e6).toFixed(1)}M` : `$${(s.total / 1e3).toFixed(0)}K`;
+        ctx.fillText(premLabel, PAD.left + totalW + 8, y + barH / 2 + 4);
+      });
+
+      // Legend
+      ctx.font = `500 9px ${FONT_MONO}`;
+      ctx.textAlign = 'left';
+      const legY = H - PAD.bottom + 10;
+      ctx.fillStyle = 'rgba(0,220,130,0.6)'; ctx.fillRect(PAD.left, legY, 8, 8); ctx.fillText('Calls', PAD.left + 12, legY + 7);
+      ctx.fillStyle = 'rgba(255,71,87,0.6)'; ctx.fillRect(PAD.left + 55, legY, 8, 8); ctx.fillText('Puts', PAD.left + 67, legY + 7);
+      return;
+    }
+
+    /* ══ STANDARD: Cumulative Lines when ≥ 10 time points ══ */
+    if (!chartData) return;
+    drawGridLines(ctx, PAD, W, H);
     const N = chartData.calls.length; if (N < 2) return;
     const maxVal = Math.max(...chartData.calls, ...chartData.puts, 1);
     const xPos = (i: number) => PAD.left + (i / (N - 1)) * cW;
     const yPos = (v: number) => PAD.top + (1 - v / maxVal) * cH;
-    ctx.clearRect(0, 0, W, H);
-    drawGridLines(ctx, PAD, W, H);
-
-    // Timeframe highlight: dim region outside current timeframe
-    if (timeframeRange && chartData.timeMs.length > 0) {
-      const fi = chartData.timeMs.findIndex(t => t >= timeframeRange.from);
-      const li = (() => { for (let j = chartData.timeMs.length - 1; j >= 0; j--) { if (chartData.timeMs[j] <= timeframeRange.to) return j; } return -1; })();
-      if (fi >= 0 && li >= 0 && fi < li) {
-        ctx.fillStyle = 'rgba(0,0,0,0.25)';
-        if (fi > 0) ctx.fillRect(PAD.left, PAD.top, xPos(fi) - PAD.left, cH);
-        if (li < N - 1) ctx.fillRect(xPos(li), PAD.top, W - PAD.right - xPos(li), cH);
-      }
-    }
 
     // Call area fill
     ctx.beginPath(); ctx.moveTo(xPos(0), PAD.top + cH);
@@ -164,12 +213,14 @@ export function OptionsFlowPanel({
     ctx.strokeStyle = 'rgba(255,71,87,0.75)'; ctx.lineWidth = 2; ctx.beginPath();
     for (let i = 0; i < N; i++) { i === 0 ? ctx.moveTo(xPos(i), yPos(chartData.puts[i])) : ctx.lineTo(xPos(i), yPos(chartData.puts[i])); } ctx.stroke();
 
-    // Right edge labels (with anti-overlap)
+    // Right edge labels
     ctx.font = `600 10px ${FONT_MONO}`; ctx.textAlign = 'left';
     let cLY = yPos(chartData.calls[N - 1]), pLY = yPos(chartData.puts[N - 1]);
     if (Math.abs(cLY - pLY) < 24) { if (cLY < pLY) { cLY -= 12; pLY += 12; } else { pLY -= 12; cLY += 12; } }
-    ctx.fillStyle = C.green; ctx.fillText('CALLS', W - PAD.right + 4, cLY - 4); ctx.fillText(fmtDollar(chartData.calls[N - 1]).replace('+', ''), W - PAD.right + 4, cLY + 8);
-    ctx.fillStyle = C.red; ctx.fillText('PUTS', W - PAD.right + 4, pLY - 4); ctx.fillText(fmtDollar(chartData.puts[N - 1]).replace('+', ''), W - PAD.right + 4, pLY + 8);
+    ctx.fillStyle = C.green; ctx.fillText('CALLS', W - PAD.right + 4, cLY - 4);
+    ctx.fillText(fmtDollar(chartData.calls[N - 1]).replace('+', ''), W - PAD.right + 4, cLY + 8);
+    ctx.fillStyle = C.red; ctx.fillText('PUTS', W - PAD.right + 4, pLY - 4);
+    ctx.fillText(fmtDollar(chartData.puts[N - 1]).replace('+', ''), W - PAD.right + 4, pLY + 8);
 
     // Crossover marker
     if (chartData.crossIdx > 0) {
@@ -185,10 +236,10 @@ export function OptionsFlowPanel({
     for (let i = 0; i < N; i += step) { if (chartData.times[i]) ctx.fillText(chartData.times[i], xPos(i), H - PAD.bottom + 14); }
     if (N > 1 && chartData.times[N - 1]) ctx.fillText(chartData.times[N - 1], xPos(N - 1), H - PAD.bottom + 14);
 
-    // Y-axis labels
+    // Y-axis
     ctx.textAlign = 'right';
     for (let i = 0; i <= 4; i++) { const val = (maxVal / 4) * (4 - i); const y = PAD.top + (i / 4) * cH; const lbl = val >= 1e6 ? `$${(val / 1e6).toFixed(1)}M` : val >= 1e3 ? `$${(val / 1e3).toFixed(0)}K` : `$${val.toFixed(0)}`; ctx.fillText(lbl, PAD.left - 6, y + 3); }
-  }, [chartData, timeframeRange]);
+  }, [chartData, hasEnoughPoints, strikeBreakdown]);
 
   useEffect(() => { drawChart(); }, [drawChart]);
   useEffect(() => { const c = containerRef.current; if (!c) return; const ro = new ResizeObserver(() => drawChart()); ro.observe(c); return () => ro.disconnect(); }, [drawChart]);
@@ -214,7 +265,7 @@ export function OptionsFlowPanel({
       <div ref={containerRef} style={{ ...S.chartArea, minHeight: 140 }}><canvas ref={canvasRef} style={S.canvas} /></div>
 
       {topTrades.length > 0 && (
-        <div style={{ ...S.scrollArea, maxHeight: 108, borderTop: `1px solid ${C.border}` }}>
+        <div style={{ ...S.scrollArea, maxHeight: 108, borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
           <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', fontFamily: FONT_MONO }}>
             <thead><tr>{['Time', 'C/P', 'Strike', 'Exp', 'Premium', 'Type'].map(h => (<th key={h} style={{ fontSize: 8, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', color: C.textMuted, textAlign: 'left', padding: '4px 10px', borderBottom: `1px solid ${C.border}`, position: 'sticky', top: 0, background: C.cardBg }}>{h}</th>))}</tr></thead>
             <tbody>{topTrades.map((t, i) => (<tr key={i} style={{ borderBottom: `1px solid ${C.borderSubtle}` }}><td style={{ padding: '5px 10px', color: C.textSecondary, whiteSpace: 'nowrap' }}>{fmtTime(t.timestampMs)}</td><td style={{ padding: '5px 10px', color: t.callPut === 'C' ? C.green : C.red, fontWeight: 600 }}>{t.callPut}</td><td style={{ padding: '5px 10px', color: C.textPrimary, fontWeight: 600 }}>${t.strike}</td><td style={{ padding: '5px 10px', color: C.textSecondary }}>{t.expiry?.slice(5) || ''}</td><td style={{ padding: '5px 10px', color: C.textPrimary, fontWeight: 600 }}>{fmtDollar(t.premium).replace('+', '')}</td><td style={{ padding: '5px 10px' }}>{(t.tradeType === 'SWEEP' || t.tradeType === 'INTERMARKET_SWEEP' || t.isSweep) ? <span style={{ fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 2, background: C.cyanDim, color: C.cyan }}>SWEEP</span> : <span style={{ fontSize: 9, color: C.textMuted }}>{t.tradeType || 'BLOCK'}</span>}</td></tr>))}</tbody>
@@ -222,10 +273,10 @@ export function OptionsFlowPanel({
         </div>
       )}
 
-      <div style={S.bottomStrip}>
+      <div style={{ ...S.bottomStrip, flexShrink: 0 }}>
         <div style={S.dot(sweepInsight ? sweepInsight.color : C.textMuted)} />
         <span style={{ fontSize: 11, color: C.textSecondary, lineHeight: 1.3, flex: 1 }}>{sweepInsight ? (<><strong style={{ color: C.textPrimary, fontWeight: 600 }}>{sweepInsight.cp === 'C' ? 'Call' : 'Put'} sweep cluster</strong>{' '}at ${sweepInsight.strike} — {fmtDollar(sweepInsight.total).replace('+', '')} in {sweepInsight.count} sweeps</>) : (<><strong style={{ color: C.textPrimary, fontWeight: 600 }}>Flow:</strong>{' '}{m.flowBias === 'BULLISH' ? 'Call premium leading' : m.flowBias === 'BEARISH' ? 'Put premium dominant' : 'Balanced flow'} this session</>)}</span>
-        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: FONT_MONO, whiteSpace: 'nowrap' as const }}>{timeframeRange?.label || 'Session'}</span>
+        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: FONT_MONO, whiteSpace: 'nowrap' as const }}>{timeframeRange?.label || 'Session'} · {ticker}</span>
       </div>
     </div>
   );

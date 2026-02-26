@@ -506,6 +506,7 @@ function AskPageContent() {
               <div className="grid grid-cols-2 gap-3">
                 <CollapsiblePanel title="Options Flow" height="420px" icon={Sparkles} subtitle={ps.flow.text} subtitleColor={ps.flow.color} forceOpen={allPanelsOpen}>
                   <OptionsFlowPanel
+                    ticker={selectedTicker}
                     stats={data.flow?.stats || null}
                     trades={data.flow?.trades || []}
                     loading={data.flow?.loading || false}
@@ -532,6 +533,7 @@ function AskPageContent() {
                 </CollapsiblePanel>
                 <CollapsiblePanel title="Dark Pool Activity" height="380px" icon={Building2} subtitle={ps.darkPool.text} subtitleColor={ps.darkPool.color} forceOpen={allPanelsOpen}>
                   <DarkPoolPanel
+                    ticker={selectedTicker}
                     prints={data.darkpool?.prints || []}
                     stats={data.darkpool?.stats || null}
                     loading={data.darkpool?.loading || false}
