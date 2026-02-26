@@ -8,12 +8,9 @@ import { FONT_MONO } from '@/lib/panel-design-system';
    RELATIVE STRENGTH LINE CHART — TradingView-style
    
    Three line series showing % change from open:
-   - Ticker (white, thick) — the stock you're analyzing
-   - SPY (green, thin) — broad market benchmark
-   - QQQ (purple, thin) — tech benchmark
+   - Ticker (white, thick), SPY (green, thin), QQQ (purple, thin)
    
-   When ticker is above both → leading the market
-   When ticker is below both → lagging the market
+   TIMEZONE FIX: ET offset applied so x-axis shows Eastern Time.
    ════════════════════════════════════════════════════════════════ */
 
 interface RSChartProps {
@@ -21,6 +18,13 @@ interface RSChartProps {
   ticker: string;
   timeframeRange?: { from: number; to: number; label: string };
   height?: number;
+}
+
+function getETOffsetSeconds(timestampMs: number): number {
+  const d = new Date(timestampMs);
+  const utcStr = d.toLocaleString('en-US', { timeZone: 'UTC' });
+  const etStr = d.toLocaleString('en-US', { timeZone: 'America/New_York' });
+  return Math.round((new Date(etStr).getTime() - new Date(utcStr).getTime()) / 1000);
 }
 
 export function RSLineChart({ data, ticker, timeframeRange, height = 140 }: RSChartProps) {
@@ -34,23 +38,24 @@ export function RSLineChart({ data, ticker, timeframeRange, height = 140 }: RSCh
     if (!data || data.length < 2) return null;
 
     const sorted = [...data].sort((a, b) => a.timeMs - b.timeMs);
+    const etOffset = sorted[0]?.timeMs ? getETOffsetSeconds(sorted[0].timeMs) : 0;
+
     const tickerPoints: { time: number; value: number }[] = [];
     const spyPoints: { time: number; value: number }[] = [];
     const qqqPoints: { time: number; value: number }[] = [];
 
     for (const d of sorted) {
       if (!d.timeMs || d.timeMs < 1000000000000) continue;
-      const t = Math.floor(d.timeMs / 1000);
+      const t = Math.floor(d.timeMs / 1000) + etOffset;
       tickerPoints.push({ time: t, value: d.tickerPct });
       spyPoints.push({ time: t, value: d.spyPct });
       qqqPoints.push({ time: t, value: d.qqqPct });
     }
 
     if (tickerPoints.length < 2) return null;
-    return { tickerPoints, spyPoints, qqqPoints };
+    return { tickerPoints, spyPoints, qqqPoints, etOffset };
   }, [data]);
 
-  // Create chart
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -87,52 +92,25 @@ export function RSLineChart({ data, ticker, timeframeRange, height = 140 }: RSCh
       handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
     });
 
-    // SPY line (green, behind)
     const spySeries = chart.addLineSeries({
-      color: 'rgba(0,220,130,0.5)',
-      lineWidth: 1,
-      crosshairMarkerVisible: true,
-      crosshairMarkerRadius: 2,
-      crosshairMarkerBackgroundColor: 'rgb(0,220,130)',
-      lastValueVisible: true,
-      priceLineVisible: false,
-      title: 'SPY',
-      priceFormat: {
-        type: 'custom',
-        formatter: (price: number) => `${price >= 0 ? '+' : ''}${price.toFixed(2)}%`,
-      },
+      color: 'rgba(0,220,130,0.5)', lineWidth: 1,
+      crosshairMarkerVisible: true, crosshairMarkerRadius: 2, crosshairMarkerBackgroundColor: 'rgb(0,220,130)',
+      lastValueVisible: true, priceLineVisible: false, title: 'SPY',
+      priceFormat: { type: 'custom', formatter: (price: number) => `${price >= 0 ? '+' : ''}${price.toFixed(2)}%` },
     });
 
-    // QQQ line (purple, behind)
     const qqqSeries = chart.addLineSeries({
-      color: 'rgba(167,139,250,0.5)',
-      lineWidth: 1,
-      crosshairMarkerVisible: true,
-      crosshairMarkerRadius: 2,
-      crosshairMarkerBackgroundColor: 'rgb(167,139,250)',
-      lastValueVisible: true,
-      priceLineVisible: false,
-      title: 'QQQ',
-      priceFormat: {
-        type: 'custom',
-        formatter: (price: number) => `${price >= 0 ? '+' : ''}${price.toFixed(2)}%`,
-      },
+      color: 'rgba(167,139,250,0.5)', lineWidth: 1,
+      crosshairMarkerVisible: true, crosshairMarkerRadius: 2, crosshairMarkerBackgroundColor: 'rgb(167,139,250)',
+      lastValueVisible: true, priceLineVisible: false, title: 'QQQ',
+      priceFormat: { type: 'custom', formatter: (price: number) => `${price >= 0 ? '+' : ''}${price.toFixed(2)}%` },
     });
 
-    // Ticker line (white, front, thick)
     const tickerSeries = chart.addLineSeries({
-      color: 'rgba(232,234,240,0.9)',
-      lineWidth: 2,
-      crosshairMarkerVisible: true,
-      crosshairMarkerRadius: 3,
-      crosshairMarkerBackgroundColor: 'rgb(232,234,240)',
-      lastValueVisible: true,
-      priceLineVisible: false,
-      title: ticker,
-      priceFormat: {
-        type: 'custom',
-        formatter: (price: number) => `${price >= 0 ? '+' : ''}${price.toFixed(2)}%`,
-      },
+      color: 'rgba(232,234,240,0.9)', lineWidth: 2,
+      crosshairMarkerVisible: true, crosshairMarkerRadius: 3, crosshairMarkerBackgroundColor: 'rgb(232,234,240)',
+      lastValueVisible: true, priceLineVisible: false, title: ticker,
+      priceFormat: { type: 'custom', formatter: (price: number) => `${price >= 0 ? '+' : ''}${price.toFixed(2)}%` },
     });
 
     chartRef.current = chart;
@@ -141,17 +119,13 @@ export function RSLineChart({ data, ticker, timeframeRange, height = 140 }: RSCh
     qqqSeriesRef.current = qqqSeries;
 
     const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        const { width } = entry.contentRect;
-        if (width > 0) chart.applyOptions({ width });
-      }
+      for (const entry of entries) { const { width } = entry.contentRect; if (width > 0) chart.applyOptions({ width }); }
     });
     ro.observe(containerRef.current);
 
     return () => { ro.disconnect(); chart.remove(); chartRef.current = null; tickerSeriesRef.current = null; spySeriesRef.current = null; qqqSeriesRef.current = null; };
   }, [height, ticker]);
 
-  // Update data
   useEffect(() => {
     if (!chartRef.current || !tickerSeriesRef.current || !spySeriesRef.current || !qqqSeriesRef.current || !chartData) return;
 
@@ -161,23 +135,21 @@ export function RSLineChart({ data, ticker, timeframeRange, height = 140 }: RSCh
 
     const ts = chartRef.current.timeScale();
     if (timeframeRange && timeframeRange.from && timeframeRange.to) {
-      const fromSec = Math.floor(timeframeRange.from / 1000);
-      const toSec = Math.floor(timeframeRange.to / 1000);
+      const etOffset = chartData.etOffset;
+      const fromSec = Math.floor(timeframeRange.from / 1000) + etOffset;
+      const toSec = Math.floor(timeframeRange.to / 1000) + etOffset;
       const dataStart = chartData.tickerPoints[0]?.time || 0;
       const dataEnd = chartData.tickerPoints[chartData.tickerPoints.length - 1]?.time || 0;
       const dataRange = dataEnd - dataStart;
       const tfRange = toSec - fromSec;
 
-      if (dataRange > 0 && tfRange >= dataRange * 0.8) {
-        ts.fitContent();
-      } else {
+      if (dataRange > 0 && tfRange >= dataRange * 0.8) { ts.fitContent(); }
+      else {
         const padding = Math.max(Math.floor(tfRange * 0.05), 60);
         try { ts.setVisibleRange({ from: (fromSec - padding) as any, to: (toSec + padding) as any }); }
         catch { ts.fitContent(); }
       }
-    } else {
-      ts.fitContent();
-    }
+    } else { ts.fitContent(); }
   }, [chartData, timeframeRange]);
 
   if (!chartData) {

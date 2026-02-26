@@ -10,9 +10,12 @@ import { FONT_MONO } from '@/lib/panel-design-system';
    Uses lightweight-charts Baseline series:
    - Green fill/line above zero (buying pressure)
    - Red fill/line below zero (selling pressure)
-   - Proper time axis (9:30 AM → 4:00 PM ET)
+   - Proper time axis in ET (not UTC)
    - Mouse wheel zoom + drag to pan
    - Crosshair with CVD value tooltip
+   
+   TIMEZONE FIX: lightweight-charts renders timestamps as UTC.
+   We apply ET offset so the x-axis shows Eastern Time labels.
    ════════════════════════════════════════════════════════════════ */
 
 interface CVDChartProps {
@@ -29,28 +32,48 @@ function fmtVol(v: number): string {
   return v.toFixed(0);
 }
 
+/**
+ * Get ET offset in seconds for a given UTC timestamp.
+ * lightweight-charts treats all timestamps as UTC, so we shift
+ * the timestamp by the ET offset to trick it into displaying ET.
+ */
+function getETOffsetSeconds(timestampMs: number): number {
+  const d = new Date(timestampMs);
+  // Get the UTC offset for America/New_York at this specific time
+  // This handles EST (-5) vs EDT (-4) automatically
+  const utcStr = d.toLocaleString('en-US', { timeZone: 'UTC' });
+  const etStr = d.toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const utcDate = new Date(utcStr);
+  const etDate = new Date(etStr);
+  return Math.round((etDate.getTime() - utcDate.getTime()) / 1000);
+}
+
 export function CVDLineChart({ data, timeframeRange, sessionBounds, height = 150 }: CVDChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Baseline'> | null>(null);
 
-  // Compute cumulative CVD
+  // Compute cumulative CVD with ET-adjusted timestamps
   const chartData = useMemo(() => {
     if (!data || data.length < 2) return null;
 
     let cvd = 0;
     const points: { time: number; value: number }[] = [];
-
     const sorted = [...data].sort((a, b) => a.timeMs - b.timeMs);
+
+    // Compute ET offset once from first data point
+    const etOffset = sorted[0]?.timeMs ? getETOffsetSeconds(sorted[0].timeMs) : 0;
 
     for (const d of sorted) {
       if (!d.timeMs || d.timeMs < 1000000000000) continue;
       cvd += (d.buyVolume || 0) - (d.sellVolume || 0);
-      points.push({ time: Math.floor(d.timeMs / 1000), value: cvd });
+      // Apply ET offset so chart displays Eastern Time
+      const utcSec = Math.floor(d.timeMs / 1000);
+      points.push({ time: utcSec + etOffset, value: cvd });
     }
 
     if (points.length < 2) return null;
-    return points;
+    return { points, etOffset };
   }, [data]);
 
   // Create chart
@@ -128,14 +151,16 @@ export function CVDLineChart({ data, timeframeRange, sessionBounds, height = 150
   useEffect(() => {
     if (!chartRef.current || !seriesRef.current || !chartData) return;
 
-    seriesRef.current.setData(chartData as any);
+    seriesRef.current.setData(chartData.points as any);
 
     const ts = chartRef.current.timeScale();
     if (timeframeRange && timeframeRange.from && timeframeRange.to) {
-      const fromSec = Math.floor(timeframeRange.from / 1000);
-      const toSec = Math.floor(timeframeRange.to / 1000);
-      const dataStart = chartData[0]?.time || 0;
-      const dataEnd = chartData[chartData.length - 1]?.time || 0;
+      // Apply same ET offset to timeframe range
+      const etOffset = chartData.etOffset;
+      const fromSec = Math.floor(timeframeRange.from / 1000) + etOffset;
+      const toSec = Math.floor(timeframeRange.to / 1000) + etOffset;
+      const dataStart = chartData.points[0]?.time || 0;
+      const dataEnd = chartData.points[chartData.points.length - 1]?.time || 0;
       const dataRange = dataEnd - dataStart;
       const tfRange = toSec - fromSec;
 

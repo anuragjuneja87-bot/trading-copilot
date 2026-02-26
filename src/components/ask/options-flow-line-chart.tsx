@@ -3,6 +3,7 @@
 import { useRef, useEffect, useMemo } from 'react';
 import { createChart, type IChartApi, type ISeriesApi, ColorType, CrosshairMode, LineStyle } from 'lightweight-charts';
 import type { FlowTimeSeries } from '@/types/flow';
+import { PANEL_COLORS as C, FONT_MONO } from '@/lib/panel-design-system';
 
 /* ════════════════════════════════════════════════════════════════
    OPTIONS FLOW LINE CHART — TradingView-style interactive chart
@@ -15,6 +16,8 @@ import type { FlowTimeSeries } from '@/types/flow';
    
    Two area series: Calls (green) and Puts (red)
    Cumulative premium shown as running total through the day
+   
+   TIMEZONE FIX: ET offset applied so x-axis shows Eastern Time.
    ════════════════════════════════════════════════════════════════ */
 
 interface FlowLineChartProps {
@@ -38,6 +41,13 @@ function isRegularHours(timestampMs: number): boolean {
   return mins >= MARKET_OPEN_MINUTES && mins <= MARKET_CLOSE_MINUTES;
 }
 
+function getETOffsetSeconds(timestampMs: number): number {
+  const d = new Date(timestampMs);
+  const utcStr = d.toLocaleString('en-US', { timeZone: 'UTC' });
+  const etStr = d.toLocaleString('en-US', { timeZone: 'America/New_York' });
+  return Math.round((new Date(etStr).getTime() - new Date(utcStr).getTime()) / 1000);
+}
+
 export function OptionsFlowLineChart({ data, timeframeRange, height = 160 }: FlowLineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -52,26 +62,29 @@ export function OptionsFlowLineChart({ data, timeframeRange, height = 160 }: Flo
     const callPoints: { time: number; value: number }[] = [];
     const putPoints: { time: number; value: number }[] = [];
 
-    // Sort by time ascending
     const sorted = [...data].sort((a, b) => a.timeMs - b.timeMs);
 
+    // Compute ET offset once from first data point
+    const firstValid = sorted.find(d => d.timeMs && d.timeMs > 1000000000000);
+    const etOffset = firstValid ? getETOffsetSeconds(firstValid.timeMs) : 0;
+
     for (const d of sorted) {
-      if (!d.timeMs || d.timeMs < 1000000000000) continue; // skip invalid
+      if (!d.timeMs || d.timeMs < 1000000000000) continue;
       // Filter to regular market hours only
       if (!isRegularHours(d.timeMs)) continue;
 
       cumCall += d.callPremium || 0;
       cumPut += d.putPremium || 0;
 
-      // lightweight-charts uses UTC seconds
-      const timeSec = Math.floor(d.timeMs / 1000);
+      // Apply ET offset so chart displays Eastern Time
+      const timeSec = Math.floor(d.timeMs / 1000) + etOffset;
 
       callPoints.push({ time: timeSec, value: cumCall });
       putPoints.push({ time: timeSec, value: cumPut });
     }
 
     if (callPoints.length < 2) return null;
-    return { callPoints, putPoints };
+    return { callPoints, putPoints, etOffset };
   }, [data]);
 
   // Create chart once
@@ -118,29 +131,6 @@ export function OptionsFlowLineChart({ data, timeframeRange, height = 160 }: Flo
         barSpacing: 6,
         fixLeftEdge: false,
         fixRightEdge: false,
-        tickMarkFormatter: (time: any) => {
-          const t = typeof time === 'number' ? time : 0;
-          const d = new Date(t * 1000);
-          return d.toLocaleTimeString('en-US', {
-            timeZone: 'America/New_York',
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true,
-          }).replace(' AM', 'a').replace(' PM', 'p');
-        },
-      },
-      localization: {
-        timeFormatter: (time: any) => {
-          const t = typeof time === 'number' ? time : 0;
-          const d = new Date(t * 1000);
-          return d.toLocaleTimeString('en-US', {
-            timeZone: 'America/New_York',
-            hour: 'numeric',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: true,
-          });
-        },
       },
       handleScroll: {
         mouseWheel: true,
@@ -165,8 +155,7 @@ export function OptionsFlowLineChart({ data, timeframeRange, height = 160 }: Flo
       crosshairMarkerRadius: 3,
       crosshairMarkerBackgroundColor: 'rgb(0,220,130)',
       priceFormat: {
-        type: 'custom' as const,
-        minMove: 1,
+        type: 'custom',
         formatter: (price: number) => {
           if (price >= 1e9) return `$${(price / 1e9).toFixed(1)}B`;
           if (price >= 1e6) return `$${(price / 1e6).toFixed(1)}M`;
@@ -189,8 +178,7 @@ export function OptionsFlowLineChart({ data, timeframeRange, height = 160 }: Flo
       crosshairMarkerRadius: 3,
       crosshairMarkerBackgroundColor: 'rgb(255,71,87)',
       priceFormat: {
-        type: 'custom' as const,
-        minMove: 1,
+        type: 'custom',
         formatter: (price: number) => {
           if (price >= 1e9) return `$${(price / 1e9).toFixed(1)}B`;
           if (price >= 1e6) return `$${(price / 1e6).toFixed(1)}M`;
@@ -234,10 +222,11 @@ export function OptionsFlowLineChart({ data, timeframeRange, height = 160 }: Flo
 
     // Set visible range based on timeframe
     const ts = chartRef.current.timeScale();
+    const etOffset = chartData.etOffset;
 
     if (timeframeRange && timeframeRange.from && timeframeRange.to) {
-      const fromSec = Math.floor(timeframeRange.from / 1000);
-      const toSec = Math.floor(timeframeRange.to / 1000);
+      const fromSec = Math.floor(timeframeRange.from / 1000) + etOffset;
+      const toSec = Math.floor(timeframeRange.to / 1000) + etOffset;
       
       // Check if the timeframe window covers most of the data (Session view)
       const dataStart = chartData.callPoints[0]?.time || 0;
