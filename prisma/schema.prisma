@@ -1,57 +1,69 @@
-// Prisma schema for TradingCopilot
-// Database: PostgreSQL (Supabase/Neon)
+// ═══════════════════════════════════════════════════════════════════════
+// TradeYodha — Complete Database Schema v1.0
+// 
+// MIGRATION: localStorage → Vercel Postgres
+//
+// ARCHITECTURE:
+//   Layer 1: SHARED (symbol-centric)  — ticker_cache (1 row per ticker)
+//   Layer 2: PER-USER (persistent)    — users, watchlist, prefs, alerts
+//   Layer 3: ANALYTICS                — thesis_logs, alert_outcomes
+//   Layer 4: EPHEMERAL (in-memory)    — prices, chat, UI state (no DB)
+//   Layer 5: HOT CACHE (Redis)        — timeline, thesis snapshots
+//
+// Auth:   NextAuth v4 + Prisma Adapter (Google OAuth)
+// DB:     Vercel Postgres (pooled via Prisma Accelerate)
+// Cache:  Upstash Redis (unchanged — timeline + thesis snapshots)
+// ═══════════════════════════════════════════════════════════════════════
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("POSTGRES_PRISMA_URL")       // Pooled connection (queries)
+  directUrl = env("POSTGRES_URL_NON_POOLING")   // Direct connection (migrations)
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  USER & AUTH
+//  1. AUTH — NextAuth Prisma Adapter
 // ═══════════════════════════════════════════════════════════════
 
 model User {
   id            String    @id @default(cuid())
-  email         String    @unique
   name          String?
+  email         String?   @unique
   emailVerified DateTime?
   image         String?
-  
-  // Subscription
-  tier          SubscriptionTier @default(FREE)
-  stripeCustomerId    String?   @unique
-  stripeSubscriptionId String?  @unique
-  stripePriceId       String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Subscription (Stripe — Phase 3)
+  tier                   SubscriptionTier @default(FREE)
+  stripeCustomerId       String?          @unique
+  stripeSubscriptionId   String?          @unique
+  stripePriceId          String?
   stripeCurrentPeriodEnd DateTime?
-  
-  // Usage tracking
+
+  // Usage limits
   dailyQuestionsUsed  Int      @default(0)
   dailyQuestionsReset DateTime @default(now())
-  totalQuestionsAsked Int      @default(0)
-  
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
   // Relations
   accounts      Account[]
   sessions      Session[]
   watchlist     WatchlistItem[]
+  preferences   UserPreferences?
+  alertSettings AlertSettings?
   alerts        Alert[]
-  chatSessions  ChatSession[]
-  briefings     Briefing[]
 
   @@map("users")
 }
 
 enum SubscriptionTier {
-  FREE
-  PRO
-  ELITE
+  FREE    // 3 tickers, 5 questions/day, delayed data
+  PRO     // 20 tickers, unlimited questions, real-time
+  ELITE   // everything + SMS/Discord alerts, priority
 }
 
 model Account {
@@ -94,7 +106,9 @@ model VerificationToken {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  WATCHLIST
+//  2. WATCHLIST
+//     Replaces: localStorage "trading-copilot-watchlist"
+//     Drives: panel data fetching, alert fan-out, cron ticker list
 // ═══════════════════════════════════════════════════════════════
 
 model WatchlistItem {
@@ -102,9 +116,7 @@ model WatchlistItem {
   userId    String
   ticker    String
   sortOrder Int      @default(0)
-  notes     String?
-  alertPrice Float?
-  createdAt DateTime @default(now())
+  addedAt   DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -114,122 +126,190 @@ model WatchlistItem {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  ALERTS
+//  3. USER PREFERENCES
+//     Replaces: localStorage "trading-copilot-preferences"
+//             + localStorage "user-storage"
+//             + localStorage chat_analysis_depth
+//             + localStorage chat_pinned_insights
 // ═══════════════════════════════════════════════════════════════
 
-model Alert {
-  id        String      @id @default(cuid())
-  userId    String
-  type      AlertType
-  ticker    String?
-  title     String
-  message   String      @db.Text
-  severity  AlertSeverity
-  isRead    Boolean     @default(false)
-  createdAt DateTime    @default(now())
+model UserPreferences {
+  userId           String  @id
+  compactMode      Boolean @default(false)
+  showTooltips     Boolean @default(true)
+  defaultTimeframe String  @default("1D")      // "1D","1W","1M","3M"
+  soundEnabled     Boolean @default(false)
+  alertsEnabled    Boolean @default(true)
+  analysisDepth    String  @default("standard") // "quick","standard","deep"
+  pinnedInsights   Json    @default("[]")       // [{ticker,insight,pinnedAt}]
+  updatedAt        DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, isRead])
-  @@index([createdAt])
+  @@map("user_preferences")
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  4. SHARED TICKER CACHE — "poll once, serve many"
+//
+//     Cron updates this every 60s for all watched tickers.
+//     1000 users × 8 tickers = 8 Polygon calls, not 8000.
+//     Previous state enables CHANGE detection (thesis flip, etc.)
+// ═══════════════════════════════════════════════════════════════
+
+model TickerCache {
+  ticker         String   @id
+
+  // Price
+  price          Float    @default(0)
+  changePercent  Float    @default(0)
+
+  // Signal states (previous cycle, for change detection)
+  thesisBias     String?                // BULLISH / BEARISH / NEUTRAL
+  confluenceCt   Int      @default(0)   // bullish signal count 0-6
+  flowLeader     String?                // calls / puts / balanced
+  cvdTrend       String?                // rising / falling / flat
+  dpRegime       String?                // accumulation / distribution / neutral
+  rsRegime       String?                // leading / lagging / inline
+  newsScore      Float?                 // -1 to 1
+
+  // Key levels
+  callWall       Float?
+  putWall        Float?
+  gexFlip        Float?
+  vwap           Float?
+
+  // Options flow aggregates
+  sweepCount     Int      @default(0)
+  topSweepStrike String?
+  topSweepValue  Float?
+
+  // Full snapshot for detail views
+  signalsJson    Json     @default("{}")
+
+  updatedAt      DateTime @updatedAt
+
+  @@map("ticker_cache")
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  5. ALERT SYSTEM
+// ═══════════════════════════════════════════════════════════════
+
+model AlertSettings {
+  userId          String   @id
+  enabledTypes    String[] @default(["confluence", "thesis_flip", "sweep_cluster", "cvd_divergence", "dark_pool_large", "key_level", "news_catalyst"])
+  sensitivity     String   @default("MEDIUM")  // LOW=T1, MEDIUM=T1+T2, HIGH=all
+  marketHoursOnly Boolean  @default(true)
+  pushEnabled     Boolean  @default(false)
+  smsEnabled      Boolean  @default(false)
+  smsPhone        String?
+  discordWebhook  String?
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("alert_settings")
+}
+
+model Alert {
+  id          String   @id @default(cuid())
+  userId      String
+  ticker      String
+  type        String                    // confluence, sweep_cluster, etc.
+  tier        Int                       // 1, 2, 3
+  title       String
+  summary     String   @db.Text
+  bias        String                    // bullish / bearish / neutral
+  confidence  String                    // LOW / MODERATE / HIGH
+  price       Float
+  target1     Float?
+  stopPrice   Float?
+  signalsJson Json     @default("[]")   // [{panel,status,detail}]
+  read        Boolean  @default(false)
+  dismissed   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, read, dismissed])
+  @@index([expiresAt])
   @@map("alerts")
 }
 
-enum AlertType {
-  PRICE
-  OPTIONS
-  NEWS
-  REGIME
-  SYSTEM
-}
-
-enum AlertSeverity {
-  INFO
-  WARNING
-  CRITICAL
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  CHAT HISTORY
-// ═══════════════════════════════════════════════════════════════
-
-model ChatSession {
-  id        String        @id @default(cuid())
+model AlertCooldown {
   userId    String
-  title     String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  ticker    String
+  alertType String
+  expiresAt DateTime
 
-  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages ChatMessage[]
-
-  @@index([userId])
-  @@map("chat_sessions")
-}
-
-model ChatMessage {
-  id          String      @id @default(cuid())
-  sessionId   String
-  role        MessageRole
-  content     String      @db.Text
-  createdAt   DateTime    @default(now())
-
-  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@index([sessionId])
-  @@map("chat_messages")
-}
-
-enum MessageRole {
-  USER
-  ASSISTANT
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  CACHED DATA (for performance)
-// ═══════════════════════════════════════════════════════════════
-
-model CachedBriefing {
-  id          String   @id @default(cuid())
-  userId      String
-  panelType   String   // 'morning_briefing', 'levels', 'gamma', 'news_pulse'
-  content     String   @db.Text
-  generatedAt DateTime @default(now())
-  expiresAt   DateTime
-
-  @@unique([userId, panelType])
+  @@id([userId, ticker, alertType])
   @@index([expiresAt])
-  @@map("cached_briefings")
-}
-
-model Briefing {
-  id        String   @id @default(cuid())
-  userId    String
-  date      String   // YYYY-MM-DD format
-  content   String   @db.Text
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, date])
-  @@index([date])
-  @@index([userId])
-  @@map("briefings")
+  @@map("alert_cooldowns")
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  ANALYTICS (optional - for tracking)
+//  6. ANALYTICS & ML RETRAINING
 // ═══════════════════════════════════════════════════════════════
+
+model ThesisLog {
+  id         String   @id @default(cuid())
+  ticker     String
+  price      Float
+  bias       String
+  score      Int
+  inputsJson Json
+  createdAt  DateTime @default(now())
+
+  @@index([ticker, createdAt(sort: Desc)])
+  @@index([createdAt])
+  @@map("thesis_logs")
+}
+
+model AlertOutcome {
+  id         String   @id @default(cuid())
+  alertId    String   @unique
+  ticker     String
+  alertType  String
+  bias       String
+  priceAt    Float
+  priceAfter Float?
+  target1    Float?
+  stopPrice  Float?
+  outcome    String?
+  pnlPercent Float?
+  createdAt  DateTime @default(now())
+
+  @@index([alertType, outcome])
+  @@map("alert_outcomes")
+}
+
+model MlPredictionLog {
+  id              String   @id @default(cuid())
+  userId          String?
+  ticker          String
+  prediction      String
+  probability     Float
+  priceAtPredict  Float
+  priceAfter      Float?
+  correct         Boolean?
+  createdAt       DateTime @default(now())
+
+  @@index([userId, ticker])
+  @@index([createdAt])
+  @@map("ml_prediction_logs")
+}
 
 model QuestionLog {
-  id        String   @id @default(cuid())
-  userId    String?
-  question  String   @db.Text
-  ticker    String?
-  verdict   String?  // BUY, SELL, WAIT, HOLD
-  responseTime Int?  // milliseconds
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  userId       String?
+  question     String   @db.Text
+  ticker       String?
+  verdict      String?
+  responseTime Int?
+  createdAt    DateTime @default(now())
 
   @@index([createdAt])
   @@index([ticker])

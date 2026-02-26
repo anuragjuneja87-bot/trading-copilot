@@ -1,99 +1,40 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { useSession } from 'next-auth/react';
 import type {
-  Alert, AlertSettings, AlertType, AlertTier, Sensitivity,
+  Alert, AlertSettings, AlertType, Sensitivity,
   AlertTypeConfig, DeliveryChannel,
 } from './alert-types';
 import { DEFAULT_ALERT_TYPES, DEFAULT_CHANNELS } from './alert-types';
+import {
+  useAlertsStore,
+  useWatchlistStore,
+} from '@/stores';
 
 /* ════════════════════════════════════════════════════════════════
-   ALERT PROVIDER — Context + state management for alert system
-
-   Manages: alerts list, unread count, read/dismiss actions,
-            settings (watchlist, alert types, sensitivity, channels),
-            toast queue, dropdown/detail/settings modal state.
-
-   Currently uses MOCK data. Backend integration points are marked
-   with // TODO: BACKEND comments for easy wiring later.
+   ALERT PROVIDER v2 — Database-backed via useAlertsStore polling
+   
+   Changes from v1 (mock):
+   - Alerts come from real DB polling (every 20s)
+   - Settings sync to /api/alerts/settings
+   - Toast triggers on NEW alerts arriving between polls
+   - Watchlist reads from useWatchlistStore (DB-synced)
+   - Works only when authenticated (silent no-op when anon)
+   
+   Same context interface — bell, toast, detail, settings
+   components require ZERO changes.
    ════════════════════════════════════════════════════════════════ */
 
-// ── Mock alerts ───────────────────────────────────────────────
-
-const MOCK_ALERTS: Alert[] = [
-  {
-    id: 'a1', ticker: 'NVDA', type: 'confluence', tier: 1,
-    title: 'High Confluence Setup',
-    summary: '5/6 panels bullish · Sweep cluster $200C · DP accumulation above VWAP · CVD rising',
-    signals: [
-      { panel: 'Options Flow', status: 'bullish', detail: 'Call dominant 60%' },
-      { panel: 'Dark Pool', status: 'bullish', detail: 'Accumulation above VWAP' },
-      { panel: 'Volume Pressure', status: 'bullish', detail: 'CVD +10.3M rising' },
-      { panel: 'Gamma', status: 'bullish', detail: 'Positive GEX, pinned' },
-      { panel: 'Relative Strength', status: 'bullish', detail: 'Leading SPY' },
-      { panel: 'News', status: 'neutral', detail: 'No catalyst' },
-    ],
-    bias: 'bullish', confidence: 'HIGH', price: 195.92,
-    target1: 200.00, stop: 190.00,
-    timestamp: Date.now() - 2 * 60_000, read: false, dismissed: false,
-  },
-  {
-    id: 'a2', ticker: 'META', type: 'sweep_cluster', tier: 2,
-    title: 'Sweep Cluster Detected',
-    summary: '4 sweeps at $650C in 90 seconds — $2.1M total premium',
-    signals: [
-      { panel: 'Options Flow', status: 'bullish', detail: '4 sweeps same strike $650C' },
-    ],
-    bias: 'bullish', confidence: 'MODERATE', price: 647.04,
-    target1: 660.00, stop: 638.00,
-    timestamp: Date.now() - 8 * 60_000, read: false, dismissed: false,
-  },
-  {
-    id: 'a3', ticker: 'SPY', type: 'thesis_flip', tier: 1,
-    title: 'Thesis Flipped → Bearish',
-    summary: 'Bias shifted BULLISH → BEARISH · CVD divergence + put dominance building',
-    signals: [
-      { panel: 'Volume Pressure', status: 'bearish', detail: 'CVD divergence detected' },
-      { panel: 'Options Flow', status: 'bearish', detail: 'Put dominance 68%' },
-      { panel: 'Relative Strength', status: 'bearish', detail: 'Lagging QQQ' },
-    ],
-    bias: 'bearish', confidence: 'HIGH', price: 593.15,
-    target1: 588.00, stop: 597.00,
-    timestamp: Date.now() - 15 * 60_000, read: false, dismissed: false,
-  },
-  {
-    id: 'a4', ticker: 'AAPL', type: 'cvd_divergence', tier: 2,
-    title: 'CVD Divergence',
-    summary: 'Price +0.3% new high but CVD falling — sellers stepping in',
-    signals: [
-      { panel: 'Volume Pressure', status: 'bearish', detail: 'CVD diverging from price' },
-    ],
-    bias: 'bearish', confidence: 'MODERATE', price: 274.20,
-    timestamp: Date.now() - 22 * 60_000, read: true, dismissed: false,
-  },
-  {
-    id: 'a5', ticker: 'QQQ', type: 'key_level', tier: 3,
-    title: 'Approaching Call Wall',
-    summary: 'Price 0.8% from call wall $620 — expect resistance or gamma squeeze',
-    signals: [
-      { panel: 'Gamma', status: 'neutral', detail: 'Price within 0.8% of call wall' },
-    ],
-    bias: 'neutral', confidence: 'LOW', price: 614.85,
-    timestamp: Date.now() - 35 * 60_000, read: true, dismissed: false,
-  },
-];
-
-// ── Context shape ─────────────────────────────────────────────
+// ── Context interface (unchanged from v1) ────────────────────
 
 interface AlertContextValue {
-  // Alerts
   alerts: Alert[];
   unreadCount: number;
   markRead: (id: string) => void;
   markAllRead: () => void;
   dismissAlert: (id: string) => void;
 
-  // UI state
   dropdownOpen: boolean;
   setDropdownOpen: (v: boolean) => void;
   detailAlert: Alert | null;
@@ -102,11 +43,9 @@ interface AlertContextValue {
   settingsOpen: boolean;
   setSettingsOpen: (v: boolean) => void;
 
-  // Toast
   toastAlert: Alert | null;
   dismissToast: () => void;
 
-  // Settings
   settings: AlertSettings;
   updateWatchlist: (tickers: string[]) => void;
   toggleAlertType: (type: AlertType) => void;
@@ -114,7 +53,6 @@ interface AlertContextValue {
   setSensitivity: (s: Sensitivity) => void;
   toggleMarketHours: () => void;
 
-  // Navigation
   onTickerClick?: (ticker: string) => void;
 }
 
@@ -126,6 +64,28 @@ export function useAlerts() {
   return ctx;
 }
 
+// ── Map DB alert → frontend Alert type ───────────────────────
+
+function mapDbAlert(db: any): Alert {
+  return {
+    id: db.id,
+    ticker: db.ticker,
+    type: db.type as AlertType,
+    tier: db.tier,
+    title: db.title,
+    summary: db.summary,
+    signals: Array.isArray(db.signalsJson) ? db.signalsJson : [],
+    bias: db.bias,
+    confidence: db.confidence,
+    price: db.price,
+    target1: db.target1 ?? undefined,
+    stop: db.stopPrice ?? undefined,
+    timestamp: new Date(db.createdAt).getTime(),
+    read: db.read,
+    dismissed: false,
+  };
+}
+
 // ── Provider ──────────────────────────────────────────────────
 
 interface AlertProviderProps {
@@ -134,22 +94,33 @@ interface AlertProviderProps {
 }
 
 export function AlertProvider({ children, onTickerClick }: AlertProviderProps) {
-  // ── Alerts state ────────────────────────────────────────────
-  const [alerts, setAlerts] = useState<Alert[]>(MOCK_ALERTS);
+  const { data: session } = useSession();
+  const isAuth = !!session?.user;
 
-  const unreadCount = alerts.filter(a => !a.read && !a.dismissed).length;
+  // ── Real alerts from Zustand store (DB-backed polling) ─────
+  const storeAlerts = useAlertsStore(s => s.alerts);
+  const storeUnread = useAlertsStore(s => s.unreadCount);
+  const storeMarkRead = useAlertsStore(s => s.markAsRead);
+  const storeMarkAll = useAlertsStore(s => s.markAllAsRead);
+  const storeDismiss = useAlertsStore(s => s.dismissAlert);
+  const startPolling = useAlertsStore(s => s.startPolling);
+  const stopPolling = useAlertsStore(s => s.stopPolling);
 
-  const markRead = useCallback((id: string) => {
-    setAlerts(prev => prev.map(a => a.id === id ? { ...a, read: true } : a));
-  }, []);
+  const alerts: Alert[] = storeAlerts.map(mapDbAlert);
+  const unreadCount = storeUnread;
 
-  const markAllRead = useCallback(() => {
-    setAlerts(prev => prev.map(a => ({ ...a, read: true })));
-  }, []);
+  // ── Start/stop polling based on auth ───────────────────────
+  useEffect(() => {
+    if (isAuth) {
+      startPolling();
+      return () => stopPolling();
+    }
+  }, [isAuth, startPolling, stopPolling]);
 
-  const dismissAlert = useCallback((id: string) => {
-    setAlerts(prev => prev.map(a => a.id === id ? { ...a, dismissed: true, read: true } : a));
-  }, []);
+  // ── Alert actions (delegate to store → DB) ─────────────────
+  const markRead = useCallback((id: string) => storeMarkRead(id), [storeMarkRead]);
+  const markAllRead = useCallback(() => storeMarkAll(), [storeMarkAll]);
+  const dismissAlert = useCallback((id: string) => storeDismiss(id), [storeDismiss]);
 
   // ── UI state ────────────────────────────────────────────────
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -157,6 +128,7 @@ export function AlertProvider({ children, onTickerClick }: AlertProviderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toastAlert, setToastAlert] = useState<Alert | null>(null);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const prevAlertIdsRef = useRef<Set<string>>(new Set());
 
   const openDetail = useCallback((alert: Alert) => {
     setDropdownOpen(false);
@@ -164,106 +136,108 @@ export function AlertProvider({ children, onTickerClick }: AlertProviderProps) {
     markRead(alert.id);
   }, [markRead]);
 
-  const closeDetail = useCallback(() => {
-    setDetailAlert(null);
-  }, []);
+  const closeDetail = useCallback(() => setDetailAlert(null), []);
 
   const dismissToast = useCallback(() => {
     setToastAlert(null);
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
   }, []);
 
-  // ── Settings state ──────────────────────────────────────────
-  const [settings, setSettings] = useState<AlertSettings>({
-    watchlist: ['SPY', 'QQQ', 'NVDA', 'META', 'AAPL', 'GOOG', 'TSLA', 'AMD'],
-    alertTypes: [...DEFAULT_ALERT_TYPES],
-    channels: [...DEFAULT_CHANNELS],
-    sensitivity: 'MEDIUM',
-    marketHoursOnly: true,
-  });
+  // ── Toast on genuinely NEW alerts ──────────────────────────
+  useEffect(() => {
+    const currentIds = new Set(alerts.map(a => a.id));
+    const newAlerts = alerts.filter(a => !a.read && !prevAlertIdsRef.current.has(a.id));
+
+    if (newAlerts.length > 0) {
+      const newest = newAlerts[0];
+      setToastAlert(newest);
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = setTimeout(() => setToastAlert(null), 8000);
+    }
+
+    prevAlertIdsRef.current = currentIds;
+  }, [alerts]);
+
+  // ── Settings state (synced to /api/alerts/settings) ────────
+  const watchlist = useWatchlistStore(s => s.watchlist);
+  const [alertTypes, setAlertTypes] = useState<AlertTypeConfig[]>([...DEFAULT_ALERT_TYPES]);
+  const [channels, setChannels] = useState<DeliveryChannel[]>([...DEFAULT_CHANNELS]);
+  const [sensitivity, setSensitivityLocal] = useState<Sensitivity>('MEDIUM');
+  const [marketHoursOnly, setMarketHoursLocal] = useState(true);
+
+  // Load settings from DB on auth
+  useEffect(() => {
+    if (!isAuth) return;
+    fetch('/api/alerts/settings')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        if (data.enabledTypes) {
+          const enabled = new Set(data.enabledTypes);
+          setAlertTypes(prev => prev.map(at => ({ ...at, enabled: enabled.has(at.type) })));
+        }
+        if (data.sensitivity) setSensitivityLocal(data.sensitivity);
+        if (data.marketHoursOnly !== undefined) setMarketHoursLocal(data.marketHoursOnly);
+      })
+      .catch(() => {});
+  }, [isAuth]);
+
+  const settings: AlertSettings = { watchlist, alertTypes, channels, sensitivity, marketHoursOnly };
+
+  const persistSettings = useCallback((updates: Record<string, any>) => {
+    if (!isAuth) return;
+    fetch('/api/alerts/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch(() => {});
+  }, [isAuth]);
 
   const updateWatchlist = useCallback((tickers: string[]) => {
-    setSettings(prev => ({ ...prev, watchlist: tickers }));
-    // TODO: BACKEND — persist watchlist
+    useWatchlistStore.getState().setWatchlist(tickers);
   }, []);
 
   const toggleAlertType = useCallback((type: AlertType) => {
-    setSettings(prev => ({
-      ...prev,
-      alertTypes: prev.alertTypes.map(at =>
-        at.type === type ? { ...at, enabled: !at.enabled } : at
-      ),
-    }));
-    // TODO: BACKEND — persist alert type preferences
-  }, []);
+    setAlertTypes(prev => {
+      const updated = prev.map(at => at.type === type ? { ...at, enabled: !at.enabled } : at);
+      persistSettings({ enabledTypes: updated.filter(at => at.enabled).map(at => at.type) });
+      return updated;
+    });
+  }, [persistSettings]);
 
   const toggleChannel = useCallback((id: string) => {
-    setSettings(prev => ({
-      ...prev,
-      channels: prev.channels.map(ch =>
+    setChannels(prev => {
+      const updated = prev.map(ch =>
         ch.id === id && ch.status !== 'always_on' ? { ...ch, enabled: !ch.enabled } : ch
-      ),
-    }));
-    // TODO: BACKEND — persist channel preferences
-  }, []);
+      );
+      persistSettings({
+        pushEnabled: updated.find(c => c.id === 'browser_push')?.enabled ?? false,
+        smsEnabled: updated.find(c => c.id === 'sms')?.enabled ?? false,
+      });
+      return updated;
+    });
+  }, [persistSettings]);
 
   const setSensitivity = useCallback((s: Sensitivity) => {
-    setSettings(prev => ({ ...prev, sensitivity: s }));
-    // TODO: BACKEND — persist sensitivity
-  }, []);
+    setSensitivityLocal(s);
+    persistSettings({ sensitivity: s });
+  }, [persistSettings]);
 
   const toggleMarketHours = useCallback(() => {
-    setSettings(prev => ({ ...prev, marketHoursOnly: !prev.marketHoursOnly }));
-    // TODO: BACKEND — persist schedule
-  }, []);
-
-  // ── Demo: simulate toast on mount (remove when backend is wired) ──
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      const newest = alerts.find(a => !a.read);
-      if (newest) {
-        setToastAlert(newest);
-        toastTimeoutRef.current = setTimeout(() => setToastAlert(null), 8000);
-      }
-    }, 2000);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // TODO: BACKEND — SSE/WebSocket listener for real-time alerts
-  // useEffect(() => {
-  //   const es = new EventSource('/api/alerts/stream');
-  //   es.onmessage = (e) => {
-  //     const alert = JSON.parse(e.data);
-  //     setAlerts(prev => [alert, ...prev]);
-  //     setToastAlert(alert);
-  //     toastTimeoutRef.current = setTimeout(() => setToastAlert(null), 8000);
-  //   };
-  //   return () => es.close();
-  // }, []);
+    setMarketHoursLocal(prev => {
+      persistSettings({ marketHoursOnly: !prev });
+      return !prev;
+    });
+  }, [persistSettings]);
 
   return (
     <AlertContext.Provider value={{
-      alerts: alerts.filter(a => !a.dismissed),
-      unreadCount,
-      markRead,
-      markAllRead,
-      dismissAlert,
-      dropdownOpen,
-      setDropdownOpen,
-      detailAlert,
-      openDetail,
-      closeDetail,
-      settingsOpen,
-      setSettingsOpen,
-      toastAlert,
-      dismissToast,
-      settings,
-      updateWatchlist,
-      toggleAlertType,
-      toggleChannel,
-      setSensitivity,
-      toggleMarketHours,
+      alerts, unreadCount, markRead, markAllRead, dismissAlert,
+      dropdownOpen, setDropdownOpen,
+      detailAlert, openDetail, closeDetail,
+      settingsOpen, setSettingsOpen,
+      toastAlert, dismissToast,
+      settings, updateWatchlist, toggleAlertType, toggleChannel, setSensitivity, toggleMarketHours,
       onTickerClick,
     }}>
       {children}

@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';
+import { SessionProvider } from 'next-auth/react';
 import { ToastContainer } from '@/components/ui/toast';
 import { WebSocketProvider } from '@/lib/websocket';
 
@@ -45,15 +46,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <WebSocketProvider apiKey={wsKey}>
-        {children}
-      </WebSocketProvider>
-      <ToastContainer />
-      {process.env.NODE_ENV === 'development' && (
-        <ReactQueryDevtools initialIsOpen={false} position="bottom" />
-      )}
-    </QueryClientProvider>
+    <SessionProvider>
+      <QueryClientProvider client={queryClient}>
+        <WebSocketProvider apiKey={wsKey}>
+          {children}
+        </WebSocketProvider>
+        <ToastContainer />
+        {process.env.NODE_ENV === 'development' && (
+          <ReactQueryDevtools initialIsOpen={false} position="bottom" />
+        )}
+      </QueryClientProvider>
+    </SessionProvider>
   );
 }
 

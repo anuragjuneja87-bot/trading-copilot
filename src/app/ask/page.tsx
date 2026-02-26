@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useWatchlistStore } from '@/stores';
+import { useSession } from 'next-auth/react';
+import { useWatchlistStore, useAuthStore, useUserPreferencesStore } from '@/stores';
 import { useWarRoomData } from '@/hooks/use-war-room-data';
 import { useMLPrediction } from '@/hooks/use-ml-prediction';
 import { COLORS } from '@/lib/echarts-theme';
@@ -31,6 +32,7 @@ import { DataSourceBadge } from '@/components/war-room/data-source-badge';
 import { MarketClock } from '@/components/war-room/market-clock';
 import { AlertProvider } from '@/components/ask/alert-provider';
 import { AlertBell } from '@/components/ask/alert-bell';
+import { UserAuthButton } from '@/components/ask/user-auth-button';
 import { AlertToast } from '@/components/ask/alert-toast';
 import { AlertDetailModal } from '@/components/ask/alert-detail-modal';
 import { AlertSettingsModal } from '@/components/ask/alert-settings-modal';
@@ -246,6 +248,17 @@ function AskPageContent() {
   const searchParams = useSearchParams();
   const selectedTicker = searchParams.get('symbol');
   const watchlist = useWatchlistStore((state) => state.watchlist);
+  const { data: session } = useSession();
+
+  useEffect(() => {
+    if (session?.user?.id) {
+      useAuthStore.getState().setAuth((session.user as { id: string }).id);
+      useWatchlistStore.getState().syncFromServer();
+      useUserPreferencesStore.getState().syncFromServer();
+    } else {
+      useAuthStore.getState().clearAuth();
+    }
+  }, [session]);
 
   const [timeframe, setTimeframe] = useState<Timeframe>(DEFAULT_TIMEFRAME);
 
@@ -416,6 +429,7 @@ function AskPageContent() {
               <div className="flex-1" />
 
               <AlertBell />
+              <UserAuthButton />
               <DataSourceBadge lastUpdate={data.lastUpdate} />
               <div
                 className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
@@ -593,6 +607,7 @@ function AskPageContent() {
             </div>
           </div>
         </main>
+      </div>
       </div>
       <AlertToast />
       <AlertDetailModal />

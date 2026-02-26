@@ -1,8 +1,40 @@
-cp ~/Downloads/cvd-line-chart.tsx src/components/ask/cvd-line-chart.tsx
-cp ~/Downloads/rs-line-chart.tsx src/components/ask/rs-line-chart.tsx
-cp ~/Downloads/volume-pressure-panel.tsx src/components/ask/volume-pressure-panel.tsx
-cp ~/Downloads/relative-strength-panel.tsx src/components/ask/relative-strength-panel.tsx
-cp ~/Downloads/options-flow-panel.tsx src/components/ask/options-flow-panel.tsx
-cp ~/Downloads/options-flow-line-chart.tsx src/components/ask/options-flow-line-chart.tsx
-cp ~/Downloads/flow-options-route.ts src/app/api/flow/options/route.ts
-git add -A && git commit -m "feat: upgrade all time-series panels to lightweight-charts" && git push origin main
+# Schema
+cp ~/Downloads/schema.prisma prisma/schema.prisma
+
+# Prisma client singleton
+cp ~/Downloads/prisma.ts src/lib/prisma.ts
+
+# Auth
+cp ~/Downloads/auth-options.ts src/lib/auth-options.ts
+cp ~/Downloads/auth-helper.ts src/lib/auth-helper.ts
+mkdir -p src/app/api/auth/\[...nextauth\]
+cp ~/Downloads/nextauth-route.ts src/app/api/auth/\[...nextauth\]/route.ts
+
+# API routes
+mkdir -p src/app/api/user/watchlist
+cp ~/Downloads/api-user-watchlist-route.ts src/app/api/user/watchlist/route.ts
+
+mkdir -p src/app/api/user/preferences
+cp ~/Downloads/api-user-preferences-route.ts src/app/api/user/preferences/route.ts
+
+mkdir -p src/app/api/alerts
+cp ~/Downloads/api-alerts-route.ts src/app/api/alerts/route.ts
+
+mkdir -p src/app/api/alerts/read
+cp ~/Downloads/api-alerts-read-route.ts src/app/api/alerts/read/route.ts
+
+mkdir -p src/app/api/alerts/settings
+cp ~/Downloads/api-alerts-settings-route.ts src/app/api/alerts/settings/route.ts
+
+# Signal detectors
+cp ~/Downloads/signal-detectors.ts src/lib/signal-detectors.ts
+
+# Alert engine cron
+mkdir -p src/app/api/cron/alert-engine
+cp ~/Downloads/api-cron-alert-engine-route.ts src/app/api/cron/alert-engine/route.ts
+
+# Updated stores
+cp ~/Downloads/stores-index.ts src/stores/index.ts
+
+# Vercel config
+cp ~/Downloads/vercel.json vercel.json

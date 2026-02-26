@@ -147,6 +147,21 @@ export function middleware(request: NextRequest) {
     );
   }
 
+  // Allow NextAuth routes through (OAuth callbacks come from Google)
+  if (pathname.startsWith('/api/auth/')) {
+    return addSecurityHeaders(NextResponse.next());
+  }
+
+  // Allow user API routes (authenticated via session)
+  if (pathname.startsWith('/api/user/')) {
+    return addSecurityHeaders(NextResponse.next());
+  }
+
+  // Allow alert API routes
+  if (pathname.startsWith('/api/alerts')) {
+    return addSecurityHeaders(NextResponse.next());
+  }
+
   // ── Authentication: Origin check OR API secret ──
   const origin = request.headers.get('origin');
   const referer = request.headers.get('referer');

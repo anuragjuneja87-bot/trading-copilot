@@ -55,3 +55,4 @@ test-*.js
 test_*.py
 diagnose.sh
 *.log
+.env*.local
