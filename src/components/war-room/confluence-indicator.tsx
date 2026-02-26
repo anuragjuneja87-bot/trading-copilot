@@ -213,7 +213,8 @@ export function ConfluenceIndicator({
     // Group sweeps by strike, detect ≥2 at same strike
     if (trades?.length) {
       const sweeps = trades.filter(t =>
-        t.tradeType === 'SWEEP' || t.tradeType === 'INTERMARKET_SWEEP' || t.isSweep
+        (t.tradeType === 'SWEEP' || t.tradeType === 'INTERMARKET_SWEEP' || t.isSweep)
+        && (t.premium || 0) >= 5000  // filter junk sweeps under $5K
       );
 
       if (sweeps.length > 0) {
@@ -242,7 +243,7 @@ export function ConfluenceIndicator({
         }
 
         // If any sweeps exist but no clusters, report total sweep activity
-        if (result.filter(r => r.type === 'SWEEP CLUSTER').length === 0 && sweeps.length >= 1) {
+        if (result.filter(r => r.type === 'SWEEP CLUSTER').length === 0 && sweeps.length >= 2) {
           const totalSweepPrem = sweeps.reduce((s, t) => s + (t.premium || 0), 0);
           const sweepCalls = sweeps.filter(s => s.callPut === 'C').length;
           const sweepPuts = sweeps.length - sweepCalls;
