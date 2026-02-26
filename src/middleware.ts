@@ -162,6 +162,11 @@ export function middleware(request: NextRequest) {
     return addSecurityHeaders(NextResponse.next());
   }
 
+  // Allow cron routes (Vercel Cron / external schedulers)
+  if (pathname.startsWith('/api/cron/')) {
+    return addSecurityHeaders(NextResponse.next());
+  }
+
   // ── Authentication: Origin check OR API secret ──
   const origin = request.headers.get('origin');
   const referer = request.headers.get('referer');
