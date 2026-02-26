@@ -61,8 +61,10 @@ export function OptionsFlowPanel({
     const fetchFullSession = async () => {
       try {
         // NO from/to params → gets full session data
+        // limit=10000 needed because high-volume tickers like NVDA
+        // trade thousands of options per minute (500 = ~1 min of NVDA data)
         const res = await fetch(
-          `/api/flow/options?tickers=${ticker}&limit=500&_t=${Date.now()}`,
+          `/api/flow/options?tickers=${ticker}&limit=10000&_t=${Date.now()}`,
           { cache: 'no-store' }
         );
         const json = await res.json();
@@ -230,15 +232,23 @@ export function OptionsFlowPanel({
     ctx.fillStyle = C.red; ctx.fillText('PUTS', W - PAD.right + 4, pLY - 4);
     ctx.fillText(fmtDollar(lineData.puts[N - 1]).replace('+', ''), W - PAD.right + 4, pLY + 8);
 
-    // ── ALL crossover markers ──
+    // ── ALL crossover markers (subtle) ──
     lineData.crossovers.forEach(cross => {
       const cx = xPos(cross.idx), cy = yPos(lineData.calls[cross.idx]);
-      ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(251,191,36,0.2)'; ctx.fill();
-      ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = C.yellow; ctx.fill();
-      ctx.fillStyle = 'rgba(251,191,36,0.6)'; ctx.font = `600 8px ${FONT_MONO}`;
-      ctx.textAlign = 'center'; ctx.fillText('CROSS', cx, cy - 10);
+      // Outer glow
+      ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.fillStyle = cross.type === 'bull' ? 'rgba(0,220,130,0.15)' : 'rgba(255,71,87,0.15)';
+      ctx.fill();
+      // Inner dot
+      ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+      ctx.fillStyle = cross.type === 'bull' ? 'rgba(0,220,130,0.7)' : 'rgba(255,71,87,0.7)';
+      ctx.fill();
+      // Small label — only show if enough space (skip if too many crossovers)
+      if (lineData.crossovers.length <= 5) {
+        ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = `500 7px ${FONT_MONO}`;
+        ctx.textAlign = 'center';
+        ctx.fillText(cross.type === 'bull' ? '▲' : '▼', cx, cy - 7);
+      }
     });
 
     // ── X-axis labels ──

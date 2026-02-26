@@ -507,7 +507,7 @@ export async function GET(request: NextRequest) {
 
           try {
             const tradesUrl = new URL(`https://api.polygon.io/v3/trades/${optionTicker}`);
-            tradesUrl.searchParams.set('limit', '10');
+            tradesUrl.searchParams.set('limit', '30');
             tradesUrl.searchParams.set('order', 'desc');
             tradesUrl.searchParams.set('apiKey', POLYGON_API_KEY);
 
