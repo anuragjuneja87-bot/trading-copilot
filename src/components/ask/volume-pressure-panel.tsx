@@ -1,42 +1,22 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import ReactECharts from 'echarts-for-react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { COLORS } from '@/lib/echarts-theme';
-import { isMarketClosed, getLastTradingDay, formatTradingDay, getMarketStatus } from '@/lib/market-utils';
+import { isMarketClosed, getLastTradingDay, formatTradingDay } from '@/lib/market-utils';
+import {
+  PANEL_COLORS as C, FONT_MONO, fmtVol,
+  setupCanvas, drawGridLines, panelStyles as S,
+} from '@/lib/panel-design-system';
 
 /* ════════════════════════════════════════════════════════════════
-   VOLUME PRESSURE PANEL v2.2 — Extended hours CVD
-   
-   v2.2 changes:
-   - Pre-market + after-hours included in CVD (continuous line)
-   - Session markers: vertical dashed lines at 9:30 AM + 4:00 PM
-   - Background tint for pre-market / after-hours regions
-   - Session pressure computed across all sessions
-   - Bold 3px CVD line with 35% area fill
+   VOLUME PRESSURE PANEL v3 — Canvas CVD, Session-Aware
    ════════════════════════════════════════════════════════════════ */
 
 interface VolumePressurePanelProps {
   ticker: string;
-  timeframeRange?: {
-    from: number;
-    to: number;
-    label: string;
-    isMarketClosed?: boolean;
-    tradingDay?: string;
-  };
+  timeframeRange?: { from: number; to: number; label: string; isMarketClosed?: boolean; tradingDay?: string; };
 }
-
-interface TickBucket {
-  time: string;
-  timeMs: number;
-  buyVolume: number;
-  sellVolume: number;
-  totalVolume: number;
-  pressure: number;
-  session?: 'pre' | 'rth' | 'post';
-}
-
+interface TickBucket { time: string; timeMs: number; buyVolume: number; sellVolume: number; totalVolume: number; pressure: number; session?: 'pre' | 'rth' | 'post'; }
 const ROLLING_WINDOW = 15;
 
 export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePanelProps) {
@@ -45,377 +25,138 @@ export function VolumePressurePanel({ ticker, timeframeRange }: VolumePressurePa
   const [error, setError] = useState<string | null>(null);
   const [bucketLabel, setBucketLabel] = useState('1min buckets');
   const [sessionBounds, setSessionBounds] = useState<{ rthOpenIdx: number; rthCloseIdx: number }>({ rthOpenIdx: -1, rthCloseIdx: -1 });
-  
-  const marketStatus = getMarketStatus();
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const isClosed = isMarketClosed();
-  const lastTradingDay = getLastTradingDay();
-  const tradingDayStr = formatTradingDay(lastTradingDay);
-  
+  const tradingDayStr = formatTradingDay(getLastTradingDay());
   const hasData = data.length > 0;
   const isStaleData = isClosed && hasData;
 
   useEffect(() => {
-    const fetchTickData = async () => {
+    const f = async () => {
       if (!ticker) return;
-      
       setLoading(true);
       try {
         let url = `/api/market/volume-pressure?ticker=${ticker}`;
-        if (timeframeRange) {
-          url += `&from=${timeframeRange.from}&to=${timeframeRange.to}`;
-        }
-        
+        if (timeframeRange) url += `&from=${timeframeRange.from}&to=${timeframeRange.to}`;
         const res = await fetch(url);
         const json = await res.json();
-        
         if (json.success && json.data) {
           setData(json.data.buckets || []);
-          if (json.data.bucketMinutes) {
-            setBucketLabel(`${json.data.bucketMinutes}min buckets`);
-          }
-          if (json.data.sessionBoundaries) {
-            setSessionBounds(json.data.sessionBoundaries);
-          }
-        } else {
-          setError(json.error || 'Failed to load');
-        }
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
+          if (json.data.bucketMinutes) setBucketLabel(`${json.data.bucketMinutes}min buckets`);
+          if (json.data.sessionBoundaries) setSessionBounds(json.data.sessionBoundaries);
+        } else setError(json.error || 'Failed to load');
+      } catch (err: any) { setError(err.message); }
+      finally { setLoading(false); }
     };
-
-    fetchTickData();
-    const interval = setInterval(fetchTickData, 60000);
-    return () => clearInterval(interval);
+    f();
+    const iv = setInterval(f, 60000);
+    return () => clearInterval(iv);
   }, [ticker, timeframeRange]);
 
-  // ── Compute CVD + pressure metrics ──
   const metrics = useMemo(() => {
     if (!data.length) return null;
-    
-    let cumulativeDelta = 0;
-    const cvdData: number[] = [];
-    const timeLabels: string[] = [];
-    let totalBuy = 0;
-    let totalSell = 0;
-    
-    data.forEach((d) => {
-      cumulativeDelta += (d.buyVolume - d.sellVolume);
-      cvdData.push(cumulativeDelta);
-      timeLabels.push(d.time);
-      totalBuy += d.buyVolume;
-      totalSell += d.sellVolume;
-    });
-    
+    let cvd = 0; const cvdArr: number[] = []; let totalBuy = 0, totalSell = 0;
+    data.forEach(d => { cvd += d.buyVolume - d.sellVolume; cvdArr.push(cvd); totalBuy += d.buyVolume; totalSell += d.sellVolume; });
     const totalVol = totalBuy + totalSell;
-    const sessionPressure = totalVol > 0 
-      ? Math.round(((totalBuy - totalSell) / totalVol) * 100) 
-      : 0;
-    
-    const recentBuckets = data.slice(-ROLLING_WINDOW);
-    const recentBuy = recentBuckets.reduce((s, d) => s + d.buyVolume, 0);
-    const recentSell = recentBuckets.reduce((s, d) => s + d.sellVolume, 0);
-    const recentTotal = recentBuy + recentSell;
-    const rollingPressure = recentTotal > 0 
-      ? Math.round(((recentBuy - recentSell) / recentTotal) * 100) 
-      : 0;
-    
+    const sessionPressure = totalVol > 0 ? Math.round(((totalBuy - totalSell) / totalVol) * 100) : 0;
+    const recent = data.slice(-ROLLING_WINDOW);
+    const rBuy = recent.reduce((s, d) => s + d.buyVolume, 0), rSell = recent.reduce((s, d) => s + d.sellVolume, 0);
+    const rTotal = rBuy + rSell;
+    const rollingPressure = rTotal > 0 ? Math.round(((rBuy - rSell) / rTotal) * 100) : 0;
     const trendDelta = rollingPressure - sessionPressure;
-    
-    return {
-      timeLabels,
-      cvdData,
-      sessionPressure,
-      rollingPressure,
-      trendDelta,
-      totalBuy: Math.round(totalBuy),
-      totalSell: Math.round(totalSell),
-    };
+    const peakVal = Math.max(...cvdArr); const peakIdx = cvdArr.indexOf(peakVal);
+    const currentCvd = cvdArr[cvdArr.length - 1] || 0;
+    const mw = Math.min(30, cvdArr.length);
+    const cvdMomentum = currentCvd - (cvdArr[cvdArr.length - mw] || 0);
+    const buyPct = totalVol > 0 ? Math.round((totalBuy / totalVol) * 100) : 50;
+    return { cvdArr, sessionPressure, rollingPressure, trendDelta, totalBuy: Math.round(totalBuy), totalSell: Math.round(totalSell), peakVal, peakIdx, peakTime: data[peakIdx]?.time || '', currentCvd, cvdMomentum, buyPct };
   }, [data]);
 
-  const sessionPressure = metrics?.sessionPressure || 0;
-  const rollingPressure = metrics?.rollingPressure || 0;
-  const trendDelta = metrics?.trendDelta || 0;
-  
-  const pressureLabel = sessionPressure > 10 ? 'BUYERS' : 
-                        sessionPressure < -10 ? 'SELLERS' : 'BALANCED';
-  const pressureColor = sessionPressure > 10 ? COLORS.green : 
-                        sessionPressure < -10 ? COLORS.red : COLORS.yellow;
-  
-  const trendLabel = trendDelta > 8 ? '↑ Accelerating' : 
-                     trendDelta < -8 ? '↓ Fading' : '→ Steady';
-  const trendColor = trendDelta > 8 ? COLORS.green : 
-                     trendDelta < -8 ? COLORS.red : '#888';
-
-  const formatVol = (v: number) => {
-    const abs = Math.abs(v);
-    if (abs >= 1000000) return `${(v / 1000000).toFixed(1)}M`;
-    if (abs >= 1000) return `${(v / 1000).toFixed(0)}K`;
-    return v.toString();
-  };
-
-  // ── CVD chart with session markers ──
-  const chartOption = useMemo(() => {
-    if (!metrics) return null;
-    
-    const lastCvd = metrics.cvdData[metrics.cvdData.length - 1] || 0;
-    const isPositiveCvd = lastCvd >= 0;
-    const fillTop = isPositiveCvd ? 'rgba(0,220,130,0.35)' : 'rgba(255,71,87,0.35)';
-    const fillBottom = isPositiveCvd ? 'rgba(0,220,130,0.03)' : 'rgba(255,71,87,0.03)';
-    const lineColor = isPositiveCvd ? '#00dc82' : '#ff4757';
-
-    // ★ Build session boundary markLines and markAreas
-    const markLineData: any[] = [];
-    const markAreaData: any[] = [];
-
-    // RTH open line (9:30 AM)
-    if (sessionBounds.rthOpenIdx >= 0 && sessionBounds.rthOpenIdx < metrics.timeLabels.length) {
-      markLineData.push({
-        xAxis: metrics.timeLabels[sessionBounds.rthOpenIdx],
-        label: {
-          show: true,
-          formatter: 'OPEN',
-          position: 'start',
-          fontSize: 9,
-          color: 'rgba(255,255,255,0.4)',
-          fontWeight: 'bold',
-        },
-        lineStyle: { color: 'rgba(255,255,255,0.15)', type: 'dashed', width: 1 },
-      });
+  const drawChart = useCallback(() => {
+    const canvas = canvasRef.current; const container = containerRef.current;
+    if (!canvas || !container || !metrics || !data.length) return;
+    const r = setupCanvas(canvas, container); if (!r) return;
+    const { ctx, W, H } = r;
+    const PAD = { top: 12, right: 50, bottom: 24, left: 50 };
+    const cW = W - PAD.left - PAD.right, cH = H - PAD.top - PAD.bottom;
+    const N = metrics.cvdArr.length; if (N < 2) return;
+    const cvdMin = Math.min(...metrics.cvdArr), cvdMax = Math.max(...metrics.cvdArr);
+    const range = cvdMax - cvdMin || 1, padded = range * 0.05;
+    const yMin = cvdMin - padded, yMax = cvdMax + padded, yRange = yMax - yMin;
+    const xPos = (i: number) => PAD.left + (i / (N - 1)) * cW;
+    const yPos = (v: number) => PAD.top + (1 - (v - yMin) / yRange) * cH;
+    const oIdx = sessionBounds.rthOpenIdx, cIdx = sessionBounds.rthCloseIdx;
+    ctx.clearRect(0, 0, W, H);
+    if (oIdx > 0) { ctx.fillStyle = C.indigo; ctx.fillRect(PAD.left, PAD.top, xPos(oIdx) - PAD.left, cH); }
+    if (cIdx > 0 && cIdx < N - 1) { ctx.fillStyle = C.indigo; ctx.fillRect(xPos(cIdx), PAD.top, W - PAD.right - xPos(cIdx), cH); }
+    drawGridLines(ctx, PAD, W, H);
+    const zeroY = yPos(0); const zV = zeroY > PAD.top && zeroY < PAD.top + cH;
+    if (zV) { ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.setLineDash([4, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(PAD.left, Math.round(zeroY) + 0.5); ctx.lineTo(W - PAD.right, Math.round(zeroY) + 0.5); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.font = `500 9px ${FONT_MONO}`; ctx.textAlign = 'right'; ctx.fillText('0', PAD.left - 6, zeroY + 3); }
+    [oIdx, cIdx].forEach(idx => { if (idx <= 0 || idx >= N) return; ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.setLineDash([4, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(Math.round(xPos(idx)) + 0.5, PAD.top); ctx.lineTo(Math.round(xPos(idx)) + 0.5, PAD.top + cH); ctx.stroke(); ctx.setLineDash([]); });
+    const eZ = zV ? zeroY : (metrics.currentCvd >= 0 ? PAD.top + cH : PAD.top);
+    if (zV) {
+      ctx.beginPath(); ctx.moveTo(xPos(0), eZ); for (let i = 0; i < N; i++) ctx.lineTo(xPos(i), Math.min(yPos(metrics.cvdArr[i]), eZ)); ctx.lineTo(xPos(N - 1), eZ); ctx.closePath();
+      const gU = ctx.createLinearGradient(0, PAD.top, 0, eZ); gU.addColorStop(0, 'rgba(0,220,130,0.18)'); gU.addColorStop(1, 'rgba(0,220,130,0.02)'); ctx.fillStyle = gU; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(xPos(0), eZ); for (let i = 0; i < N; i++) ctx.lineTo(xPos(i), Math.max(yPos(metrics.cvdArr[i]), eZ)); ctx.lineTo(xPos(N - 1), eZ); ctx.closePath();
+      const gD = ctx.createLinearGradient(0, eZ, 0, PAD.top + cH); gD.addColorStop(0, 'rgba(255,71,87,0.02)'); gD.addColorStop(1, 'rgba(255,71,87,0.18)'); ctx.fillStyle = gD; ctx.fill();
     }
-
-    // RTH close line (4:00 PM)
-    if (sessionBounds.rthCloseIdx >= 0 && sessionBounds.rthCloseIdx < metrics.timeLabels.length) {
-      markLineData.push({
-        xAxis: metrics.timeLabels[sessionBounds.rthCloseIdx],
-        label: {
-          show: true,
-          formatter: 'CLOSE',
-          position: 'start',
-          fontSize: 9,
-          color: 'rgba(255,255,255,0.4)',
-          fontWeight: 'bold',
-        },
-        lineStyle: { color: 'rgba(255,255,255,0.15)', type: 'dashed', width: 1 },
-      });
+    for (let i = 0; i < N - 1; i++) {
+      const sess = data[i].session; const lw = sess === 'rth' ? 3 : 1.5; const op = sess === 'rth' ? 0.9 : 0.4;
+      const v1 = metrics.cvdArr[i], v2 = metrics.cvdArr[i + 1];
+      if ((v1 >= 0 && v2 >= 0) || (v1 < 0 && v2 < 0)) { ctx.strokeStyle = v1 >= 0 ? `rgba(0,220,130,${op})` : `rgba(255,71,87,${op})`; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(xPos(i), yPos(v1)); ctx.lineTo(xPos(i + 1), yPos(v2)); ctx.stroke(); }
+      else { const t = v1 / (v1 - v2); const xM = xPos(i) + t * (xPos(i + 1) - xPos(i)); const yM = zV ? zeroY : (yPos(v1) + yPos(v2)) / 2; ctx.strokeStyle = v1 >= 0 ? `rgba(0,220,130,${op})` : `rgba(255,71,87,${op})`; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(xPos(i), yPos(v1)); ctx.lineTo(xM, yM); ctx.stroke(); ctx.strokeStyle = v2 >= 0 ? `rgba(0,220,130,${op})` : `rgba(255,71,87,${op})`; ctx.beginPath(); ctx.moveTo(xM, yM); ctx.lineTo(xPos(i + 1), yPos(v2)); ctx.stroke(); }
     }
-
-    // ★ Pre-market tint (start of data to RTH open)
-    if (sessionBounds.rthOpenIdx > 0) {
-      markAreaData.push([
-        { xAxis: metrics.timeLabels[0], itemStyle: { color: 'rgba(99,102,241,0.05)' } },
-        { xAxis: metrics.timeLabels[sessionBounds.rthOpenIdx] },
-      ]);
-    }
-
-    // ★ After-hours tint (RTH close to end of data)
-    if (sessionBounds.rthCloseIdx >= 0 && sessionBounds.rthCloseIdx < metrics.timeLabels.length - 1) {
-      markAreaData.push([
-        { xAxis: metrics.timeLabels[sessionBounds.rthCloseIdx], itemStyle: { color: 'rgba(99,102,241,0.05)' } },
-        { xAxis: metrics.timeLabels[metrics.timeLabels.length - 1] },
-      ]);
-    }
-
-    return {
-      tooltip: {
-        trigger: 'axis',
-        backgroundColor: 'rgba(0,0,0,0.85)',
-        borderColor: 'rgba(255,255,255,0.1)',
-        textStyle: { color: '#fff', fontSize: 12 },
-        formatter: (params: any) => {
-          const time = params[0]?.axisValue || '';
-          const cvd = params[0]?.value || 0;
-          const idx = params[0]?.dataIndex || 0;
-          const bucket = data[idx];
-          const sessionTag = bucket?.session === 'pre' ? ' <span style="color:#818cf8;font-size:10px">PRE</span>' 
-                           : bucket?.session === 'post' ? ' <span style="color:#818cf8;font-size:10px">AH</span>' : '';
-          const color = cvd >= 0 ? '#00dc82' : '#ff4757';
-          return `<div style="font-weight:bold;margin-bottom:4px">${time}${sessionTag}</div>` +
-            `<div style="color:${color}">CVD: ${formatVol(cvd)}</div>`;
-        },
-      },
-      grid: { top: 20, right: 55, bottom: 45, left: 55 },
-      dataZoom: [
-        {
-          type: 'inside',
-          xAxisIndex: 0,
-          zoomOnMouseWheel: true,
-          moveOnMouseMove: true,
-          moveOnMouseWheel: false,
-        },
-        {
-          type: 'slider',
-          xAxisIndex: 0,
-          height: 18,
-          bottom: 2,
-          start: 0,
-          end: 100,
-          borderColor: 'transparent',
-          backgroundColor: 'rgba(255,255,255,0.03)',
-          fillerColor: 'rgba(0,220,130,0.1)',
-          handleStyle: { color: '#00dc82', borderColor: '#00dc82' },
-          textStyle: { color: '#666', fontSize: 9 },
-          dataBackground: {
-            lineStyle: { color: `${lineColor}50` },
-            areaStyle: { color: `${lineColor}0A` },
-          },
-        },
-      ],
-      xAxis: {
-        type: 'category',
-        data: metrics.timeLabels,
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { fontSize: 11, color: '#888' },
-      },
-      yAxis: {
-        type: 'value',
-        min: 'dataMin',
-        max: 'dataMax',
-        axisLine: { show: false },
-        axisTick: { show: false },
-        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)', type: 'dashed' } },
-        axisLabel: { fontSize: 11, color: '#888', formatter: (v: number) => formatVol(v) },
-      },
-      series: [
-        {
-          name: 'CVD',
-          type: 'line',
-          data: metrics.cvdData,
-          smooth: 0.3,
-          symbol: 'none',
-          lineStyle: { width: 3, color: lineColor },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: fillTop },
-                { offset: 1, color: fillBottom },
-              ],
-            },
-          },
-          itemStyle: { color: lineColor },
-          // ★ Session boundary markers
-          markLine: {
-            silent: true,
-            symbol: 'none',
-            data: markLineData,
-          },
-          markArea: {
-            silent: true,
-            data: markAreaData,
-          },
-          z: 10,
-        },
-      ],
-    };
+    if (metrics.peakIdx >= 0) { const px = xPos(metrics.peakIdx), py = yPos(metrics.peakVal); ctx.fillStyle = C.green; ctx.beginPath(); ctx.moveTo(px, py - 4); ctx.lineTo(px + 3, py); ctx.lineTo(px, py + 4); ctx.lineTo(px - 3, py); ctx.closePath(); ctx.fill(); ctx.fillStyle = 'rgba(0,220,130,0.5)'; ctx.font = `600 8px ${FONT_MONO}`; ctx.textAlign = 'center'; ctx.fillText('Peak', px, py - 8); }
+    const lX = xPos(N - 1), lY = yPos(metrics.currentCvd), lC = metrics.currentCvd >= 0 ? C.green : C.red;
+    ctx.beginPath(); ctx.arc(lX, lY, 7, 0, Math.PI * 2); ctx.fillStyle = metrics.currentCvd >= 0 ? 'rgba(0,220,130,0.12)' : 'rgba(255,71,87,0.12)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(lX, lY, 3.5, 0, Math.PI * 2); ctx.fillStyle = lC; ctx.fill();
+    ctx.fillStyle = lC; ctx.font = `700 11px ${FONT_MONO}`; ctx.textAlign = 'left'; ctx.fillText(fmtVol(metrics.currentCvd), W - PAD.right + 6, lY + 4);
+    ctx.fillStyle = C.textMuted; ctx.font = `500 10px ${FONT_MONO}`; ctx.textAlign = 'right';
+    for (let i = 0; i <= 5; i++) { const val = yMax - (i / 5) * yRange; const y = PAD.top + (i / 5) * cH; if (Math.abs(val) > yRange * 0.04) ctx.fillText(fmtVol(val), PAD.left - 6, y + 4); }
+    ctx.fillStyle = C.textMuted; ctx.font = `500 9px ${FONT_MONO}`; ctx.textAlign = 'center';
+    const ls = Math.max(Math.floor(N / 10), 1); for (let i = 0; i < N; i += ls) { if (data[i]?.time) ctx.fillText(data[i].time, xPos(i), H - PAD.bottom + 14); }
   }, [metrics, data, sessionBounds]);
 
+  useEffect(() => { drawChart(); }, [drawChart]);
+  useEffect(() => { const c = containerRef.current; if (!c) return; const ro = new ResizeObserver(() => drawChart()); ro.observe(c); return () => ro.disconnect(); }, [drawChart]);
+
+  const sp = metrics?.sessionPressure || 0, rp = metrics?.rollingPressure || 0, td = metrics?.trendDelta || 0, bp = metrics?.buyPct || 50;
+  const pLabel = sp > 10 ? 'BUYERS' : sp < -10 ? 'SELLERS' : 'BALANCED';
+  const pColor = sp > 10 ? C.green : sp < -10 ? C.red : C.yellow;
+  const pBg = sp > 10 ? C.greenDim : sp < -10 ? C.redDim : C.yellowDim;
+  const tLabel = td > 8 ? '↑ ACCEL' : td < -8 ? '↓ FADING' : '→ STEADY';
+  const tColor = td > 8 ? C.green : td < -8 ? C.red : C.textSecondary;
+  const tBg = td > 8 ? C.greenDim : td < -8 ? C.redDim : 'rgba(255,255,255,0.05)';
+  const cvdM = metrics?.cvdMomentum || 0;
+
+  if (loading && !hasData) return <div style={S.panel}><div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textSecondary, fontSize: 13 }}>Loading volume data...</div></div>;
+  if (error && !hasData) return <div style={S.panel}><div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.red, fontSize: 13 }}>{error}</div></div>;
+  if (!hasData) return <div style={S.panel}><div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: C.textSecondary, gap: 6 }}><span style={{ fontSize: 28 }}>📊</span><span style={{ fontSize: 14, fontWeight: 600 }}>No Volume Data</span></div></div>;
+
   return (
-    <div 
-      className="rounded-xl p-4 flex flex-col h-full max-h-full overflow-hidden"
-      style={{ background: COLORS.cardBg, border: `1px solid ${COLORS.cardBorder}` }}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-base font-bold text-gray-300 uppercase tracking-wider">
-          Volume Pressure
-        </h3>
-        <div className="flex items-center gap-2">
-          {isStaleData && (
-            <div className="flex items-center gap-1 px-2.5 py-1 rounded text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
-              <span>⚠️</span>
-              <span>Showing {tradingDayStr} data</span>
-            </div>
-          )}
-          {timeframeRange && !isStaleData && (
-            <span className="text-xs text-gray-400 px-2.5 py-1 rounded bg-white/5">
-              {timeframeRange.label}
-            </span>
-          )}
-          <span className="text-xs text-gray-500">{bucketLabel}</span>
+    <div style={S.panel}>
+      <div style={S.metricsStrip}>
+        <div style={S.metricBlock()}><span style={S.metricLabel}>Session Pressure</span><span style={S.metricValue(pColor)}>{sp > 0 ? '+' : ''}{sp}%</span><div style={S.badge(pColor, pBg)}>● {pLabel}</div></div>
+        <div style={S.metricBlock()}>
+          <span style={S.metricLabel}>Buy / Sell</span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}><span style={S.metricValue(C.green, 13)}>{fmtVol(metrics?.totalBuy || 0)}</span><span style={{ color: C.textMuted, fontSize: 11 }}>/</span><span style={S.metricValue(C.red, 13)}>{fmtVol(metrics?.totalSell || 0)}</span></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+            <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.06)', position: 'relative', overflow: 'hidden' }}><div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${bp}%`, borderRadius: 2, background: C.green, opacity: 0.7 }} /></div>
+            <span style={{ fontFamily: FONT_MONO, fontSize: 10, fontWeight: 600, color: bp >= 50 ? C.green : C.red, minWidth: 28, textAlign: 'right' as const }}>{bp}%</span>
+          </div>
         </div>
+        <div style={S.metricBlock()}><span style={S.metricLabel}>Last {ROLLING_WINDOW} min</span><span style={S.metricValue(tColor)}>{rp > 0 ? '+' : ''}{rp}%</span><div style={S.badge(tColor, tBg)}>{tLabel}</div></div>
+        <div style={S.metricBlock(true)}><span style={S.metricLabel}>CVD</span><span style={S.metricValue(metrics?.currentCvd && metrics.currentCvd >= 0 ? C.green : C.red)}>{metrics?.currentCvd && metrics.currentCvd > 0 ? '+' : ''}{fmtVol(metrics?.currentCvd || 0)}</span><span style={S.metricSub}>Peak: {fmtVol(metrics?.peakVal || 0)} at {metrics?.peakTime || ''}</span></div>
       </div>
-
-      {/* ── Pressure Summary ── */}
-      <div className="flex items-center gap-4 mb-3 py-2 px-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
-        <div className="flex items-center gap-2">
-          <span className="text-2xl font-black font-mono" style={{ color: pressureColor }}>
-            {sessionPressure > 0 ? '+' : ''}{sessionPressure}%
-          </span>
-          <span className="text-sm font-bold" style={{ color: pressureColor }}>
-            {pressureLabel}
-          </span>
-        </div>
-        
-        <div className="w-px h-6" style={{ background: 'rgba(255,255,255,0.08)' }} />
-        
-        <div className="flex flex-col">
-          <span className="text-xs text-gray-500">Last {ROLLING_WINDOW} bars</span>
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-bold font-mono" style={{ color: rollingPressure > 10 ? COLORS.green : rollingPressure < -10 ? COLORS.red : '#888' }}>
-              {rollingPressure > 0 ? '+' : ''}{rollingPressure}%
-            </span>
-            <span className="text-xs" style={{ color: trendColor }}>
-              {trendLabel}
-            </span>
-          </div>
-        </div>
-        
-        <div className="w-px h-6" style={{ background: 'rgba(255,255,255,0.08)' }} />
-        
-        {metrics && (
-          <div className="flex items-center gap-3 text-xs">
-            <span style={{ color: COLORS.green }}>
-              <span className="text-gray-500 mr-1">Buy</span>
-              <span className="font-bold font-mono">{formatVol(metrics.totalBuy)}</span>
-            </span>
-            <span style={{ color: COLORS.red }}>
-              <span className="text-gray-500 mr-1">Sell</span>
-              <span className="font-bold font-mono">{formatVol(metrics.totalSell)}</span>
-            </span>
-          </div>
-        )}
+      <div ref={containerRef} style={S.chartArea}>
+        {isStaleData && <div style={S.staleTag}><div style={{ fontSize: 10, fontWeight: 600, padding: '3px 10px', borderRadius: 4, background: 'rgba(251,191,36,0.12)', color: C.yellow, border: '1px solid rgba(251,191,36,0.2)' }}>⚠ {tradingDayStr} · Market Closed</div></div>}
+        <canvas ref={canvasRef} style={S.canvas} />
       </div>
-
-      {/* ── CVD Chart ── */}
-      <div className="flex-1 min-h-0 overflow-hidden">
-        {loading ? (
-          <div className="h-full flex items-center justify-center text-gray-500 text-sm">
-            Loading volume data...
-          </div>
-        ) : error ? (
-          <div className="h-full flex items-center justify-center text-red-400 text-sm">
-            {error}
-          </div>
-        ) : isClosed && !hasData ? (
-          <div className="h-full flex flex-col items-center justify-center text-gray-500">
-            <div className="text-3xl mb-2">📊</div>
-            <div className="text-base font-semibold">Market Closed</div>
-            <div className="text-xs text-gray-600 mt-1">No volume data for current session</div>
-          </div>
-        ) : isClosed && hasData ? (
-          <div className="relative h-full">
-            <div className="h-full opacity-30">
-              {chartOption && <ReactECharts option={chartOption} style={{ height: '100%', width: '100%' }} />}
-            </div>
-            <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded">
-              <div className="text-center px-4">
-                <div className="text-base font-semibold text-yellow-400 mb-1">⚠️ Market Closed</div>
-                <div className="text-xs text-gray-400">Showing {tradingDayStr} data</div>
-              </div>
-            </div>
-          </div>
-        ) : chartOption ? (
-          <ReactECharts option={chartOption} style={{ height: '100%', width: '100%' }} />
-        ) : (
-          <div className="h-full flex items-center justify-center text-gray-500 text-sm">
-            No volume data available
-          </div>
-        )}
+      <div style={S.bottomStrip}>
+        <div style={S.dot(cvdM >= 0 ? C.green : C.red)} />
+        <span style={{ fontSize: 11, color: C.textSecondary, lineHeight: 1.3, flex: 1 }}><strong style={{ color: C.textPrimary, fontWeight: 600 }}>Momentum:</strong> {cvdM >= 0 ? `CVD rising +${fmtVol(cvdM)} over last 30 bars — buying pressure intact` : `CVD falling ${fmtVol(cvdM)} over last 30 bars — selling pressure building`}</span>
+        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: FONT_MONO, whiteSpace: 'nowrap' as const }}>{bucketLabel} · {ticker}</span>
       </div>
     </div>
   );

@@ -1,23 +1,29 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { COLORS } from '@/lib/echarts-theme';
-import ReactECharts from 'echarts-for-react';
 import type { EnhancedFlowStats, EnhancedOptionTrade } from '@/types/flow';
 import type { Timeframe } from '@/components/war-room/timeframe-selector';
-import { formatCurrency } from '@/lib/format';
+import {
+  PANEL_COLORS as C, FONT_MONO, fmtDollar, fmtTime,
+  setupCanvas, drawGridLines, panelStyles as S,
+} from '@/lib/panel-design-system';
 
-// Safety check
-if (!COLORS) {
-  console.error('[OptionsFlowPanel] COLORS is undefined!');
-}
+/* ════════════════════════════════════════════════════════════════
+   OPTIONS FLOW PANEL v3 — Canvas Cumulative Flow + Sweep Table
+   
+   Metrics strip: Net Flow | Call/Put $ | Trades | Top Strike
+   Chart: Cumulative call premium (green) vs put premium (red)
+   Table: Top 5 trades by premium
+   Insight: Auto-detected sweep clustering
+   ════════════════════════════════════════════════════════════════ */
 
 interface FlowPanelProps {
   stats: EnhancedFlowStats | null;
   trades: EnhancedOptionTrade[];
   loading: boolean;
   error: string | null;
-  avgDailyFlow?: number; // Add this - fetch from historical data or use constant
+  avgDailyFlow?: number;
   timeframe?: Timeframe;
   timeframeRange?: {
     from: number;
@@ -30,588 +36,390 @@ interface FlowPanelProps {
   vwap?: number | null;
 }
 
-type ChartType = 'premium' | 'delta';
-
-export function OptionsFlowPanel({ 
-  stats, 
-  trades, 
-  loading, 
-  error, 
-  avgDailyFlow = 2000000,
+export function OptionsFlowPanel({
+  stats,
+  trades,
+  loading,
+  error,
+  avgDailyFlow = 2_000_000,
   timeframe = '15m',
   timeframeRange,
   currentPrice,
   vwap,
 }: FlowPanelProps) {
-  const [chartType, setChartType] = useState<ChartType>('premium');
-  
-  // Flow volume context
-  const flowVsAvg = useMemo(() => {
-    if (!stats || !avgDailyFlow || avgDailyFlow === 0) return null;
-    const ratio = Math.abs(stats.netDeltaAdjustedFlow || 0) / avgDailyFlow;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // ── Derived metrics ──
+  const metrics = useMemo(() => {
+    if (!stats) return null;
+
+    const callPrem = stats.callPremium || 0;
+    const putPrem = stats.putPremium || 0;
+    const totalPrem = callPrem + putPrem;
+    const netFlow = stats.netDeltaAdjustedFlow || (callPrem - putPrem);
+    const callPct = totalPrem > 0 ? Math.round((callPrem / totalPrem) * 100) : 50;
+
+    const flowBias = callPct >= 60 ? 'BULLISH' : callPct <= 40 ? 'BEARISH' : 'NEUTRAL';
+    const flowColor = flowBias === 'BULLISH' ? C.green : flowBias === 'BEARISH' ? C.red : C.yellow;
+    const flowBg = flowBias === 'BULLISH' ? C.greenDim : flowBias === 'BEARISH' ? C.redDim : C.yellowDim;
+
+    // Volume context
+    const ratio = avgDailyFlow > 0 ? Math.abs(netFlow) / avgDailyFlow : 0;
+    const volumeLabel = ratio < 0.1 ? 'VERY LOW' : ratio < 0.5 ? 'LOW' : ratio < 1 ? 'MODERATE' : ratio < 2 ? 'HIGH' : 'VERY HIGH';
+    const volumeColor = ratio < 0.5 ? C.red : ratio < 1 ? C.yellow : C.cyan;
+    const volumeBg = ratio < 0.5 ? C.redDim : ratio < 1 ? C.yellowDim : C.cyanDim;
+
     return {
-      ratio,
-      label: ratio < 0.1 ? 'VERY LOW' : ratio < 0.5 ? 'LOW' : ratio < 1 ? 'MODERATE' : ratio < 2 ? 'HIGH' : 'VERY HIGH',
-      bgColor: ratio < 0.1 ? 'bg-red-500/30' : ratio < 0.5 ? 'bg-orange-500/30' : ratio < 1 ? 'bg-gray-500/30' : ratio < 2 ? 'bg-green-500/30' : 'bg-cyan-500/30',
-      textColor: ratio < 0.1 ? 'text-red-300' : ratio < 0.5 ? 'text-orange-300' : ratio < 1 ? 'text-gray-300' : ratio < 2 ? 'text-green-300' : 'text-cyan-300',
+      netFlow, callPrem, putPrem, callPct, flowBias, flowColor, flowBg,
+      tradeCount: stats.tradeCount || 0,
+      volumeLabel, volumeColor, volumeBg,
     };
   }, [stats, avgDailyFlow]);
 
-  // Guard against undefined stats
-  if (!stats && !loading && !error) {
-    return (
-      <div className="h-full flex items-center justify-center text-gray-500 text-xs">
-        No data available
-      </div>
-    );
-  }
-
-  // Derived values
-  const regime = stats?.regime || 'NEUTRAL';
-  const callRatio = stats?.callRatio || 50;
-  const putRatio = stats?.putRatio || 50;
-  
-  // Badge logic - match hero verdict
-  const flowBias = putRatio >= 60 ? 'BEARISH' : callRatio >= 60 ? 'BULLISH' : 'NEUTRAL';
-  const flowBiasColor = flowBias === 'BULLISH' ? (COLORS?.green || '#00e676') : 
-                        flowBias === 'BEARISH' ? (COLORS?.red || '#ff5252') : (COLORS?.yellow || '#ffc107');
-  
-  // Get timeframe label
-  const timeframeLabel = timeframeRange?.label || 'Current';
-  
-  const formatDelta = (delta: number) => {
-    const sign = delta >= 0 ? '+' : '';
-    if (Math.abs(delta) >= 1000000) return `${sign}$${(delta / 1000000).toFixed(1)}M`;
-    if (Math.abs(delta) >= 1000) return `${sign}$${(delta / 1000).toFixed(0)}K`;
-    return `${sign}$${delta.toFixed(0)}`;
-  };
-
-  // Find top trade (by premium or smart money score)
+  // ── Top trade ──
   const topTrade = useMemo(() => {
     if (!trades.length) return null;
-    return trades.reduce((best, t) => 
-      (t.smartMoneyScore || 0) > (best.smartMoneyScore || 0) ? t : best
-    , trades[0]);
+    return [...trades].sort((a, b) => (b.premium || 0) - (a.premium || 0))[0];
   }, [trades]);
 
-  // Detect latest crossover from flow time series
-  const latestCrossover = useMemo(() => {
-    if (!stats?.flowTimeSeries || stats.flowTimeSeries.length < 2) return null;
-    
-    const data = stats.flowTimeSeries;
-    let cumulativeCall = 0;
-    let cumulativePut = 0;
-    const callData: number[] = [];
-    const putData: number[] = [];
-    const timeLabels: string[] = [];
-    
-    data.forEach(d => {
-      cumulativeCall += d.callPremium || 0;
-      cumulativePut += d.putPremium || 0;
-      callData.push(cumulativeCall);
-      putData.push(cumulativePut);
-      timeLabels.push(d.time || '');
+  // ── Top 5 trades for table ──
+  const topTrades = useMemo(() => {
+    return [...trades]
+      .sort((a, b) => (b.premium || 0) - (a.premium || 0))
+      .slice(0, 5);
+  }, [trades]);
+
+  // ── Cumulative time series data for chart ──
+  const chartData = useMemo(() => {
+    if (!stats?.flowTimeSeries?.length) return null;
+
+    const series = stats.flowTimeSeries;
+    let cumCall = 0, cumPut = 0;
+    const calls: number[] = [];
+    const puts: number[] = [];
+    const times: string[] = [];
+
+    series.forEach(d => {
+      cumCall += d.callPremium || 0;
+      cumPut += d.putPremium || 0;
+      calls.push(cumCall);
+      puts.push(cumPut);
+      times.push(d.time || '');
     });
-    
-    // Detect crossovers
-    for (let i = callData.length - 1; i >= 1; i--) {
-      const prevCallAbove = callData[i-1] > putData[i-1];
-      const currCallAbove = callData[i] > putData[i];
-      
-      if (!prevCallAbove && currCallAbove) {
-        return { time: timeLabels[i], type: 'bullish' as const, index: i };
-      } else if (prevCallAbove && !currCallAbove) {
-        return { time: timeLabels[i], type: 'bearish' as const, index: i };
+
+    // Detect crossover
+    let crossIdx = -1;
+    let crossType: 'bull' | 'bear' = 'bull';
+    for (let i = series.length - 1; i >= 1; i--) {
+      const prevCallAbove = calls[i - 1] > puts[i - 1];
+      const currCallAbove = calls[i] > puts[i];
+      if (prevCallAbove !== currCallAbove) {
+        crossIdx = i;
+        crossType = currCallAbove ? 'bull' : 'bear';
+        break;
       }
     }
-    
-    return null;
+
+    return { calls, puts, times, crossIdx, crossType };
   }, [stats?.flowTimeSeries]);
 
-  return (
-    <div 
-      className="rounded-xl p-3 flex flex-col h-full max-h-full overflow-hidden"
-      style={{ background: COLORS.cardBg, border: `1px solid ${COLORS.cardBorder}` }}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
-            Options Flow
-          </h3>
-          {/* Timeframe label */}
-          {timeframeRange && (
-            <span className="text-[10px] text-gray-500 bg-white/5 px-2 py-0.5 rounded">
-              {timeframeLabel}
-            </span>
-          )}
-          <span 
-            className="px-2 py-0.5 rounded text-[10px] font-bold"
-            style={{ background: `${flowBiasColor}20`, color: flowBiasColor }}
-          >
-            {flowBias}
-          </span>
-          {/* Latest Crossover Indicator */}
-          {latestCrossover && (
-            <span 
-              className="px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1"
-              style={{ 
-                background: latestCrossover.type === 'bullish' ? 'rgba(0,230,118,0.15)' : 'rgba(255,82,82,0.15)',
-                color: latestCrossover.type === 'bullish' ? '#00e676' : '#ff5252',
-              }}
-            >
-              {latestCrossover.type === 'bullish' ? '🔺' : '🔻'} {latestCrossover.type === 'bullish' ? 'Bullish' : 'Bearish'} crossover at {latestCrossover.time}
-            </span>
-          )}
-        </div>
-      </div>
+  // ── Sweep cluster insight ──
+  const sweepInsight = useMemo(() => {
+    if (!trades.length) return null;
 
-      {/* Key Stats Row */}
-      <div className="grid grid-cols-4 gap-2 mb-2 text-center">
-        <StatBox 
-          label="Net Δ Flow" 
-          value={formatCurrency(stats?.netDeltaAdjustedFlow || 0, { compact: true, showSign: true })}
-          color={(stats?.netDeltaAdjustedFlow || 0) >= 0 ? COLORS.green : COLORS.red}
-          subtext={flowVsAvg ? `${flowVsAvg.label} vs avg` : undefined}
-          subtextColor={flowVsAvg?.textColor}
-          subtextBgColor={flowVsAvg?.bgColor}
-          highlight
-        />
-        <StatBox 
-          label="Call/Put" 
-          value={`${stats?.callRatio || 50}/${stats?.putRatio || 50}`}
-          color="#fff"
-        />
-        <StatBox 
-          label="Sweeps" 
-          value={`${((stats?.sweepRatio || 0) * 100).toFixed(0)}%`}
-          color={(stats?.sweepRatio || 0) > 0.3 ? COLORS.cyan : '#888'}
-        />
-        <StatBox 
-          label="Unusual" 
-          value={stats?.unusualCount?.toString() || '0'}
-          color={(stats?.unusualCount || 0) > 5 ? COLORS.yellow : '#888'}
-        />
-      </div>
-
-      {/* Chart */}
-      <div className="h-[200px] overflow-hidden">
-        {loading ? (
-          <LoadingState />
-        ) : error ? (
-          <ErrorState message={error} />
-        ) : (stats?.flowTimeSeries && stats.flowTimeSeries.length > 1) ? (
-          // Use the time series from stats (preferred)
-          <FlowChart 
-            data={stats.flowTimeSeries} 
-            chartType={chartType}
-          />
-        ) : trades.length > 0 ? (
-          // Fall back to computing from trades
-          <FlowChartFromTrades trades={trades} chartType={chartType} />
-        ) : (
-          <EmptyState message="No flow data available" />
-        )}
-      </div>
-
-      {/* Top Trade */}
-      {topTrade && (
-        <div 
-          className="mt-2 p-2 rounded-lg flex items-center justify-between"
-          style={{ background: 'rgba(255,255,255,0.03)' }}
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-500">🎯 Top:</span>
-            <span 
-              className="text-xs font-mono font-semibold"
-              style={{ color: topTrade.callPut === 'C' ? COLORS.green : COLORS.red }}
-            >
-              ${topTrade.strike} {topTrade.callPut}
-            </span>
-            {topTrade.isSweep && (
-              <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-cyan-500/20 text-cyan-400">
-                SWEEP
-              </span>
-            )}
-            <span className="text-[10px] text-gray-400">
-              Score: {topTrade.smartMoneyScore || 0}/10
-            </span>
-          </div>
-          <span className="text-xs font-mono text-gray-400">
-            ${((topTrade.premium || 0) / 1000).toFixed(0)}K
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function StatBox({ 
-  label, 
-  value, 
-  color, 
-  highlight,
-  subtext,
-  subtextColor,
-  subtextBgColor,
-}: { 
-  label: string; 
-  value: string; 
-  color: string;
-  highlight?: boolean;
-  subtext?: string;
-  subtextColor?: string;
-  subtextBgColor?: string;
-}) {
-  return (
-    <div 
-      className="p-1.5 rounded"
-      style={{ 
-        background: highlight ? `${color}10` : 'rgba(255,255,255,0.02)',
-        border: highlight ? `1px solid ${color}30` : 'none',
-      }}
-    >
-      <div className="text-[9px] text-gray-500 uppercase">{label}</div>
-      <div className="text-2xl font-bold font-mono" style={{ color }}>{value}</div>
-      {subtext && (
-        <div className={`text-[10px] font-medium px-2 py-0.5 rounded mt-1 inline-block ${subtextBgColor || ''}`} style={{ color: subtextColor || '#666' }}>
-          {subtext}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Crossover detection function
-function detectCrossovers(callData: number[], putData: number[], timeLabels: string[]) {
-  const crossovers: Array<{time: string, type: 'bullish' | 'bearish', index: number, callValue: number, putValue: number}> = [];
-  
-  for (let i = 1; i < callData.length; i++) {
-    const prevCallAbove = callData[i-1] > putData[i-1];
-    const currCallAbove = callData[i] > putData[i];
-    
-    if (!prevCallAbove && currCallAbove) {
-      crossovers.push({ 
-        time: timeLabels[i], 
-        type: 'bullish', 
-        index: i,
-        callValue: callData[i],
-        putValue: putData[i],
-      });
-    } else if (prevCallAbove && !currCallAbove) {
-      crossovers.push({ 
-        time: timeLabels[i], 
-        type: 'bearish', 
-        index: i,
-        callValue: callData[i],
-        putValue: putData[i],
-      });
-    }
-  }
-  return crossovers;
-}
-
-function FlowChart({ 
-  data, 
-  chartType 
-}: { 
-  data: any[];
-  chartType: 'premium' | 'delta';
-}) {
-  // If data is empty or has only 1 point, show message
-  if (!data || data.length === 0) {
-    return (
-      <div className="h-full flex items-center justify-center text-gray-500 text-xs">
-        No time series data
-      </div>
+    const sweeps = trades.filter(t =>
+      t.tradeType === 'SWEEP' || t.tradeType === 'INTERMARKET_SWEEP' || t.isSweep
     );
-  }
+    if (sweeps.length < 2) return null;
 
-  // If only 1 data point, show it differently
-  if (data.length === 1) {
-    const d = data[0];
-    return (
-      <div className="h-full flex flex-col items-center justify-center gap-2">
-        <div className="text-xs text-gray-400">{d.time || 'Single bucket'}</div>
-        <div className="flex gap-4">
-          <div className="text-center">
-            <div className="text-[10px] text-gray-500">Calls</div>
-            <div className="text-2xl font-bold text-green-400">
-              ${((d.callPremium || 0) / 1000).toFixed(0)}K
-            </div>
-          </div>
-          <div className="text-center">
-            <div className="text-[10px] text-gray-500">Puts</div>
-            <div className="text-2xl font-bold text-red-400">
-              ${((d.putPremium || 0) / 1000).toFixed(0)}K
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Transform data to cumulative values
-  const chartData = useMemo(() => {
-    let cumulativeCall = 0;
-    let cumulativePut = 0;
-    let cumulativeNetFlow = 0;
-    
-    const callData: number[] = [];
-    const putData: number[] = [];
-    const netFlowData: number[] = [];
-    const timeLabels: string[] = [];
-    
-    data.forEach(d => {
-      cumulativeCall += d.callPremium || 0;
-      cumulativePut += d.putPremium || 0;
-      cumulativeNetFlow += (d.deltaAdjustedPremium || d.netFlow || 0);
-      
-      callData.push(cumulativeCall);
-      putData.push(cumulativePut);
-      netFlowData.push(cumulativeNetFlow);
-      timeLabels.push(d.time || '');
+    // Group by strike
+    const byStrike: Record<number, { count: number; total: number; cp: string }> = {};
+    sweeps.forEach(s => {
+      const k = s.strike;
+      if (!byStrike[k]) byStrike[k] = { count: 0, total: 0, cp: s.callPut };
+      byStrike[k].count++;
+      byStrike[k].total += s.premium || 0;
     });
-    
-    // Detect crossovers
-    const crossovers = detectCrossovers(callData, putData, timeLabels);
-    
-    // Prepare crossover scatter points
-    const crossoverPoints = crossovers.map(c => ({
-      value: [c.index, c.callValue],
-      itemStyle: {
-        color: c.type === 'bullish' ? '#00e676' : '#ff5252',
-      },
-      symbol: 'triangle',
-      symbolSize: 12,
-    }));
-    
+
+    const top = Object.entries(byStrike)
+      .sort(([, a], [, b]) => b.total - a.total)[0];
+
+    if (!top) return null;
+    const [strike, info] = top;
+    const recentSweeps = sweeps.filter(s =>
+      s.strike === Number(strike) && (Date.now() - s.timestampMs) < 7_200_000
+    );
+
+    if (recentSweeps.length < 2) return null;
+
     return {
-      timeLabels,
-      callData,
-      putData,
-      netFlowData,
-      crossovers,
-      crossoverPoints,
+      strike: Number(strike),
+      cp: info.cp,
+      total: info.total,
+      count: recentSweeps.length,
+      color: info.cp === 'C' ? C.green : C.red,
     };
-  }, [data]);
-
-  const option = useMemo(() => ({
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: 'rgba(0,0,0,0.85)',
-      borderColor: 'rgba(255,255,255,0.1)',
-      textStyle: { color: '#fff', fontSize: 11 },
-      formatter: (params: any) => {
-        let result = `<div style="font-weight:bold;margin-bottom:4px">${params[0].axisValue}</div>`;
-        params.forEach((p: any) => {
-          const value = Math.abs(p.value);
-          const formatted = value >= 1000000 
-            ? `$${(value / 1000000).toFixed(1)}M`
-            : value >= 1000 
-            ? `$${(value / 1000).toFixed(0)}K`
-            : `$${value.toFixed(0)}`;
-          result += `<div style="color:${p.color}">${p.seriesName}: ${formatted}</div>`;
-        });
-        return result;
-      },
-    },
-    legend: {
-      data: ['Calls', 'Puts', 'Net Flow'],
-      textStyle: { color: '#888', fontSize: 12 },
-      top: 5,
-      right: 10,
-    },
-    grid: { top: 35, right: 15, bottom: 45, left: 50 },
-    dataZoom: [
-      {
-        type: 'inside',
-        xAxisIndex: 0,
-        zoomOnMouseWheel: true,
-        moveOnMouseMove: true,
-        moveOnMouseWheel: false,
-      },
-      {
-        type: 'slider',
-        xAxisIndex: 0,
-        height: 18,
-        bottom: 2,
-        borderColor: 'transparent',
-        backgroundColor: 'rgba(255,255,255,0.03)',
-        fillerColor: 'rgba(0,229,255,0.1)',
-        handleStyle: { color: '#00e5ff', borderColor: '#00e5ff' },
-        textStyle: { color: '#666', fontSize: 9 },
-        dataBackground: {
-          lineStyle: { color: 'rgba(0,229,255,0.3)' },
-          areaStyle: { color: 'rgba(0,229,255,0.05)' },
-        },
-      },
-    ],
-    xAxis: {
-      type: 'category',
-      data: chartData.timeLabels,
-      axisLine: { show: false },
-      axisTick: { show: false },
-      axisLabel: { 
-        fontSize: 11, 
-        color: '#666',
-        rotate: chartData.timeLabels.length > 6 ? 45 : 0,
-      },
-    },
-    yAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      axisTick: { show: false },
-      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.03)' } },
-      axisLabel: { 
-        fontSize: 12, 
-        color: '#666',
-        formatter: (v: number) => {
-          const abs = Math.abs(v);
-          if (abs >= 1000000) return `$${(v / 1000000).toFixed(1)}M`;
-          if (abs >= 1000) return `$${(v / 1000).toFixed(0)}K`;
-          return `$${v}`;
-        }
-      },
-    },
-    series: [
-      {
-        name: 'Calls',
-        type: 'line',
-        data: chartData.callData,
-        smooth: true,
-        symbol: 'none',
-        lineStyle: { color: '#00e676', width: 3 },
-        areaStyle: {
-          color: {
-            type: 'linear',
-            x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: 'rgba(0,230,118,0.3)' },
-              { offset: 1, color: 'rgba(0,230,118,0)' }
-            ]
-          }
-        },
-      },
-      {
-        name: 'Puts',
-        type: 'line',
-        data: chartData.putData,
-        smooth: true,
-        symbol: 'none',
-        lineStyle: { color: '#ff5252', width: 3 },
-      },
-      {
-        name: 'Net Flow',
-        type: 'line',
-        data: chartData.netFlowData,
-        smooth: true,
-        symbol: 'none',
-        lineStyle: { color: '#00bcd4', width: 1, type: 'dashed' },
-      },
-      // Crossover markers
-      {
-        name: 'Crossovers',
-        type: 'scatter',
-        data: chartData.crossoverPoints,
-        symbol: 'triangle',
-        symbolSize: 12,
-        z: 10,
-        tooltip: {
-          formatter: (params: any) => {
-            const crossover = chartData.crossovers.find((c, i) => chartData.crossoverPoints[i]?.value[0] === params.value[0]);
-            if (crossover) {
-              return `<div style="font-weight:bold">${crossover.type === 'bullish' ? '🔺 Bullish' : '🔻 Bearish'} Crossover</div>
-                      <div>Time: ${crossover.time}</div>
-                      <div style="color:#00e676">Calls: $${(crossover.callValue / 1000).toFixed(0)}K</div>
-                      <div style="color:#ff5252">Puts: $${(crossover.putValue / 1000).toFixed(0)}K</div>`;
-            }
-            return '';
-          },
-        },
-      },
-    ],
-  }), [chartData]);
-
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} />;
-}
-
-function LoadingState() {
-  return (
-    <div className="h-full flex items-center justify-center text-gray-500 text-xs">
-      <div className="animate-pulse">Loading flow data...</div>
-    </div>
-  );
-}
-
-function ErrorState({ message }: { message: string }) {
-  return (
-    <div className="h-full flex items-center justify-center text-red-400 text-xs">
-      {message}
-    </div>
-  );
-}
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="h-full flex items-center justify-center text-gray-500 text-xs">
-      {message}
-    </div>
-  );
-}
-
-// Add a component that processes trades into chart format
-function FlowChartFromTrades({ 
-  trades, 
-  chartType 
-}: { 
-  trades: EnhancedOptionTrade[]; 
-  chartType: 'premium' | 'delta';
-}) {
-  const chartData = useMemo(() => {
-    // Group trades by time (15-min buckets for better granularity)
-    const buckets = new Map<string, { callPremium: number; putPremium: number; netFlow: number }>();
-    
-    // Sort trades by timestamp
-    const sorted = [...trades].sort((a, b) => a.timestampMs - b.timestampMs);
-    
-    sorted.forEach(trade => {
-      const date = new Date(trade.timestampMs);
-      // Round to 15 min bucket
-      date.setMinutes(Math.floor(date.getMinutes() / 15) * 15, 0, 0);
-      const key = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-      
-      const existing = buckets.get(key) || { callPremium: 0, putPremium: 0, netFlow: 0 };
-      
-      if (trade.callPut === 'C') {
-        existing.callPremium += trade.premium || 0;
-      } else {
-        existing.putPremium += trade.premium || 0;
-      }
-      
-      existing.netFlow += trade.deltaAdjustedPremium || 0;
-      
-      buckets.set(key, existing);
-    });
-    
-    // Convert to array and sort by time
-    return Array.from(buckets.entries())
-      .map(([time, data]) => ({
-        time,
-        callPremium: data.callPremium,
-        putPremium: data.putPremium,
-        netFlow: data.netFlow,
-      }))
-      .sort((a, b) => {
-        // Sort by time string (simple string comparison works for HH:MM format)
-        return a.time.localeCompare(b.time);
-      });
   }, [trades]);
 
-  if (chartData.length === 0) {
-    return <EmptyState message="No chart data" />;
+  // ── Draw chart ──
+  const drawChart = useCallback(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container || !chartData) return;
+
+    const r = setupCanvas(canvas, container);
+    if (!r) return;
+    const { ctx, W, H } = r;
+
+    const PAD = { top: 12, right: 50, bottom: 24, left: 48 };
+    const cW = W - PAD.left - PAD.right;
+    const cH = H - PAD.top - PAD.bottom;
+    const N = chartData.calls.length;
+    if (N < 2) return;
+
+    const maxVal = Math.max(
+      ...chartData.calls,
+      ...chartData.puts,
+      1
+    );
+    const xPos = (i: number) => PAD.left + (i / (N - 1)) * cW;
+    const yPos = (v: number) => PAD.top + (1 - v / maxVal) * cH;
+
+    ctx.clearRect(0, 0, W, H);
+    drawGridLines(ctx, PAD, W, H);
+
+    // ── Call area fill ──
+    ctx.beginPath();
+    ctx.moveTo(xPos(0), PAD.top + cH);
+    for (let i = 0; i < N; i++) ctx.lineTo(xPos(i), yPos(chartData.calls[i]));
+    ctx.lineTo(xPos(N - 1), PAD.top + cH);
+    ctx.closePath();
+    const gCall = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + cH);
+    gCall.addColorStop(0, 'rgba(0,220,130,0.15)');
+    gCall.addColorStop(1, 'rgba(0,220,130,0.01)');
+    ctx.fillStyle = gCall;
+    ctx.fill();
+
+    // ── Put area fill ──
+    ctx.beginPath();
+    ctx.moveTo(xPos(0), PAD.top + cH);
+    for (let i = 0; i < N; i++) ctx.lineTo(xPos(i), yPos(chartData.puts[i]));
+    ctx.lineTo(xPos(N - 1), PAD.top + cH);
+    ctx.closePath();
+    const gPut = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + cH);
+    gPut.addColorStop(0, 'rgba(255,71,87,0.12)');
+    gPut.addColorStop(1, 'rgba(255,71,87,0.01)');
+    ctx.fillStyle = gPut;
+    ctx.fill();
+
+    // ── Call line ──
+    ctx.strokeStyle = 'rgba(0,220,130,0.85)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) {
+      i === 0 ? ctx.moveTo(xPos(i), yPos(chartData.calls[i])) : ctx.lineTo(xPos(i), yPos(chartData.calls[i]));
+    }
+    ctx.stroke();
+
+    // ── Put line ──
+    ctx.strokeStyle = 'rgba(255,71,87,0.75)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) {
+      i === 0 ? ctx.moveTo(xPos(i), yPos(chartData.puts[i])) : ctx.lineTo(xPos(i), yPos(chartData.puts[i]));
+    }
+    ctx.stroke();
+
+    // ── Right edge labels ──
+    ctx.font = `600 10px ${FONT_MONO}`;
+    ctx.textAlign = 'left';
+    const lastCallY = yPos(chartData.calls[N - 1]);
+    const lastPutY = yPos(chartData.puts[N - 1]);
+
+    ctx.fillStyle = C.green;
+    ctx.fillText('CALLS', W - PAD.right + 4, lastCallY - 6);
+    ctx.fillText(fmtDollar(chartData.calls[N - 1]).replace('+', ''), W - PAD.right + 4, lastCallY + 6);
+
+    ctx.fillStyle = C.red;
+    ctx.fillText('PUTS', W - PAD.right + 4, lastPutY - 6);
+    ctx.fillText(fmtDollar(chartData.puts[N - 1]).replace('+', ''), W - PAD.right + 4, lastPutY + 6);
+
+    // ── Crossover marker ──
+    if (chartData.crossIdx > 0) {
+      const cx = xPos(chartData.crossIdx);
+      const cy = yPos(chartData.calls[chartData.crossIdx]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(251,191,36,0.2)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = C.yellow;
+      ctx.fill();
+      ctx.fillStyle = 'rgba(251,191,36,0.6)';
+      ctx.font = `600 8px ${FONT_MONO}`;
+      ctx.textAlign = 'center';
+      ctx.fillText('CROSS', cx, cy - 10);
+    }
+
+    // ── X-axis labels ──
+    ctx.fillStyle = C.textMuted;
+    ctx.font = `500 9px ${FONT_MONO}`;
+    ctx.textAlign = 'center';
+    const step = Math.max(Math.floor(N / 8), 1);
+    for (let i = 0; i < N; i += step) {
+      if (chartData.times[i]) {
+        ctx.fillText(chartData.times[i], xPos(i), H - PAD.bottom + 14);
+      }
+    }
+
+    // ── Y-axis labels ──
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= 4; i++) {
+      const val = (maxVal / 4) * (4 - i);
+      const y = PAD.top + (i / 4) * cH;
+      const label = val >= 1e6 ? `$${(val / 1e6).toFixed(0)}M` : val >= 1e3 ? `$${(val / 1e3).toFixed(0)}K` : `$${val.toFixed(0)}`;
+      ctx.fillText(label, PAD.left - 6, y + 3);
+    }
+  }, [chartData]);
+
+  useEffect(() => { drawChart(); }, [drawChart]);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver(() => drawChart());
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [drawChart]);
+
+  // ── Loading / Error / Empty states ──
+  if (loading && !stats) {
+    return <div style={S.panel}><div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textSecondary, fontSize: 13 }}>Loading flow data...</div></div>;
+  }
+  if (error && !stats) {
+    return <div style={S.panel}><div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.red, fontSize: 13 }}>{error}</div></div>;
+  }
+  if (!stats) {
+    return <div style={S.panel}><div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: C.textSecondary, gap: 6 }}><span style={{ fontSize: 28 }}>📊</span><span style={{ fontSize: 14, fontWeight: 600 }}>No Flow Data</span></div></div>;
   }
 
-  // Use same chart options as FlowChart (now always uses dual-line format)
-  return <FlowChart data={chartData} chartType={chartType} />;
+  const m = metrics!;
+
+  return (
+    <div style={S.panel}>
+      {/* ── METRICS STRIP ── */}
+      <div style={S.metricsStrip}>
+        {/* 1. Net Flow */}
+        <div style={S.metricBlock()}>
+          <span style={S.metricLabel}>Net Flow</span>
+          <span style={S.metricValue(m.flowColor, 15)}>{fmtDollar(m.netFlow)}</span>
+          <div style={S.badge(m.flowColor, m.flowBg)}>● {m.flowBias}</div>
+        </div>
+
+        {/* 2. Call / Put $ */}
+        <div style={S.metricBlock()}>
+          <span style={S.metricLabel}>Call / Put $</span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={S.metricValue(C.green, 13)}>{fmtDollar(m.callPrem).replace('+', '')}</span>
+            <span style={{ color: C.textMuted, fontSize: 11 }}>/</span>
+            <span style={S.metricValue(C.red, 13)}>{fmtDollar(m.putPrem).replace(/[+-]/, '')}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+            <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.06)', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${m.callPct}%`, borderRadius: 2, background: C.green, opacity: 0.7 }} />
+            </div>
+            <span style={{ fontFamily: FONT_MONO, fontSize: 10, fontWeight: 600, color: m.callPct >= 50 ? C.green : C.red, minWidth: 28, textAlign: 'right' }}>
+              {m.callPct}%
+            </span>
+          </div>
+        </div>
+
+        {/* 3. Trades */}
+        <div style={S.metricBlock()}>
+          <span style={S.metricLabel}>Trades</span>
+          <span style={S.metricValue(C.textPrimary, 15)}>{m.tradeCount}</span>
+          <div style={S.badge(m.volumeColor, m.volumeBg)}>{m.volumeLabel} FLOW</div>
+        </div>
+
+        {/* 4. Top Strike */}
+        <div style={S.metricBlock(true)}>
+          <span style={S.metricLabel}>Top Strike</span>
+          {topTrade ? (
+            <>
+              <span style={S.metricValue(C.textPrimary, 15)}>
+                ${topTrade.strike}{topTrade.callPut}
+              </span>
+              <span style={S.metricSub}>
+                {fmtDollar(topTrade.premium).replace('+', '')} · {topTrade.expiry?.slice(5) || ''} · {topTrade.tradeType === 'SWEEP' || topTrade.isSweep ? 'Sweep' : 'Block'}
+              </span>
+            </>
+          ) : (
+            <span style={S.metricValue(C.textMuted, 15)}>—</span>
+          )}
+        </div>
+      </div>
+
+      {/* ── CHART ── */}
+      <div ref={containerRef} style={{ ...S.chartArea, minHeight: 120 }}>
+        <canvas ref={canvasRef} style={S.canvas} />
+      </div>
+
+      {/* ── TOP TRADES TABLE ── */}
+      {topTrades.length > 0 && (
+        <div style={{ ...S.scrollArea, maxHeight: 108, borderTop: `1px solid ${C.border}` }}>
+          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', fontFamily: FONT_MONO }}>
+            <thead>
+              <tr>
+                {['Time', 'C/P', 'Strike', 'Exp', 'Premium', 'Type'].map(h => (
+                  <th key={h} style={{ fontSize: 8, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', color: C.textMuted, textAlign: 'left', padding: '4px 10px', borderBottom: `1px solid ${C.border}`, position: 'sticky', top: 0, background: C.cardBg }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {topTrades.map((t, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${C.borderSubtle}` }}>
+                  <td style={{ padding: '5px 10px', color: C.textSecondary, whiteSpace: 'nowrap' }}>{fmtTime(t.timestampMs)}</td>
+                  <td style={{ padding: '5px 10px', color: t.callPut === 'C' ? C.green : C.red, fontWeight: 600 }}>{t.callPut}</td>
+                  <td style={{ padding: '5px 10px', color: C.textPrimary, fontWeight: 600 }}>${t.strike}</td>
+                  <td style={{ padding: '5px 10px', color: C.textSecondary }}>{t.expiry?.slice(5) || ''}</td>
+                  <td style={{ padding: '5px 10px', color: C.textPrimary, fontWeight: 600 }}>{fmtDollar(t.premium).replace('+', '')}</td>
+                  <td style={{ padding: '5px 10px' }}>
+                    {(t.tradeType === 'SWEEP' || t.tradeType === 'INTERMARKET_SWEEP' || t.isSweep) ? (
+                      <span style={{ fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 2, background: C.cyanDim, color: C.cyan }}>SWEEP</span>
+                    ) : (
+                      <span style={{ fontSize: 9, color: C.textMuted }}>{t.tradeType || 'BLOCK'}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── BOTTOM INSIGHT ── */}
+      <div style={S.bottomStrip}>
+        <div style={S.dot(sweepInsight ? sweepInsight.color : C.textMuted)} />
+        <span style={{ fontSize: 11, color: C.textSecondary, lineHeight: 1.3, flex: 1 }}>
+          {sweepInsight ? (
+            <>
+              <strong style={{ color: C.textPrimary, fontWeight: 600 }}>
+                {sweepInsight.cp === 'C' ? 'Call' : 'Put'} sweep cluster
+              </strong>{' '}
+              at ${sweepInsight.strike} — {fmtDollar(sweepInsight.total).replace('+', '')} in {sweepInsight.count} sweeps
+            </>
+          ) : (
+            <>
+              <strong style={{ color: C.textPrimary, fontWeight: 600 }}>Flow:</strong>{' '}
+              {m.flowBias === 'BULLISH' ? 'Call premium leading' : m.flowBias === 'BEARISH' ? 'Put premium dominant' : 'Balanced flow'} this session
+            </>
+          )}
+        </span>
+        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: FONT_MONO, whiteSpace: 'nowrap' }}>
+          {timeframeRange?.label || 'Session'}
+        </span>
+      </div>
+    </div>
+  );
 }
