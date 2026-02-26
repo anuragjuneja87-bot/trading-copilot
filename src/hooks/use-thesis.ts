@@ -77,9 +77,10 @@ export function useThesis(opts: UseThesisOptions): UseThesisResult {
       return;
     }
     
-    // Allow price=0 for closed markets, but require > 0 for open
-    if (!current.price && current.marketSession === 'open') {
-      console.log('[Thesis] Skip: waiting for price data');
+    // Require price > 0 OR prevClose > 0 for ALL sessions
+    // (API will 400 if both are 0)
+    if (current.price <= 0 && (!current.prevClose || current.prevClose <= 0)) {
+      console.log('[Thesis] Skip: waiting for price data (price=0, prevClose=0)');
       return;
     }
 
@@ -167,13 +168,13 @@ export function useThesis(opts: UseThesisOptions): UseThesisResult {
       // Cancel any pending debounce
       if (tickerDebounceRef.current) clearTimeout(tickerDebounceRef.current);
       
-      // Debounce: wait 800ms for market data to load for new ticker
+      // Debounce: wait 2s for market data to load for new ticker
       console.log(`[Thesis] Ticker changed to ${ticker}, waiting for data...`);
       tickerDebounceRef.current = setTimeout(() => {
         console.log(`[Thesis] Data settled, fetching thesis for ${ticker}`);
         hasFetchedRef.current = true;
         fetchThesis(true);
-      }, 800);
+      }, 2000);
       return;
     }
     
@@ -185,13 +186,25 @@ export function useThesis(opts: UseThesisOptions): UseThesisResult {
       if (tickerDebounceRef.current) clearTimeout(tickerDebounceRef.current);
       tickerDebounceRef.current = setTimeout(() => {
         fetchThesis(true);
-      }, 500);
+      }, 1500);
     }
     
     return () => {
       if (tickerDebounceRef.current) clearTimeout(tickerDebounceRef.current);
     };
   }, [ticker, enabled, fetchThesis]);
+
+  // ── Retry when price becomes available (covers closed market race) ──
+  const prevPriceRef = useRef<number>(0);
+  useEffect(() => {
+    if (!ticker || !enabled) return;
+    // If price just went from 0 to a valid number, and we have no thesis yet, retry
+    if (prevPriceRef.current <= 0 && price > 0 && !thesis && !isLoading && hasFetchedRef.current) {
+      console.log(`[Thesis] Price loaded (${price}), retrying...`);
+      fetchThesis(true);
+    }
+    prevPriceRef.current = price;
+  }, [price, ticker, enabled, thesis, isLoading, fetchThesis]);
 
   // ── Auto-refresh timer with smart gating ────────────────
   useEffect(() => {
