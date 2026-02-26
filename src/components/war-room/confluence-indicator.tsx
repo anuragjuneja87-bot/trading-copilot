@@ -514,7 +514,7 @@ export function ConfluenceIndicator({
       <div
         style={{
           display: 'flex', alignItems: 'center',
-          padding: '6px 14px', gap: 8,
+          padding: '8px 14px', gap: 10,
           overflow: 'hidden',
         }}
         onMouseEnter={() => setIsPaused(true)}
@@ -522,12 +522,12 @@ export function ConfluenceIndicator({
       >
         {/* Session-aware label */}
         <div style={{
-          fontSize: 8, fontWeight: 700, letterSpacing: 1.5,
+          fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
           color: activityLabelColor,
           textTransform: 'uppercase' as const,
-          flexShrink: 0, paddingRight: 8,
+          flexShrink: 0, paddingRight: 10,
           borderRight: `1px solid ${K.border}`,
-          minWidth: 42,
+          minWidth: 50,
         }}>
           {activityLabel}
         </div>
@@ -540,7 +540,7 @@ export function ConfluenceIndicator({
             WebkitMaskImage: 'linear-gradient(to right, transparent, black 2%, black 98%, transparent)',
           }}>
             <div style={{
-              display: 'flex', gap: 12, width: 'max-content',
+              display: 'flex', gap: 16, width: 'max-content',
               animation: aggSignals.length > 2 ? `confluenceScroll ${scrollDuration}s linear infinite` : 'none',
               animationPlayState: isPaused ? 'paused' : 'running',
             }}>
@@ -548,22 +548,22 @@ export function ConfluenceIndicator({
               {(aggSignals.length > 2 ? [...aggSignals, ...aggSignals] : aggSignals).map((sig, i) => (
                 <div key={`${sig.id}-${i}`} style={{
                   display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '3px 12px', borderRadius: 5,
-                  fontSize: 11, fontWeight: 500,
+                  padding: '5px 14px', borderRadius: 5,
+                  fontSize: 12, fontWeight: 500,
                   whiteSpace: 'nowrap' as const, flexShrink: 0,
                   background: 'rgba(255,255,255,0.02)',
                   border: `1px solid ${K.borderSubtle}`,
                 }}>
-                  <span style={{ fontSize: 12 }}>{sig.icon}</span>
+                  <span style={{ fontSize: 14 }}>{sig.icon}</span>
                   <span style={{
-                    fontSize: 8, fontWeight: 700, letterSpacing: 0.5,
-                    padding: '1px 5px', borderRadius: 2,
+                    fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
+                    padding: '2px 6px', borderRadius: 3,
                     background: sig.typeBg, color: sig.typeColor,
                   }}>{sig.type}</span>
-                  <span style={{ color: 'rgba(255,255,255,0.65)' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12 }}>
                     {sig.text}
                   </span>
-                  <span style={{ fontWeight: 700, color: sig.isBullish ? K.green : K.red }}>
+                  <span style={{ fontWeight: 700, fontSize: 12, color: sig.isBullish ? K.green : K.red }}>
                     {sig.detail}
                   </span>
                 </div>
@@ -571,7 +571,7 @@ export function ConfluenceIndicator({
             </div>
           </div>
         ) : (
-          <span style={{ fontSize: 10, color: K.textMuted, fontStyle: 'italic' }}>
+          <span style={{ fontSize: 11, color: K.textMuted, fontStyle: 'italic' }}>
             No data for activity analysis
           </span>
         )}
