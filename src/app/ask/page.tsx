@@ -441,6 +441,8 @@ function AskPageContent() {
               <ConfluenceIndicator
                 flowStats={data.flow?.stats}
                 darkPoolStats={data.darkpool?.stats}
+                trades={data.flow?.trades || []}
+                prints={data.darkpool?.prints || []}
                 volumePressure={volumePressure || 0}
                 priceVsGexFlip={data.price > (data.levels?.gexFlip || 0) ? 'above' : 'below'}
                 currentPrice={data.price}
