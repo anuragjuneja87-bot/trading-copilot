@@ -1,3 +1,2 @@
 cp ~/Downloads/confluence-indicator.tsx src/components/war-room/confluence-indicator.tsx
-git add -A && git commit -m "fix: lower activity ticker thresholds for Polygon trade data" && git push origin main
-vercel --prod
+git add -A && git commit -m "feat: aggregated unusual signals replace raw prints — sweep clusters, DP accumulation, premium spikes" && git push origin main
