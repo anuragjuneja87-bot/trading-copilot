@@ -220,39 +220,10 @@ export function OptionsFlowLineChart({ data, timeframeRange, height = 160 }: Flo
     callSeriesRef.current.setData(chartData.callPoints as any);
     putSeriesRef.current.setData(chartData.putPoints as any);
 
-    // Set visible range based on timeframe
-    const ts = chartRef.current.timeScale();
-    const etOffset = chartData.etOffset;
-
-    if (timeframeRange && timeframeRange.from && timeframeRange.to) {
-      const fromSec = Math.floor(timeframeRange.from / 1000) + etOffset;
-      const toSec = Math.floor(timeframeRange.to / 1000) + etOffset;
-      
-      // Check if the timeframe window covers most of the data (Session view)
-      const dataStart = chartData.callPoints[0]?.time || 0;
-      const dataEnd = chartData.callPoints[chartData.callPoints.length - 1]?.time || 0;
-      const dataRange = dataEnd - dataStart;
-      const tfRange = toSec - fromSec;
-      
-      if (dataRange > 0 && tfRange >= dataRange * 0.8) {
-        // Session-wide timeframe — fit all content
-        ts.fitContent();
-      } else {
-        // Zoomed timeframe — set visible range with small padding
-        const padding = Math.max(Math.floor(tfRange * 0.05), 60);
-        try {
-          ts.setVisibleRange({
-            from: (fromSec - padding) as any,
-            to: (toSec + padding) as any,
-          });
-        } catch {
-          ts.fitContent();
-        }
-      }
-    } else {
-      ts.fitContent();
-    }
-  }, [chartData, timeframeRange]);
+    // Always show full session (9:30 AM - 4:00 PM ET)
+    // User can zoom in manually with scroll wheel
+    chartRef.current.timeScale().fitContent();
+  }, [chartData]);
 
   if (!chartData) {
     return (

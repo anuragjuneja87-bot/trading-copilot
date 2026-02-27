@@ -22,6 +22,7 @@ import { GammaLevelsPanel } from '@/components/ask/gamma-levels-panel';
 import { NewsSentimentPanel } from '@/components/ask/news-sentiment-panel';
 import { VolumePressurePanel } from '@/components/ask/volume-pressure-panel';
 import { RelativeStrengthPanel } from '@/components/ask/relative-strength-panel';
+import { StrikeBreakdownPanel } from '@/components/ask/strike-breakdown-panel';
 import {
   TimeframeSelector,
   Timeframe,
@@ -588,9 +589,9 @@ function AskPageContent() {
                 </button>
               </div>
 
-              {/* Row 1: Options Flow + Gamma */}
-              <div className="grid grid-cols-2 gap-3">
-                <CollapsiblePanel title="Options Flow" height="420px" icon={Sparkles} subtitle={ps.flow.text} subtitleColor={ps.flow.color} forceOpen={allPanelsOpen}>
+              {/* Row 1: Options Flow — FULL WIDTH */}
+              <div>
+                <CollapsiblePanel title="Options Flow" height="480px" icon={Sparkles} subtitle={ps.flow.text} subtitleColor={ps.flow.color} forceOpen={allPanelsOpen}>
                   <OptionsFlowPanel
                     ticker={selectedTicker}
                     stats={data.flow?.stats || null}
@@ -603,6 +604,10 @@ function AskPageContent() {
                     vwap={data.levels?.vwap || null}
                   />
                 </CollapsiblePanel>
+              </div>
+
+              {/* Row 2: Gamma + Volume */}
+              <div className="grid grid-cols-2 gap-3">
                 <CollapsiblePanel title="Gamma & Key Levels" height="420px" icon={Target} subtitle={ps.gamma.text} subtitleColor={ps.gamma.color} forceOpen={allPanelsOpen}>
                   <GammaLevelsPanel
                     ticker={selectedTicker}
@@ -610,13 +615,13 @@ function AskPageContent() {
                     currentPrice={data.price}
                   />
                 </CollapsiblePanel>
-              </div>
-
-              {/* Row 2: Volume + Dark Pool */}
-              <div className="grid grid-cols-2 gap-3">
                 <CollapsiblePanel title="Volume Pressure" height="380px" icon={BarChart3} subtitle={ps.volume.text} subtitleColor={ps.volume.color} forceOpen={allPanelsOpen}>
                   <VolumePressurePanel ticker={selectedTicker} timeframeRange={timeframeRange} />
                 </CollapsiblePanel>
+              </div>
+
+              {/* Row 3: Dark Pool + RS (hide RS for index tickers) */}
+              <div className="grid grid-cols-2 gap-3">
                 <CollapsiblePanel title="Dark Pool Activity" height="380px" icon={Building2} subtitle={ps.darkPool.text} subtitleColor={ps.darkPool.color} forceOpen={allPanelsOpen}>
                   <DarkPoolPanel
                     ticker={selectedTicker}
@@ -630,10 +635,6 @@ function AskPageContent() {
                     meta={data.darkpool?.meta}
                   />
                 </CollapsiblePanel>
-              </div>
-
-              {/* Row 3: RS (hide for index tickers) + News */}
-              <div className="grid grid-cols-2 gap-3">
                 {!isIndex ? (
                   <CollapsiblePanel title="Relative Strength" height="380px" icon={Activity} subtitle={ps.rs.text} subtitleColor={ps.rs.color} forceOpen={allPanelsOpen}>
                     <RelativeStrengthPanel ticker={selectedTicker} timeframeRange={timeframeRange} />
@@ -650,11 +651,23 @@ function AskPageContent() {
                     </div>
                   </CollapsiblePanel>
                 )}
+              </div>
+
+              {/* Row 4: News + Strike Breakdown */}
+              <div className="grid grid-cols-2 gap-3">
                 <CollapsiblePanel title="News Sentiment" height="380px" icon={Newspaper} subtitle={ps.news.text} subtitleColor={ps.news.color} forceOpen={allPanelsOpen}>
                   <NewsSentimentPanel
                     ticker={selectedTicker}
                     items={data.news.items}
                     loading={data.news.loading}
+                  />
+                </CollapsiblePanel>
+                <CollapsiblePanel title="Strike Breakdown" height="380px" icon={Layers} subtitle="" forceOpen={allPanelsOpen}>
+                  <StrikeBreakdownPanel
+                    ticker={selectedTicker}
+                    trades={data.flow?.trades || []}
+                    loading={data.flow?.loading || false}
+                    error={data.flow?.error || null}
                   />
                 </CollapsiblePanel>
               </div>
