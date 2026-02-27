@@ -225,27 +225,27 @@ export function getAdjustedTimeframeRange(tf: Timeframe): TimeframeRangeResult {
   switch (tf) {
     case '1m':
       from = endTime - 1 * 60 * 1000;
-      label = isMarketOpen ? 'Last 1 min' : `Last 1 min (${tradingDayStr})`;
+      label = isMarketOpen ? 'Last 1 min' : tradingDayStr;
       break;
     case '5m':
       from = endTime - 5 * 60 * 1000;
-      label = isMarketOpen ? 'Last 5 min' : `Last 5 min (${tradingDayStr})`;
+      label = isMarketOpen ? 'Last 5 min' : tradingDayStr;
       break;
     case '15m':
       from = endTime - 15 * 60 * 1000;
-      label = isMarketOpen ? 'Last 15 min' : `Last 15 min (${tradingDayStr})`;
+      label = isMarketOpen ? 'Last 15 min' : tradingDayStr;
       break;
     case '30m':
       from = endTime - 30 * 60 * 1000;
-      label = isMarketOpen ? 'Last 30 min' : `Last 30 min (${tradingDayStr})`;
+      label = isMarketOpen ? 'Last 30 min' : tradingDayStr;
       break;
     case '1h':
       from = endTime - 60 * 60 * 1000;
-      label = isMarketOpen ? 'Last hour' : `Last hour (${tradingDayStr})`;
+      label = isMarketOpen ? 'Last hour' : tradingDayStr;
       break;
     case '4h':
       from = endTime - 4 * 60 * 60 * 1000;
-      label = isMarketOpen ? 'Last 4 hours' : `Last 4 hours (${tradingDayStr})`;
+      label = isMarketOpen ? 'Last 4 hours' : tradingDayStr;
       break;
     case '1d':
       from = marketOpen.getTime();

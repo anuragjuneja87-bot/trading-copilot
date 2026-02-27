@@ -508,9 +508,9 @@ function AskPageContent() {
               </button>
             </div>
 
-            <div className="px-4 pb-2 flex items-center justify-between">
+            <div className="px-4 pb-2 flex items-center gap-6">
               <TimeframeSelector value={timeframe} onChange={setTimeframe} />
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 mr-32">
                 <MarketClock />
                 <span className="text-xs text-gray-300">{timeframeRange.label}</span>
               </div>
