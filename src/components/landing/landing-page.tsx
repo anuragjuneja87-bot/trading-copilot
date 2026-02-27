@@ -2,13 +2,15 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import { useSession, signIn } from 'next-auth/react';
 import { YodhaLogo, YodhaWordmark } from '@/components/brand/yodha-logo';
 import {
   Shield, Activity, Building2, BarChart3,
   Zap, Eye, Brain, ChevronRight, ArrowRight,
   TrendingUp, Lock, Sparkles, Timer, Target,
-  AlertTriangle, Check, X, MonitorSmartphone,
-  Cpu, MessageSquare
+  AlertTriangle, Check, X,
+  Cpu, MessageSquare, BarChart, Crosshair,
+  LineChart, Radio, Bell
 } from 'lucide-react';
 
 /* ──────────────────────────────────────────────────────────
@@ -64,6 +66,7 @@ function LiveDataAnimation() {
       counter.current++;
     }, 1800);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -146,44 +149,29 @@ function ThesisCard() {
 
 const TRADE_STEPS = [
   {
-    time: '9:32 AM',
-    title: 'Unusual call flow detected on NVDA',
+    time: '9:32 AM', title: 'Unusual call flow detected on NVDA',
     desc: 'Heavy institutional sweep at the 195 strike — $2.4M in premium, above-ask fills.',
-    icon: Zap,
-    color: '#00e676',
-    panel: 'OPTIONS FLOW',
+    icon: Zap, color: '#00e676', panel: 'OPTIONS FLOW',
   },
   {
-    time: '9:33 AM',
-    title: 'Dark pool accumulation confirmed at $188-190',
+    time: '9:33 AM', title: 'Dark pool accumulation confirmed at $188-190',
     desc: '3 large block prints totaling $12.4M, all at or above the midpoint.',
-    icon: Building2,
-    color: '#7c4dff',
-    panel: 'DARK POOL',
+    icon: Building2, color: '#7c4dff', panel: 'DARK POOL',
   },
   {
-    time: '9:34 AM',
-    title: 'ML model detects 82% move probability',
+    time: '9:34 AM', title: 'ML model detects 82% move probability',
     desc: 'LightGBM pipeline flags high-confidence bullish signal. Direction confidence: 82%.',
-    icon: Cpu,
-    color: '#00e5ff',
-    panel: 'ML ENGINE',
+    icon: Cpu, color: '#00e5ff', panel: 'ML ENGINE',
   },
   {
-    time: '9:34 AM',
-    title: 'Yodha delivers the thesis',
+    time: '9:34 AM', title: 'Yodha delivers the thesis',
     desc: 'All signals synthesized: institutional call buying + dark pool accumulation + bullish momentum. Entry above VWAP, targets at GEX flip and call wall.',
-    icon: Shield,
-    color: '#00e5ff',
-    panel: 'YODHA ANALYSIS',
+    icon: Shield, color: '#00e5ff', panel: 'YODHA ANALYSIS',
   },
   {
-    time: '10:15 AM',
-    title: 'NVDA hits $193.50 — thesis confirmed',
+    time: '10:15 AM', title: 'NVDA hits $193.50 — thesis confirmed',
     desc: 'The move played out exactly as the data suggested. Yodha flagged it 43 minutes before the breakout.',
-    icon: Target,
-    color: '#00e676',
-    panel: 'RESULT',
+    icon: Target, color: '#00e676', panel: 'RESULT',
   },
 ];
 
@@ -193,7 +181,6 @@ function ScrollyStep({ step, index }: { step: typeof TRADE_STEPS[0]; index: numb
 
   return (
     <div ref={ref} className="flex gap-6 items-start">
-      {/* Timeline */}
       <div className="flex flex-col items-center flex-shrink-0 w-16">
         <div
           className="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-500"
@@ -209,15 +196,8 @@ function ScrollyStep({ step, index }: { step: typeof TRADE_STEPS[0]; index: numb
           <div className="w-px h-16 mt-2" style={{ background: visible ? `${step.color}30` : 'rgba(255,255,255,0.06)' }} />
         )}
       </div>
-
-      {/* Content */}
-      <div
-        className="flex-1 pb-8 transition-all duration-500"
-        style={{
-          opacity: visible ? 1 : 0.2,
-          transform: visible ? 'translateX(0)' : 'translateX(20px)',
-        }}
-      >
+      <div className="flex-1 pb-8 transition-all duration-500"
+        style={{ opacity: visible ? 1 : 0.2, transform: visible ? 'translateX(0)' : 'translateX(20px)' }}>
         <div className="flex items-center gap-2 mb-1">
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full font-mono" style={{ background: `${step.color}15`, color: step.color }}>
             {step.time}
@@ -243,7 +223,6 @@ function MarketTimeCTA() {
     return () => clearInterval(i);
   }, []);
 
-  // ET offset
   const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
   const h = et.getHours();
   const m = et.getMinutes();
@@ -253,11 +232,9 @@ function MarketTimeCTA() {
   if (isOpen) return <>The market is live. See what Yodha sees.</>;
   if (isPre) return <>Pre-market is active. Get your edge before the open.</>;
 
-  // Calculate hours to next open
   const nextOpen = new Date(et);
   if (h >= 16) nextOpen.setDate(nextOpen.getDate() + 1);
   nextOpen.setHours(9, 30, 0, 0);
-  // Skip weekends
   while (nextOpen.getDay() === 0 || nextOpen.getDay() === 6) {
     nextOpen.setDate(nextOpen.getDate() + 1);
   }
@@ -267,16 +244,64 @@ function MarketTimeCTA() {
 }
 
 /* ──────────────────────────────────────────────────────────
+   WAR ROOM PANEL CARDS
+   ────────────────────────────────────────────────────────── */
+
+const WAR_ROOM_PANELS = [
+  {
+    icon: LineChart, color: '#00e5ff', title: 'AI Trading Thesis',
+    desc: 'Yodha synthesizes all 6 data streams into a clear bullish/bearish thesis with entry, targets, and stop levels.',
+    highlight: 'Updated every 30 seconds',
+  },
+  {
+    icon: Zap, color: '#00e676', title: 'Options Flow',
+    desc: 'Real-time sweeps, blocks, and unusual activity. See where institutions are placing their bets.',
+    highlight: 'Institutional-grade flow data',
+  },
+  {
+    icon: Building2, color: '#7c4dff', title: 'Dark Pool Activity',
+    desc: 'Block prints from institutional desks. Accumulation and distribution detection with VWAP reference.',
+    highlight: 'Large prints > $500K flagged',
+  },
+  {
+    icon: BarChart, color: '#ff9800', title: 'Gamma & Key Levels',
+    desc: 'Call walls, put walls, GEX flip points. Know exactly where market makers will defend.',
+    highlight: 'Dealer positioning mapped',
+  },
+  {
+    icon: Activity, color: '#ff5252', title: 'Volume & CVD',
+    desc: 'Cumulative volume delta reveals hidden buying or selling pressure beneath the surface.',
+    highlight: 'Divergence detection built-in',
+  },
+  {
+    icon: Brain, color: '#00e5ff', title: 'ML Predictions',
+    desc: 'LightGBM model trained on millions of data points. Predicts move probability and direction.',
+    highlight: '59.4% win rate · 0.23 Sharpe',
+  },
+];
+
+/* ──────────────────────────────────────────────────────────
    MAIN LANDING PAGE
    ────────────────────────────────────────────────────────── */
 
 export default function LandingPage() {
   const [mounted, setMounted] = useState(false);
+  const { data: session } = useSession();
   useEffect(() => { setMounted(true); }, []);
 
   const act2 = useIntersection(0.15);
   const act3 = useIntersection(0.1);
+  const actPanels = useIntersection(0.1);
   const act4 = useIntersection(0.15);
+  const actDisclaimer = useIntersection(0.15);
+
+  const handleEnterWarRoom = () => {
+    if (session?.user) {
+      window.location.href = '/ask';
+    } else {
+      signIn('google', { callbackUrl: '/ask' });
+    }
+  };
 
   return (
     <div className="min-h-screen" style={{ background: '#060810' }}>
@@ -291,15 +316,48 @@ export default function LandingPage() {
             <YodhaLogo size={36} />
             <YodhaWordmark className="text-xl" />
           </Link>
-          <Link
-            href="/ask"
-            className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all hover:scale-105"
-            style={{ background: 'linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%)', color: '#060810' }}
-          >
-            <span className="hidden sm:inline">Enter War Room</span>
-            <span className="sm:hidden">War Room</span>
-            <ArrowRight className="w-4 h-4" />
-          </Link>
+
+          <div className="flex items-center gap-3">
+            {session?.user ? (
+              <>
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                  {session.user.image && (
+                    <img src={session.user.image} alt="" className="w-5 h-5 rounded-full" referrerPolicy="no-referrer" />
+                  )}
+                  <span className="text-xs text-gray-400 font-mono hidden sm:inline">
+                    {session.user.name || session.user.email}
+                  </span>
+                </div>
+                <button
+                  onClick={() => window.location.href = '/ask'}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all hover:scale-105"
+                  style={{ background: 'linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%)', color: '#060810' }}
+                >
+                  <span className="hidden sm:inline">Enter War Room</span>
+                  <span className="sm:hidden">War Room</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => signIn('google')}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-gray-300 transition-all hover:text-white hover:bg-white/5"
+                >
+                  Sign In
+                </button>
+                <button
+                  onClick={handleEnterWarRoom}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all hover:scale-105"
+                  style={{ background: 'linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%)', color: '#060810' }}
+                >
+                  <span className="hidden sm:inline">Enter War Room</span>
+                  <span className="sm:hidden">War Room</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </nav>
 
@@ -345,16 +403,16 @@ export default function LandingPage() {
               </p>
 
               <div className={`flex flex-col sm:flex-row items-start gap-4 transition-all duration-700 delay-300 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
-                <Link
-                  href="/ask"
+                <button
+                  onClick={handleEnterWarRoom}
                   className="group flex items-center gap-3 px-8 py-4 rounded-xl text-base font-bold transition-all hover:scale-105 hover:shadow-[0_0_30px_rgba(0,229,255,0.3)]"
                   style={{ background: 'linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%)', color: '#060810' }}
                 >
-                  See it live
+                  {session ? 'Enter War Room' : 'Sign In & Enter War Room'}
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </Link>
+                </button>
                 <span className="text-sm text-gray-500 flex items-center gap-1.5 pt-3">
-                  <Lock className="w-3 h-3" /> No signup required. Free during beta.
+                  <Lock className="w-3 h-3" /> Free during beta. Google sign-in required.
                 </span>
               </div>
             </div>
@@ -391,25 +449,15 @@ export default function LandingPage() {
               Scattered tools, delayed data, gut decisions. Sound familiar?
             </p>
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Without Yodha */}
-            <div
-              className={`rounded-2xl p-6 transition-all duration-700 delay-100 ${act2.visible ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'}`}
-              style={{ background: 'rgba(255,82,82,0.04)', border: '1px solid rgba(255,82,82,0.15)' }}
-            >
+            <div className={`rounded-2xl p-6 transition-all duration-700 delay-100 ${act2.visible ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'}`}
+              style={{ background: 'rgba(255,82,82,0.04)', border: '1px solid rgba(255,82,82,0.15)' }}>
               <div className="flex items-center gap-2 mb-4">
                 <X className="w-5 h-5 text-red-400" />
                 <span className="text-sm font-bold text-red-400 uppercase tracking-wider">Trading Today</span>
               </div>
               <div className="space-y-3">
-                {[
-                  '6 browser tabs open',
-                  'Delayed data across platforms',
-                  'Manual synthesis of scattered signals',
-                  'Gut decisions under time pressure',
-                  '"I missed the move checking another screen"',
-                ].map((item) => (
+                {['6 browser tabs open', 'Delayed data across platforms', 'Manual synthesis of scattered signals', 'Gut decisions under time pressure', '"I missed the move checking another screen"'].map((item) => (
                   <div key={item} className="flex items-start gap-2.5">
                     <div className="w-1.5 h-1.5 rounded-full bg-red-500/50 mt-1.5 flex-shrink-0" />
                     <span className="text-sm text-gray-400">{item}</span>
@@ -417,24 +465,14 @@ export default function LandingPage() {
                 ))}
               </div>
             </div>
-
-            {/* With Yodha */}
-            <div
-              className={`rounded-2xl p-6 transition-all duration-700 delay-200 ${act2.visible ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-8'}`}
-              style={{ background: 'rgba(0,229,255,0.04)', border: '1px solid rgba(0,229,255,0.15)' }}
-            >
+            <div className={`rounded-2xl p-6 transition-all duration-700 delay-200 ${act2.visible ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-8'}`}
+              style={{ background: 'rgba(0,229,255,0.04)', border: '1px solid rgba(0,229,255,0.15)' }}>
               <div className="flex items-center gap-2 mb-4">
                 <Check className="w-5 h-5" style={{ color: '#00e5ff' }} />
                 <span className="text-sm font-bold uppercase tracking-wider" style={{ color: '#00e5ff' }}>Trading with Yodha</span>
               </div>
               <div className="space-y-3">
-                {[
-                  'One screen, everything synthesized',
-                  'Real-time data updated every 30 seconds',
-                  'ML-detected signals with confidence scoring',
-                  'Clear thesis with entry, targets, and stops',
-                  '"Yodha flagged the setup 10 minutes before the move"',
-                ].map((item) => (
+                {['One screen, everything synthesized', 'Real-time data updated every 30 seconds', 'ML-detected signals with confidence scoring', 'Clear thesis with entry, targets, and stops', '"Yodha flagged the setup 10 minutes before the move"'].map((item) => (
                   <div key={item} className="flex items-start gap-2.5">
                     <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: '#00e5ff' }} />
                     <span className="text-sm text-gray-300">{item}</span>
@@ -442,6 +480,70 @@ export default function LandingPage() {
                 ))}
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── WAR ROOM PREVIEW ─────────────────────────────── */}
+      <section ref={actPanels.ref} className="px-6 py-24 border-t" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+        <div className="max-w-6xl mx-auto">
+          <div className={`text-center mb-16 transition-all duration-700 ${actPanels.visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-6"
+              style={{ background: 'rgba(0,229,255,0.08)', border: '1px solid rgba(0,229,255,0.15)' }}>
+              <Eye className="w-3.5 h-3.5" style={{ color: '#00e5ff' }} />
+              <span className="text-xs font-semibold" style={{ color: '#00e5ff' }}>Inside the War Room</span>
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-black text-white mb-4" style={{ fontFamily: "'Oxanium', monospace" }}>
+              6 data streams. One thesis.
+            </h2>
+            <p className="text-gray-400 max-w-2xl mx-auto">
+              Every panel feeds into Yodha&apos;s AI analysis. Options flow, dark pool prints, gamma levels, volume delta, relative strength, and news — all synthesized in real-time.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {WAR_ROOM_PANELS.map((panel, i) => {
+              const Icon = panel.icon;
+              return (
+                <div
+                  key={panel.title}
+                  className="rounded-xl p-5 transition-all duration-700 group hover:scale-[1.02]"
+                  style={{
+                    background: 'rgba(255,255,255,0.02)',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    transitionDelay: `${i * 80}ms`,
+                    opacity: actPanels.visible ? 1 : 0,
+                    transform: actPanels.visible ? 'translateY(0)' : 'translateY(20px)',
+                  }}
+                >
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-9 h-9 rounded-lg flex items-center justify-center"
+                      style={{ background: `${panel.color}15` }}>
+                      <Icon className="w-4 h-4" style={{ color: panel.color }} />
+                    </div>
+                    <h3 className="text-sm font-bold text-white">{panel.title}</h3>
+                  </div>
+                  <p className="text-xs text-gray-400 leading-relaxed mb-3">{panel.desc}</p>
+                  <div className="text-[10px] font-mono font-semibold px-2 py-1 rounded inline-block"
+                    style={{ background: `${panel.color}10`, color: panel.color }}>
+                    {panel.highlight}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* CTA after panels */}
+          <div className={`text-center mt-12 transition-all duration-700 delay-500 ${actPanels.visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
+            <button
+              onClick={handleEnterWarRoom}
+              className="inline-flex items-center gap-3 px-8 py-4 rounded-xl text-base font-bold transition-all hover:scale-105 hover:shadow-[0_0_30px_rgba(0,229,255,0.3)]"
+              style={{ background: 'linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%)', color: '#060810' }}
+            >
+              <Shield className="w-5 h-5" />
+              {session ? 'Enter the War Room' : 'Sign In to Access'}
+              <ArrowRight className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </section>
@@ -457,8 +559,6 @@ export default function LandingPage() {
               From scattered data to a clear thesis in 2 minutes. Here&apos;s how it works on a real setup.
             </p>
           </div>
-
-          {/* Timeline */}
           <div className="pl-2">
             {TRADE_STEPS.map((step, i) => (
               <ScrollyStep key={i} step={step} index={i} />
@@ -475,42 +575,21 @@ export default function LandingPage() {
               What powers the analysis
             </h2>
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {[
-              {
-                icon: Activity,
-                title: 'Real-time data engine',
-                desc: 'Options flow, dark pool prints, gamma exposure, and relative strength — updated every 30 seconds during market hours.',
-                color: '#00e5ff',
-              },
-              {
-                icon: Brain,
-                title: 'Machine learning models',
-                desc: 'Trained on millions of market data points. Detects when a significant move is building before it happens.',
-                color: '#7c4dff',
-                stat: '59.4% win rate · 0.227 Sharpe',
-              },
-              {
-                icon: MessageSquare,
-                title: 'AI analyst',
-                desc: 'Reads the data like a quant desk analyst. Delivers a thesis with specific entry, target, and risk levels.',
-                color: '#00e676',
-              },
+              { icon: Activity, title: 'Real-time data engine', desc: 'Options flow, dark pool prints, gamma exposure, and relative strength — updated every 30 seconds during market hours.', color: '#00e5ff' },
+              { icon: Brain, title: 'Machine learning models', desc: 'Trained on millions of market data points. Detects when a significant move is building before it happens.', color: '#7c4dff', stat: '59.4% win rate · 0.227 Sharpe' },
+              { icon: MessageSquare, title: 'AI analyst', desc: 'Reads the data like a quant desk analyst. Delivers a thesis with specific entry, target, and risk levels.', color: '#00e676' },
             ].map((card, i) => {
               const Icon = card.icon;
               return (
-                <div
-                  key={card.title}
-                  className={`rounded-2xl p-6 transition-all duration-700`}
+                <div key={card.title} className="rounded-2xl p-6 transition-all duration-700"
                   style={{
-                    background: 'rgba(255,255,255,0.02)',
-                    border: '1px solid rgba(255,255,255,0.06)',
+                    background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
                     transitionDelay: `${i * 150}ms`,
                     opacity: act4.visible ? 1 : 0,
                     transform: act4.visible ? 'translateY(0)' : 'translateY(20px)',
-                  }}
-                >
+                  }}>
                   <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4"
                     style={{ background: `${card.color}15` }}>
                     <Icon className="w-6 h-6" style={{ color: card.color }} />
@@ -530,6 +609,45 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── RISK DISCLAIMER ──────────────────────────────── */}
+      <section ref={actDisclaimer.ref} className="px-6 py-20 border-t" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+        <div className="max-w-4xl mx-auto">
+          <div
+            className={`rounded-2xl p-8 transition-all duration-700 ${actDisclaimer.visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
+            style={{ background: 'rgba(255,193,7,0.04)', border: '1px solid rgba(255,193,7,0.15)' }}
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: 'rgba(255,193,7,0.12)' }}>
+                <AlertTriangle className="w-6 h-6 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-amber-400 mb-3" style={{ fontFamily: "'Oxanium', monospace" }}>
+                  Important Risk Disclosure
+                </h3>
+                <div className="space-y-3 text-sm text-gray-400 leading-relaxed">
+                  <p>
+                    <strong className="text-gray-300">TradeYodha is not a registered investment advisor.</strong> All analysis, predictions, thesis statements, and trade levels provided by this platform are for <strong className="text-amber-400/80">informational and educational purposes only</strong> and do not constitute investment advice, financial advice, or trading recommendations.
+                  </p>
+                  <p>
+                    <strong className="text-gray-300">AI models can and will make mistakes.</strong> Machine learning predictions, sentiment analysis, and automated thesis generation are probabilistic tools — not guarantees. Past model performance does not predict future results. Our ML model&apos;s 59.4% win rate means it is wrong approximately 40% of the time.
+                  </p>
+                  <p>
+                    <strong className="text-gray-300">Trading involves substantial risk of loss.</strong> You may lose some or all of your invested capital. Only trade with money you can afford to lose. You are solely responsible for your own trading decisions and their financial consequences.
+                  </p>
+                  <p className="text-xs text-gray-500 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    By creating an account and entering the War Room, you acknowledge that you have read and understood this risk disclosure, our{' '}
+                    <Link href="/terms" className="text-amber-400/70 hover:text-amber-400 underline">Terms of Service</Link> and{' '}
+                    <Link href="/privacy" className="text-amber-400/70 hover:text-amber-400 underline">Privacy Policy</Link>.
+                    You accept all risks associated with using AI-generated trading analysis.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── ACT 5: THE CTA ──────────────────────────────── */}
       <section className="px-6 py-24">
         <div className="max-w-3xl mx-auto text-center">
@@ -538,32 +656,39 @@ export default function LandingPage() {
             <MarketTimeCTA />
           </h2>
           <p className="text-gray-400 mb-8 max-w-lg mx-auto">
-            No credit card. No signup required. Just pick a ticker.
+            Free during beta. Sign in with Google to get started.
           </p>
-          <Link
-            href="/ask"
+          <button
+            onClick={handleEnterWarRoom}
             className="inline-flex items-center gap-3 px-8 py-4 rounded-xl text-base font-bold transition-all hover:scale-105 hover:shadow-[0_0_30px_rgba(0,229,255,0.3)]"
             style={{ background: 'linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%)', color: '#060810' }}
           >
             <Shield className="w-5 h-5" />
-            Enter the War Room — Free
+            {session ? 'Enter the War Room' : 'Sign In & Enter War Room'}
             <ArrowRight className="w-4 h-4" />
-          </Link>
+          </button>
         </div>
       </section>
 
       {/* ── FOOTER ──────────────────────────────────────── */}
       <footer className="px-6 py-8 border-t" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
-        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <YodhaLogo size={24} />
-            <YodhaWordmark className="text-sm" />
+        <div className="max-w-5xl mx-auto">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-4">
+            <div className="flex items-center gap-2">
+              <YodhaLogo size={24} />
+              <YodhaWordmark className="text-sm" />
+            </div>
+            <div className="flex items-center gap-6">
+              <Link href="/privacy" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">Privacy</Link>
+              <Link href="/terms" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">Terms</Link>
+            </div>
           </div>
-          <div className="flex items-center gap-6">
-            <Link href="/privacy" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">Privacy</Link>
-            <Link href="/terms" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">Terms</Link>
+          <div className="text-center border-t pt-4" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+            <p className="text-[10px] text-gray-600 leading-relaxed max-w-2xl mx-auto">
+              TradeYodha is not a registered investment advisor. All content is for informational purposes only and does not constitute financial advice. 
+              Trading involves substantial risk of loss. Past performance does not guarantee future results. © {new Date().getFullYear()} TradeYodha.
+            </p>
           </div>
-          <p className="text-xs text-gray-600">© 2025 TradeYodha. Not financial advice.</p>
         </div>
       </footer>
     </div>

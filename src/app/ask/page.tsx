@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
+import { useSession, signIn } from 'next-auth/react';
 import { useWatchlistStore, useAuthStore, useUserPreferencesStore } from '@/stores';
 import { useWarRoomData } from '@/hooks/use-war-room-data';
 import { useMLPrediction } from '@/hooks/use-ml-prediction';
@@ -36,6 +36,7 @@ import { UserAuthButton } from '@/components/ask/user-auth-button';
 import { AlertToast } from '@/components/ask/alert-toast';
 import { AlertDetailModal } from '@/components/ask/alert-detail-modal';
 import { AlertSettingsModal } from '@/components/ask/alert-settings-modal';
+import { DisclaimerGate } from '@/components/ask/disclaimer-gate';
 
 /* ──────────────────────────────────────────────────────────
    COLLAPSIBLE DATA PANEL WRAPPER
@@ -248,7 +249,25 @@ function AskPageContent() {
   const searchParams = useSearchParams();
   const selectedTicker = searchParams.get('symbol');
   const watchlist = useWatchlistStore((state) => state.watchlist);
-  const { data: session } = useSession();
+  const { data: session, status: authStatus } = useSession();
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState<boolean | null>(null);
+
+  // Auth guard — redirect to landing if not signed in
+  useEffect(() => {
+    if (authStatus === 'unauthenticated') {
+      router.push('/');
+    }
+  }, [authStatus, router]);
+
+  // Check disclaimer acceptance
+  useEffect(() => {
+    if (authStatus === 'authenticated') {
+      fetch('/api/user/disclaimer')
+        .then(r => r.json())
+        .then(data => setDisclaimerAccepted(data.accepted))
+        .catch(() => setDisclaimerAccepted(false));
+    }
+  }, [authStatus]);
 
   useEffect(() => {
     if (session?.user?.id) {
@@ -334,6 +353,25 @@ function AskPageContent() {
     setTimeframe(DEFAULT_TIMEFRAME);
     router.push(`/ask?symbol=${ticker}`);
   };
+
+  // Loading state
+  if (authStatus === 'loading' || disclaimerAccepted === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0a0e17' }}>
+        <div className="text-gray-500 text-sm font-mono">Loading...</div>
+      </div>
+    );
+  }
+
+  // Auth gate
+  if (authStatus === 'unauthenticated') {
+    return null; // useEffect will redirect
+  }
+
+  // Disclaimer gate
+  if (!disclaimerAccepted) {
+    return <DisclaimerGate onAccept={() => setDisclaimerAccepted(true)} />;
+  }
 
   if (!selectedTicker) {
     return (
