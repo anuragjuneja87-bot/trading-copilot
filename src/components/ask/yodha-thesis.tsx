@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { COLORS } from '@/lib/echarts-theme';
 import { RefreshCw, Shield } from 'lucide-react';
 import { useThesis } from '@/hooks/use-thesis';
@@ -66,6 +66,7 @@ interface YodhaThesisProps {
   mlPrediction?: MLPrediction | null;
   mlLoading?: boolean;
   newsItems?: any[];
+  onThesisChange?: (thesis: ThesisV2Response | null) => void;
 }
 
 // ── Color Constants ────────────────────────────────────────
@@ -207,7 +208,7 @@ function buildSignals(
 // ── Main Component ─────────────────────────────────────────
 
 export function YodhaThesis(props: YodhaThesisProps) {
-  const { ticker, price, changePercent, flowStats, darkPoolStats, relativeStrength, levels, marketSession, volumePressure, mlPrediction, mlLoading, newsItems } = props;
+  const { ticker, price, changePercent, flowStats, darkPoolStats, relativeStrength, levels, marketSession, volumePressure, mlPrediction, mlLoading, newsItems, onThesisChange } = props;
 
   // Build quality-aware signals
   const signals = useMemo(() => buildSignals(
@@ -258,6 +259,10 @@ export function YodhaThesis(props: YodhaThesisProps) {
     },
     newsHeadlines,
   });
+
+  useEffect(() => {
+    onThesisChange?.(thesis);
+  }, [thesis, onThesisChange]);
 
   // ── Render ──────────────────────────────────────────────
 

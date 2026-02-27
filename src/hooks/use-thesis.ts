@@ -129,6 +129,10 @@ export function useThesis(opts: UseThesisOptions): UseThesisResult {
 
       const data = await response.json();
       if (data.success && data.data) {
+        if (latestRef.current.ticker !== current.ticker) {
+          console.log(`[Thesis] ⚠️ Discarding stale response: requested ${current.ticker} but now viewing ${latestRef.current.ticker}`);
+          return;
+        }
         console.log(`[Thesis] ✅ Generated (${data.data.marketState}, ${data.data.bias})`);
         setThesis(data.data);
         setLastUpdated(new Date());
@@ -170,13 +174,23 @@ export function useThesis(opts: UseThesisOptions): UseThesisResult {
       // Cancel any pending debounce
       if (tickerDebounceRef.current) clearTimeout(tickerDebounceRef.current);
       
-      // Debounce: wait 2s for market data to load for new ticker
+      // Debounce: wait for data to load for new ticker
       console.log(`[Thesis] Ticker changed to ${ticker}, waiting for data...`);
       tickerDebounceRef.current = setTimeout(() => {
-        console.log(`[Thesis] Data settled, fetching thesis for ${ticker}`);
+        const current = latestRef.current;
+        if (current.price <= 0) {
+          console.log(`[Thesis] Data not ready for ${ticker} (price=0), retrying in 2s...`);
+          tickerDebounceRef.current = setTimeout(() => {
+            console.log(`[Thesis] Retry fetch for ${ticker}`);
+            hasFetchedRef.current = true;
+            fetchThesis(true);
+          }, 2000);
+          return;
+        }
+        console.log(`[Thesis] Data settled, fetching thesis for ${ticker} at $${current.price.toFixed(2)}`);
         hasFetchedRef.current = true;
         fetchThesis(true);
-      }, 2000);
+      }, 2500);
       return;
     }
     

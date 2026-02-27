@@ -37,6 +37,7 @@ import { AlertToast } from '@/components/ask/alert-toast';
 import { AlertDetailModal } from '@/components/ask/alert-detail-modal';
 import { AlertSettingsModal } from '@/components/ask/alert-settings-modal';
 import { DisclaimerGate } from '@/components/ask/disclaimer-gate';
+import type { ThesisV2Response } from '@/app/api/ai/thesis-v2/route';
 
 /* ──────────────────────────────────────────────────────────
    COLLAPSIBLE DATA PANEL WRAPPER
@@ -251,6 +252,7 @@ function AskPageContent() {
   const watchlist = useWatchlistStore((state) => state.watchlist);
   const { data: session, status: authStatus } = useSession();
   const [disclaimerAccepted, setDisclaimerAccepted] = useState<boolean | null>(null);
+  const [thesis, setThesis] = useState<ThesisV2Response | null>(null);
 
   // Auth guard — redirect to landing if not signed in
   useEffect(() => {
@@ -430,6 +432,7 @@ function AskPageContent() {
             relativeStrength={data.relativeStrength}
             mlPrediction={mlResult.prediction}
             volumePressure={volumePressure}
+            thesisSummary={thesis?.thesis ? thesis.thesis.substring(0, 500) : undefined}
             sidebarMode
           />
         </aside>
@@ -572,6 +575,7 @@ function AskPageContent() {
                 mlPrediction={mlResult.prediction}
                 mlLoading={mlResult.isLoading}
                 newsItems={data.news.items}
+                onThesisChange={setThesis}
               />
 
               {/* DETAILED DATA PANELS (collapsible, default collapsed) */}

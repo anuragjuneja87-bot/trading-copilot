@@ -539,6 +539,7 @@ interface AskYodhaChatProps {
   relativeStrength?: YodhaAnalysisProps['relativeStrength'];
   mlPrediction?: MLPrediction | null;
   volumePressure?: number;
+  thesisSummary?: string;
   sidebarMode?: boolean;
 }
 
@@ -605,6 +606,10 @@ function buildWarRoomContext(props: AskYodhaChatProps): string {
   if (volumePressure !== undefined) {
     const vpLabel = volumePressure > 60 ? 'heavy buying' : volumePressure < 40 ? 'heavy selling' : 'neutral';
     lines.push(`VOLUME PRESSURE: ${volumePressure.toFixed(0)}% buy-side (${vpLabel})`);
+  }
+
+  if (props.thesisSummary) {
+    lines.push(`CURRENT YODHA THESIS: ${props.thesisSummary}`);
   }
 
   // News Sentiment

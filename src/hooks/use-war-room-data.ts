@@ -134,6 +134,15 @@ export function useWarRoomData(
   const [preMarketData, setPreMarketData] = useState<PreMarketData | null>(null);
   const [relativeStrength, setRelativeStrength] = useState<RSSummary | null>(null);
   
+  // Reset price when ticker changes to prevent stale data bleed
+  const prevTickerRef = useRef(ticker);
+  useEffect(() => {
+    if (ticker !== prevTickerRef.current) {
+      prevTickerRef.current = ticker;
+      setPriceData({ price: 0, change: 0, changePercent: 0 });
+    }
+  }, [ticker]);
+  
   // Detect market session (updates every 30s)
   const [marketSession, setMarketSession] = useState<MarketSession>(getMarketSession());
   
@@ -368,12 +377,48 @@ export function useWarRoomData(
     return () => clearInterval(interval);
   }, [fetchAllData, ticker, marketSession]);
 
+  // ============================================
+  // FAST PRICE POLL — 5s interval for header price
+  // (separate from full 30s data poll)
+  // ============================================
+  useEffect(() => {
+    if (!ticker) return;
+    
+    if (marketSession === 'closed' || marketSession === 'after-hours') return;
+    
+    const fetchPrice = async () => {
+      try {
+        const res = await fetch(`/api/market/prices?tickers=${ticker}&_t=${Date.now()}`);
+        const json = await res.json();
+        const priceArr = json.data || [];
+        const tickerPrice = Array.isArray(priceArr)
+          ? priceArr.find((p: any) => p.ticker === ticker)
+          : priceArr.prices?.find((p: any) => p.ticker === ticker) || priceArr;
+
+        if (tickerPrice && tickerPrice.price > 0) {
+          setPriceData({
+            price: tickerPrice.price,
+            change: tickerPrice.change || 0,
+            changePercent: tickerPrice.changePercent || 0,
+          });
+        }
+      } catch {}
+    };
+
+    fetchPrice();
+    const interval = setInterval(fetchPrice, 5000);
+    return () => clearInterval(interval);
+  }, [ticker, marketSession]);
+
   const quote = getQuote(ticker);
+  // Prefer WebSocket real-time quote, fall back to REST poll
+  // Only use WS quote if it's for the current ticker
+  const wsQuote = quote?.ticker === ticker ? quote : undefined;
 
   return {
-    price: quote?.price || priceData.price,
-    change: quote?.change || priceData.change,
-    changePercent: quote?.changePercent || priceData.changePercent,
+    price: wsQuote?.price ?? priceData.price,
+    change: wsQuote?.change ?? priceData.change,
+    changePercent: wsQuote?.changePercent ?? priceData.changePercent,
     flow: data.flow || { stats: null, trades: [], loading: true, error: null },
     darkpool: data.darkpool || { prints: [], stats: null, loading: true, error: null, meta: undefined },
     news: data.news || { items: [], loading: true },
