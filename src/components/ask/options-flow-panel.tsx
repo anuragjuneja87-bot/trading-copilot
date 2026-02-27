@@ -1,31 +1,22 @@
 'use client';
 
-import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import type { EnhancedFlowStats, EnhancedOptionTrade, FlowTimeSeries } from '@/types/flow';
 import type { Timeframe } from '@/components/war-room/timeframe-selector';
 import {
   PANEL_COLORS as C, FONT_MONO, fmtDollar, fmtTime,
-  setupCanvas, panelStyles as S,
+  panelStyles as S,
 } from '@/lib/panel-design-system';
 import { OptionsFlowLineChart } from './options-flow-line-chart';
 
 /* ════════════════════════════════════════════════════════════════
-   OPTIONS FLOW PANEL v5.0
+   OPTIONS FLOW PANEL v6.0
 
-   Uses TradingView's lightweight-charts for the cumulative line chart:
-   - Proper time axis 9:30 AM → 4:00 PM ET (no pre/post market)
-   - Mouse wheel zoom + drag to pan (scroll left/right)
-   - Crosshair with call/put values
-   - Timeframe controls visible range:
-     * 5M → zoomed to last 5 min
-     * 1H → last hour
-     * Session → full day (fitContent)
+   Cumulative call/put premium lines — the core view.
+   Strike breakdown moved to separate StrikeBreakdownPanel.
    
-   Independent full-session fetch via Polygon aggregates for complete
-   day coverage regardless of symbol volume.
-   
-   Strike bar chart (canvas) shows premium breakdown by strike for
-   the selected timeframe.
+   Chart height: 280px (was 160px) for proper divergence visibility.
+   Full-session fetch via Polygon aggregates for complete day coverage.
    ════════════════════════════════════════════════════════════════ */
 
 interface FlowPanelProps {
@@ -49,8 +40,7 @@ export function OptionsFlowPanel({
   avgDailyFlow = 2_000_000, timeframe = '15m', timeframeRange,
   currentPrice, vwap,
 }: FlowPanelProps) {
-  const barCanvasRef = useRef<HTMLCanvasElement>(null);
-  const barContainerRef = useRef<HTMLDivElement>(null);
+
 
   /* ══════════════════════════════════════════════════════════════
      ★ INDEPENDENT FULL-SESSION FETCH
@@ -112,22 +102,7 @@ export function OptionsFlowPanel({
   const topTrade = useMemo(() => trades.length ? [...trades].sort((a, b) => (b.premium || 0) - (a.premium || 0))[0] : null, [trades]);
   const topTrades = useMemo(() => [...trades].sort((a, b) => (b.premium || 0) - (a.premium || 0)).slice(0, 5), [trades]);
 
-  /* ── Strike breakdown (from parent data — timeframe-filtered) ── */
-  const strikeBreakdown = useMemo(() => {
-    if (!trades.length) return [];
-    const byStrike: Record<string, { callPrem: number; putPrem: number; count: number }> = {};
-    trades.forEach(t => {
-      const key = `$${t.strike}`;
-      if (!byStrike[key]) byStrike[key] = { callPrem: 0, putPrem: 0, count: 0 };
-      if (t.callPut === 'C') byStrike[key].callPrem += t.premium || 0;
-      else byStrike[key].putPrem += t.premium || 0;
-      byStrike[key].count++;
-    });
-    return Object.entries(byStrike)
-      .map(([strike, data]) => ({ strike, ...data, total: data.callPrem + data.putPrem }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 8);
-  }, [trades]);
+
 
   /* ── Sweep insight ── */
   const sweepInsight = useMemo(() => {
@@ -147,62 +122,7 @@ export function OptionsFlowPanel({
     return { strike: Number(strike), cp: info.cp, total: info.total, count: info.count, color: info.cp === 'C' ? C.green : C.red };
   }, [trades]);
 
-  /* ══════════════════════════════════════════════════════════════
-     DRAW: Strike Premium Bar Chart (canvas — timeframe-filtered)
-     ══════════════════════════════════════════════════════════════ */
-  const drawBarChart = useCallback(() => {
-    const canvas = barCanvasRef.current, container = barContainerRef.current;
-    if (!canvas || !container || !strikeBreakdown.length) return;
-    const r = setupCanvas(canvas, container); if (!r) return;
-    const { ctx, W, H } = r;
-    const PAD = { top: 6, right: 54, bottom: 6, left: 52 };
-    const cW = W - PAD.left - PAD.right, cH = H - PAD.top - PAD.bottom;
 
-    ctx.clearRect(0, 0, W, H);
-
-    const N = strikeBreakdown.length;
-    const maxPrem = Math.max(...strikeBreakdown.map(s => s.total), 1);
-    const barH = Math.min(Math.floor(cH / N) - 4, 22);
-    const gapY = (cH - barH * N) / (N + 1);
-
-    strikeBreakdown.forEach((s, i) => {
-      const y = PAD.top + gapY + i * (barH + gapY);
-      const totalW = (s.total / maxPrem) * cW * 0.82;
-      const callW = s.total > 0 ? (s.callPrem / s.total) * totalW : 0;
-      const putW = totalW - callW;
-
-      if (callW > 0) {
-        const g = ctx.createLinearGradient(PAD.left, 0, PAD.left + callW, 0);
-        g.addColorStop(0, 'rgba(0,220,130,0.2)'); g.addColorStop(1, 'rgba(0,220,130,0.45)');
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.roundRect(PAD.left, y, callW, barH, 3); ctx.fill();
-      }
-      if (putW > 0) {
-        const g = ctx.createLinearGradient(PAD.left + callW, 0, PAD.left + callW + putW, 0);
-        g.addColorStop(0, 'rgba(255,71,87,0.2)'); g.addColorStop(1, 'rgba(255,71,87,0.45)');
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.roundRect(PAD.left + callW, y, putW, barH, 3); ctx.fill();
-      }
-
-      ctx.fillStyle = C.textSecondary; ctx.font = `600 10px ${FONT_MONO}`;
-      ctx.textAlign = 'right';
-      ctx.fillText(s.strike, PAD.left - 6, y + barH / 2 + 3);
-
-      ctx.fillStyle = C.textMuted; ctx.font = `500 9px ${FONT_MONO}`;
-      ctx.textAlign = 'left';
-      const premLabel = s.total >= 1e6 ? `$${(s.total / 1e6).toFixed(1)}M` : `$${(s.total / 1e3).toFixed(0)}K`;
-      ctx.fillText(premLabel, PAD.left + totalW + 6, y + barH / 2 + 3);
-    });
-  }, [strikeBreakdown]);
-
-  useEffect(() => { drawBarChart(); }, [drawBarChart]);
-  useEffect(() => {
-    const c = barContainerRef.current;
-    if (!c) return;
-    const ro = new ResizeObserver(() => drawBarChart());
-    ro.observe(c);
-    return () => ro.disconnect();
-  }, [drawBarChart]);
 
   // ── Loading / Error / Empty states ──
   if (loading && !stats) return <div style={S.panel}><div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textSecondary, fontSize: 13 }}>Loading flow data...</div></div>;
@@ -211,7 +131,6 @@ export function OptionsFlowPanel({
 
   const m = metrics!;
   const hasLineData = lineTimeSeries.length >= 2;
-  const hasBarData = strikeBreakdown.length > 0;
 
   return (
     <div style={S.panel}>
@@ -266,29 +185,12 @@ export function OptionsFlowPanel({
           <OptionsFlowLineChart
             data={lineTimeSeries}
             timeframeRange={timeframeRange}
-            height={160}
+            height={280}
           />
         </div>
       )}
 
-      {/* ── PREMIUM BY STRIKE BAR CHART (canvas) ── */}
-      {hasBarData && (
-        <div style={{ borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
-          <div style={{ padding: '4px 14px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 8, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' as const, color: 'rgba(255,255,255,0.25)' }}>
-              Premium by Strike
-            </span>
-            <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.04)' }} />
-            <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.2)' }}>
-              <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: 1, background: 'rgba(0,220,130,0.5)', marginRight: 3, verticalAlign: 'middle' }} />Calls
-              <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: 1, background: 'rgba(255,71,87,0.5)', marginLeft: 8, marginRight: 3, verticalAlign: 'middle' }} />Puts
-            </span>
-          </div>
-          <div ref={barContainerRef} style={{ position: 'relative', height: Math.min(strikeBreakdown.length * 26 + 12, 180) }}>
-            <canvas ref={barCanvasRef} style={S.canvas} />
-          </div>
-        </div>
-      )}
+
 
       {/* ── TOP TRADES TABLE ── */}
       {topTrades.length > 0 && (
