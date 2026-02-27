@@ -25,9 +25,11 @@ import { isMarketOpen } from '@/lib/redis';
 export const maxDuration = 60;
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
-const APP_URL = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+// Prefer explicit production URL > VERCEL_PROJECT_PRODUCTION_URL > VERCEL_URL > localhost
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL 
+  || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null)
+  || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+  || 'http://localhost:3000';
 
 // Tier mapping for sensitivity filter
 const TIER_GATE: Record<string, number[]> = {
@@ -57,14 +59,14 @@ function verifyCron(request: NextRequest): boolean {
   return false;
 }
 
-// ── Data fetchers (call our OWN APIs — they cache Polygon) ───
+// -- Data fetchers with error logging and timeouts --
 
 async function fetchSnapshot(ticker: string) {
   if (!POLYGON_API_KEY) return null;
   try {
     const res = await fetch(
       `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${ticker}?apiKey=${POLYGON_API_KEY}`,
-      { cache: 'no-store' }
+      { cache: 'no-store', signal: AbortSignal.timeout(8000) }
     );
     const data = await res.json();
     const t = data.ticker;
@@ -73,7 +75,10 @@ async function fetchSnapshot(ticker: string) {
       price: t.day?.c || t.lastTrade?.p || t.prevDay?.c || 0,
       changePercent: t.todaysChangePerc || 0,
     };
-  } catch { return null; }
+  } catch (e: any) {
+    console.error(`[alert-engine] fetchSnapshot(${ticker}): ${e.message}`);
+    return null;
+  }
 }
 
 async function fetchFlowStats(ticker: string) {
@@ -81,12 +86,18 @@ async function fetchFlowStats(ticker: string) {
     const res = await fetch(`${APP_URL}/api/flow/options?tickers=${ticker}&limit=300`, {
       cache: 'no-store',
       headers: { 'x-cron-worker': '1' },
+      signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`[alert-engine] fetchFlow(${ticker}) HTTP ${res.status}: ${await res.text().catch(() => '')}`);
+      return null;
+    }
     const json = await res.json();
-    // API returns { success, data: { stats, flow, meta } }
     return json.data?.stats || json.stats || null;
-  } catch { return null; }
+  } catch (e: any) {
+    console.error(`[alert-engine] fetchFlow(${ticker}): ${e.message}`);
+    return null;
+  }
 }
 
 async function fetchDarkPool(ticker: string) {
@@ -94,12 +105,18 @@ async function fetchDarkPool(ticker: string) {
     const res = await fetch(`${APP_URL}/api/darkpool?ticker=${ticker}`, {
       cache: 'no-store',
       headers: { 'x-cron-worker': '1' },
+      signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`[alert-engine] fetchDP(${ticker}) HTTP ${res.status}`);
+      return null;
+    }
     const json = await res.json();
-    // API returns { success, data: { stats, prints, ... } }
     return json.data?.stats || json.stats || null;
-  } catch { return null; }
+  } catch (e: any) {
+    console.error(`[alert-engine] fetchDP(${ticker}): ${e.message}`);
+    return null;
+  }
 }
 
 async function fetchVolumePressure(ticker: string) {
@@ -107,16 +124,18 @@ async function fetchVolumePressure(ticker: string) {
     const res = await fetch(`${APP_URL}/api/market/volume-pressure?ticker=${ticker}`, {
       cache: 'no-store',
       headers: { 'x-cron-worker': '1' },
+      signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`[alert-engine] fetchVP(${ticker}) HTTP ${res.status}`);
+      return null;
+    }
     const json = await res.json();
-    // API returns { success, data: { buckets, summary: { totalBuy, totalSell } } }
     const vpData = json.data || json;
     if (!vpData?.summary) return null;
     const { totalBuy, totalSell } = vpData.summary;
     const totalVol = totalBuy + totalSell;
     const pressure = totalVol > 0 ? Math.round(((totalBuy - totalSell) / totalVol) * 100) : 0;
-    // Determine CVD trend from buckets
     let cvdTrend: 'rising' | 'falling' | 'flat' = 'flat';
     const buckets = vpData.buckets || [];
     if (buckets.length >= 3) {
@@ -126,7 +145,10 @@ async function fetchVolumePressure(ticker: string) {
       else if (cvds[2] < cvds[1] && cvds[1] < cvds[0]) cvdTrend = 'falling';
     }
     return { pressure, cvdTrend };
-  } catch { return null; }
+  } catch (e: any) {
+    console.error(`[alert-engine] fetchVP(${ticker}): ${e.message}`);
+    return null;
+  }
 }
 
 async function fetchLevels(ticker: string) {
@@ -134,12 +156,18 @@ async function fetchLevels(ticker: string) {
     const res = await fetch(`${APP_URL}/api/levels?ticker=${ticker}`, {
       cache: 'no-store',
       headers: { 'x-cron-worker': '1' },
+      signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`[alert-engine] fetchLevels(${ticker}) HTTP ${res.status}`);
+      return null;
+    }
     const json = await res.json();
-    // API returns { success, data: { callWall, putWall, gexFlip, vwap, ... } }
     return json.data || json;
-  } catch { return null; }
+  } catch (e: any) {
+    console.error(`[alert-engine] fetchLevels(${ticker}): ${e.message}`);
+    return null;
+  }
 }
 
 async function fetchRelativeStrength(ticker: string) {
@@ -147,13 +175,20 @@ async function fetchRelativeStrength(ticker: string) {
     const res = await fetch(`${APP_URL}/api/market/relative-strength?ticker=${ticker}`, {
       cache: 'no-store',
       headers: { 'x-cron-worker': '1' },
+      signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`[alert-engine] fetchRS(${ticker}) HTTP ${res.status}`);
+      return null;
+    }
     const json = await res.json();
-    // API returns { success, data: { rsVsSpy, regime, ... } } or flat object
     return json.data || json;
-  } catch { return null; }
+  } catch (e: any) {
+    console.error(`[alert-engine] fetchRS(${ticker}): ${e.message}`);
+    return null;
+  }
 }
+
 
 // ── Build TickerState from raw API responses ─────────────────
 
