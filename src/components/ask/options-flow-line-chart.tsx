@@ -121,7 +121,7 @@ export function OptionsFlowLineChart({ data, timeframeRange, height = 160 }: Flo
       },
       rightPriceScale: {
         borderColor: 'rgba(255,255,255,0.06)',
-        scaleMargins: { top: 0.08, bottom: 0.02 },
+        scaleMargins: { top: 0.05, bottom: 0.0 },
       },
       timeScale: {
         borderColor: 'rgba(255,255,255,0.06)',
@@ -157,11 +157,21 @@ export function OptionsFlowLineChart({ data, timeframeRange, height = 160 }: Flo
       priceFormat: {
         type: 'custom',
         formatter: (price: number) => {
-          if (price >= 1e9) return `$${(price / 1e9).toFixed(1)}B`;
-          if (price >= 1e6) return `$${(price / 1e6).toFixed(1)}M`;
-          if (price >= 1e3) return `$${(price / 1e3).toFixed(0)}K`;
-          return `$${price.toFixed(0)}`;
+          const abs = Math.abs(price);
+          const sign = price < 0 ? '-' : '';
+          if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(1)}B`;
+          if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M`;
+          if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(0)}K`;
+          return `${sign}$${abs.toFixed(0)}`;
         },
+      },
+      autoscaleInfoProvider: (original: () => any) => {
+        const res = original();
+        if (res !== null && res.priceRange) {
+          res.priceRange.minValue = Math.min(res.priceRange.minValue, 0);
+          if (res.priceRange.minValue < 0) res.priceRange.minValue = 0;
+        }
+        return res;
       },
       lastValueVisible: true,
       priceLineVisible: false,
@@ -180,11 +190,21 @@ export function OptionsFlowLineChart({ data, timeframeRange, height = 160 }: Flo
       priceFormat: {
         type: 'custom',
         formatter: (price: number) => {
-          if (price >= 1e9) return `$${(price / 1e9).toFixed(1)}B`;
-          if (price >= 1e6) return `$${(price / 1e6).toFixed(1)}M`;
-          if (price >= 1e3) return `$${(price / 1e3).toFixed(0)}K`;
-          return `$${price.toFixed(0)}`;
+          const abs = Math.abs(price);
+          const sign = price < 0 ? '-' : '';
+          if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(1)}B`;
+          if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M`;
+          if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(0)}K`;
+          return `${sign}$${abs.toFixed(0)}`;
         },
+      },
+      autoscaleInfoProvider: (original: () => any) => {
+        const res = original();
+        if (res !== null && res.priceRange) {
+          res.priceRange.minValue = Math.min(res.priceRange.minValue, 0);
+          if (res.priceRange.minValue < 0) res.priceRange.minValue = 0;
+        }
+        return res;
       },
       lastValueVisible: true,
       priceLineVisible: false,
