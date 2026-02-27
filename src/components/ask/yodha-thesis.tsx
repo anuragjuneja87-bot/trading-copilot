@@ -65,6 +65,7 @@ interface YodhaThesisProps {
   volumePressure?: number;
   mlPrediction?: MLPrediction | null;
   mlLoading?: boolean;
+  newsItems?: any[];
 }
 
 // ── Color Constants ────────────────────────────────────────
@@ -206,12 +207,32 @@ function buildSignals(
 // ── Main Component ─────────────────────────────────────────
 
 export function YodhaThesis(props: YodhaThesisProps) {
-  const { ticker, price, changePercent, flowStats, darkPoolStats, relativeStrength, levels, marketSession, volumePressure, mlPrediction, mlLoading } = props;
+  const { ticker, price, changePercent, flowStats, darkPoolStats, relativeStrength, levels, marketSession, volumePressure, mlPrediction, mlLoading, newsItems } = props;
 
   // Build quality-aware signals
   const signals = useMemo(() => buildSignals(
     flowStats, darkPoolStats, volumePressure, levels, price, relativeStrength, mlPrediction, ticker, marketSession,
   ), [flowStats, darkPoolStats, volumePressure, levels, price, relativeStrength, mlPrediction, ticker, marketSession]);
+
+  // Extract news headlines with sentiment for thesis
+  const newsHeadlines = useMemo(() => {
+    if (!newsItems || newsItems.length === 0) return undefined;
+    return newsItems.slice(0, 10).map((item: any) => {
+      // Extract sentiment using same logic as news panel
+      let sentiment = 'neutral';
+      const label = item?.sentimentLabel;
+      if (typeof label === 'string') {
+        const l = label.toUpperCase();
+        if (l === 'BULLISH' || l === 'POSITIVE') sentiment = 'bullish';
+        else if (l === 'BEARISH' || l === 'NEGATIVE') sentiment = 'bearish';
+      }
+      return {
+        title: item.title || item.headline || '',
+        sentiment,
+        source: item.source || item.publisher?.name || undefined,
+      };
+    }).filter((h: any) => h.title.length > 0);
+  }, [newsItems]);
 
   // Use the thesis hook
   const { thesis, isLoading, error, refresh, secondsSinceUpdate } = useThesis({
@@ -235,6 +256,7 @@ export function YodhaThesis(props: YodhaThesisProps) {
       prevLow: levels.prevLow ?? null,
       prevClose: levels.prevClose ?? null,
     },
+    newsHeadlines,
   });
 
   // ── Render ──────────────────────────────────────────────

@@ -38,6 +38,9 @@ export interface ThesisV2Request {
     ml: { status: string; value: string; probability?: number; direction?: string };
   };
 
+  // News context (headlines + sentiment)
+  newsHeadlines?: { title: string; sentiment: string; source?: string }[];
+
   // Key levels
   levels: {
     callWall: number | null;
@@ -245,10 +248,48 @@ function buildIntradayLevels(price: number, levels: ThesisV2Request['levels']): 
   return result;
 }
 
+// ── News Context Builder ──────────────────────────────────
+
+function buildNewsContext(headlines: ThesisV2Request['newsHeadlines'], ticker: string): string {
+  if (!headlines || headlines.length === 0) return '';
+  
+  const isIndex = ['SPY', 'QQQ', 'IWM', 'DIA'].includes(ticker.toUpperCase());
+  
+  // Categorize headlines
+  const bullish = headlines.filter(h => h.sentiment === 'bullish' || h.sentiment === 'positive');
+  const bearish = headlines.filter(h => h.sentiment === 'bearish' || h.sentiment === 'negative');
+  const neutral = headlines.filter(h => h.sentiment !== 'bullish' && h.sentiment !== 'positive' && h.sentiment !== 'bearish' && h.sentiment !== 'negative');
+  
+  let block = `\nNEWS CONTEXT (${headlines.length} headlines):`;
+  
+  // Show top headlines (max 8)
+  const top = headlines.slice(0, 8);
+  top.forEach((h, i) => {
+    const sentTag = h.sentiment === 'bullish' || h.sentiment === 'positive' ? '🟢' 
+      : h.sentiment === 'bearish' || h.sentiment === 'negative' ? '🔴' : '⚪';
+    block += `\n  ${sentTag} ${h.title}${h.source ? ` (${h.source})` : ''}`;
+  });
+  
+  block += `\n  Sentiment mix: ${bullish.length} bullish, ${bearish.length} bearish, ${neutral.length} neutral`;
+  
+  if (isIndex) {
+    block += `\n  NOTE: For ${ticker}, focus on MACRO implications — Fed policy, economic data, sector rotation, geopolitics. These headlines drive the index more than individual stock news.`;
+  } else {
+    const tickerSpecific = headlines.filter(h => 
+      h.title.toLowerCase().includes(ticker.toLowerCase())
+    );
+    if (tickerSpecific.length > 0) {
+      block += `\n  ${ticker}-SPECIFIC: ${tickerSpecific.length} of ${headlines.length} headlines directly mention ${ticker}`;
+    }
+  }
+  
+  return block;
+}
+
 // ── Prompt Builder ──────────────────────────────────────────
 
 function buildPrompt(req: ThesisV2Request, marketState: ThesisV2Response['marketState'], atrContext: ATRContext, quality: SignalQuality): string {
-  const { ticker, price, changePercent, prevClose, signals, levels } = req;
+  const { ticker, price, changePercent, prevClose, signals, levels, newsHeadlines } = req;
   const signalList = [signals.flow, signals.volume, signals.darkPool, signals.gex, signals.vwap, signals.rs, signals.ml];
   const active = signalList.filter(s => s.status !== 'no_data');
   const bulls = active.filter(s => s.status === 'bullish').length;
@@ -276,12 +317,16 @@ Quality-adjusted: ${quality.highQualityBulls}B/${quality.highQualityBears}R (qua
 
   const atrBlock = `\nATR: ${atrContext.atrPct.toFixed(2)}% daily (${atrContext.source}) · Move = ${(atrContext.gapAsAtrRatio * 100).toFixed(0)}% of ATR`;
 
+  const newsBlock = buildNewsContext(newsHeadlines, ticker);
+
   const base = `
 TICKER: ${ticker} · $${price.toFixed(2)} · ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}% vs prev close $${prevClose.toFixed(2)}
 STATE: ${marketState}${atrBlock}
-${signalBlock}${qualityBlock}
+${signalBlock}${qualityBlock}${newsBlock}
 ${buildIntradayLevels(price, levels)}`;
 
+  const hasNews = !!(newsHeadlines && newsHeadlines.length > 0);
+  
   let instructions = '';
   switch (marketState) {
     case 'rth_bullish':
@@ -291,16 +336,16 @@ ${buildIntradayLevels(price, levels)}`;
       break;
     case 'pre_gap_up':
     case 'pre_gap_down':
-      instructions = buildPreGapInstructions(marketState, changePercent, atrContext, ticker);
+      instructions = buildPreGapInstructions(marketState, changePercent, atrContext, ticker, hasNews);
       break;
     case 'pre_flat':
-      instructions = buildPreFlatInstructions(changePercent, atrContext);
+      instructions = buildPreFlatInstructions(changePercent, atrContext, ticker, hasNews);
       break;
     case 'after_hours':
-      instructions = `After-hours. Write: sessionRecap, stats [{label,value,color}], afterHoursNote, tomorrowPlan, one setup for tomorrow. Include risk.`;
+      instructions = `After-hours. Write: sessionRecap (what happened today — reference news if provided), stats [{label,value,color}], afterHoursNote, tomorrowPlan (what to watch tomorrow based on today's action + news), one setup for tomorrow. Include risk.`;
       break;
     case 'closed':
-      instructions = `Closed. Write: sessionRecap, stats [{label,value,color}], tomorrowPlan, setup grid (breakout/target/support/risk).`;
+      instructions = `Closed. Write: sessionRecap (synthesize today's price action with news context — what drove the move?), stats [{label,value,color}], tomorrowPlan (specific levels and catalysts to watch), setup grid (breakout/target/support/risk).`;
       break;
   }
 
@@ -339,21 +384,86 @@ DAY TRADE RULES: Use INTRADAY LEVELS for targets (Cam R3/R4/S3/S4, VWAP, prevHig
 Return ${direction === 'bullish' ? 'bullSetup' : 'bearSetup'}. If data doesn't support a trade, return NO setup and explain why. Include specific risk warning.`;
 }
 
-function buildPreGapInstructions(marketState: string, changePercent: number, atrContext: ATRContext, ticker: string): string {
+function buildPreGapInstructions(marketState: string, changePercent: number, atrContext: ATRContext, ticker: string, hasNews: boolean): string {
   const isUp = marketState === 'pre_gap_up';
-  return `PRE-MARKET: ${isUp ? 'GAP UP' : 'GAP DOWN'} ${changePercent.toFixed(2)}% = ${(atrContext.gapAsAtrRatio * 100).toFixed(0)}% of ${ticker} daily ATR (${atrContext.atrPct.toFixed(2)}%).${
-    atrContext.gapAsAtrRatio >= 0.30 ? ' Significant move — treat with conviction.' : atrContext.gapAsAtrRatio >= 0.20 ? ' Meaningful move despite small %.' : ''}
+  const isIndex = ['SPY', 'QQQ', 'IWM', 'DIA'].includes(ticker.toUpperCase());
+  
+  let instructions = `PRE-MARKET: ${isUp ? 'GAP UP' : 'GAP DOWN'} ${changePercent.toFixed(2)}% = ${(atrContext.gapAsAtrRatio * 100).toFixed(0)}% of ${ticker} daily ATR (${atrContext.atrPct.toFixed(2)}%).`;
+  
+  if (atrContext.gapAsAtrRatio >= 0.30) instructions += ' This is a significant move.';
+  else if (atrContext.gapAsAtrRatio >= 0.20) instructions += ' Meaningful move for this ticker.';
+  
+  if (isIndex && hasNews) {
+    instructions += `
 
-2-3 paragraph thesis: (1) Gap + ATR significance. (2) Signal context. (3) Key intraday levels for open. (4) Two scenarios: "gap holds" vs "gap fades."
+WRITE A PRE-MARKET BRIEF (3 paragraphs):
+
+Paragraph 1 — MACRO CONTEXT: Lead with the WHY behind this gap. Analyze the news headlines provided. What's driving the move? Economic data, Fed rhetoric, geopolitical events, earnings season theme, sector rotation? Connect the headlines to the price action. Don't just list headlines — synthesize them into a narrative. If tariff news, trade war, or policy changes are in the headlines, explain the market mechanism (e.g., "tariff fears compress multiples on import-dependent sectors").
+
+Paragraph 2 — MARKET STRUCTURE: How does the gap interact with yesterday's action? Is this continuation or reversal? Where does GEX position us (above/below flip = mean-reversion vs trend)? What does the options positioning suggest about dealer hedging today? Reference specific levels. If flow/DP data is pre-market thin, acknowledge it but note what yesterday's positioning implies.
+
+Paragraph 3 — GAME PLAN: Two scenarios for the open. "If gap holds above [level]" → targets. "If gap fades below [level]" → where's support. Specific Cam pivot and VWAP levels for entries. What would make you flip your bias? What's the key level to watch in the first 15 minutes?`;
+  } else if (isIndex) {
+    instructions += `
+
+WRITE A PRE-MARKET BRIEF (2-3 paragraphs):
+(1) Analyze the gap in context of recent market structure. What drove this? Where does GEX positioning put us? Above/below flip matters for today's regime.
+(2) Key levels for the open — use Cam pivots, VWAP, prev high/low. Two scenarios: gap holds vs gap fades.
+(3) What would change the thesis? What signal to watch.`;
+  } else if (hasNews) {
+    instructions += `
+
+WRITE A PRE-MARKET BRIEF (2-3 paragraphs):
+(1) Lead with WHY — analyze the news headlines. Is this earnings, sector momentum, analyst action, or macro sympathy? What's the catalyst? Be specific about what the news means for the stock.
+(2) How does the gap interact with yesterday's levels and GEX? Is this continuation or a gap that will get sold?
+(3) Two scenarios for the open. Specific levels for entry/stop. What would you watch in the first 15 minutes?`;
+  } else {
+    instructions += `
+
+WRITE A PRE-MARKET BRIEF (2 paragraphs):
+(1) Gap + market structure context. Where does GEX and options positioning put us?
+(2) Two scenarios: gap holds vs fades. Specific levels for entries/targets/stops.`;
+  }
+  
+  instructions += `
 
 Use Cam pivots + VWAP + prevHigh/Low for targets — NOT call/put wall.
-Return BOTH bullSetup + bearSetup. Risk warning about thin pre-market data.`;
+Return BOTH bullSetup + bearSetup. Include risk warning about pre-market liquidity.
+Do NOT just recite the gap % and ATR — a trader can read that from the chart. ADD INSIGHT.`;
+  
+  return instructions;
 }
 
-function buildPreFlatInstructions(changePercent: number, atrContext: ATRContext): string {
-  return `PRE-MARKET FLAT: ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}% = ${(atrContext.gapAsAtrRatio * 100).toFixed(0)}% of ATR — negligible.
+function buildPreFlatInstructions(changePercent: number, atrContext: ATRContext, ticker: string, hasNews: boolean): string {
+  const isIndex = ['SPY', 'QQQ', 'IWM', 'DIA'].includes(ticker.toUpperCase());
+  
+  let instructions = `PRE-MARKET FLAT: ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}% = ${(atrContext.gapAsAtrRatio * 100).toFixed(0)}% of ATR — negligible gap.`;
+  
+  if (isIndex && hasNews) {
+    instructions += `
 
-1-2 paragraphs: Flat, no catalyst, no edge. List key levels. Wait for first signal. No setups. Risk warning about flat opens.`;
+Even though the gap is small, the news context matters. WRITE A PRE-MARKET BRIEF (2 paragraphs):
+
+Paragraph 1 — CONTEXT: Flat opens aren't always boring. Analyze the news — is this calm before a catalyst (Fed speaker, economic data), consolidation after a big move, or genuine indecision? What's the narrative? Reference specific headlines if they hint at direction. A flat open with hawkish Fed news brewing is very different from a flat open in a quiet tape.
+
+Paragraph 2 — LEVELS & PLAN: Yesterday's close and VWAP are the pivots. Where does GEX position us? Key Cam levels for first breakout/breakdown direction. What signal would you wait for before committing?`;
+  } else if (hasNews) {
+    instructions += `
+
+Flat gap but check the news — any catalysts developing? WRITE 1-2 paragraphs:
+(1) Is this quiet consolidation or coiled spring? Any news catalysts? Reference headlines.
+(2) Key levels. What signal to wait for.`;
+  } else {
+    instructions += `
+
+1-2 paragraphs: Flat, low pre-market conviction. Key levels to watch. What would create a trading opportunity at the open. No forced setups.`;
+  }
+  
+  instructions += `
+Return BOTH bullSetup + bearSetup if levels provide clear scenarios, otherwise null. Risk warning about flat opens.
+Do NOT just say "flat, no catalyst, wait." Tell the trader what to WATCH FOR.`;
+  
+  return instructions;
 }
 
 // ── System Prompt ──────────────────────────────────────────
@@ -362,10 +472,17 @@ const SYSTEM_PROMPT = `You are Yodha, a senior institutional DAY TRADING analyst
 
 Rules:
 - Use ONLY provided price levels. Never invent numbers.
-- Direct trader-to-trader tone. No generic disclaimers.
+- Direct trader-to-trader tone. No generic disclaimers or filler.
 - When signals conflict, explain WHY (distribution, accumulation, divergence).
 - Reference specific values ("96% call ratio", "62% sell-side prints").
 - GEX: Above flip = mean-reversion (capped). Below = trend-amplification (extends).
+
+NEWS ANALYSIS:
+- When news headlines are provided, SYNTHESIZE them into a narrative. Don't list headlines — explain what they mean for the trade.
+- For indices (SPY/QQQ): Focus on macro implications — Fed policy, economic data, tariffs/trade, sector rotation, geopolitics.
+- For stocks: Focus on company-specific catalysts — earnings, analyst upgrades/downgrades, sector momentum, partnerships, regulatory.
+- Connect the news to the PRICE ACTION and LEVELS. "Tariff fears are pushing SPY toward the S3 at $X" is good. "There is tariff news" is useless.
+- If news contradicts the signal data, highlight the divergence — that's valuable insight.
 
 DAY TRADE TARGETING:
 - Entries/targets/stops use: VWAP, Camarilla R3/R4/S3/S4, prevHigh/Low, prevClose.
@@ -379,6 +496,11 @@ DATA QUALITY:
 - You CAN override pre-computed bias if data quality doesn't support it.
 - Distinguish "data supports X" from "data is insufficient to conclude."
 - ATR-relative framing: 0.3% on SPY ≠ 0.3% on NVDA.
+
+WRITING QUALITY:
+- Lead with the INSIGHT, not the data point. "Tariff escalation is compressing tech multiples" > "SPY gapped down 0.4%".
+- Every sentence should add information a trader can ACT on. No padding, no throat-clearing.
+- If you don't have enough data to say something useful, say "not enough data" in one sentence. Don't write three paragraphs about not having data.
 
 Respond ONLY with valid JSON:
 {
@@ -401,7 +523,7 @@ async function callClaude(prompt: string): Promise<string> {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY || '', 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1500, system: SYSTEM_PROMPT, messages: [{ role: 'user', content: prompt }] }),
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 2000, system: SYSTEM_PROMPT, messages: [{ role: 'user', content: prompt }] }),
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Claude API ${response.status}: ${await response.text().catch(() => 'Unknown')}`);
@@ -463,7 +585,7 @@ export async function POST(request: NextRequest) {
         footer = `Claude Haiku 4.5 + Databricks ML · ${active.length} signals · ${quality.highQualityBulls} quality bull · ${quality.highQualityBears} quality bear${qualityTag}`;
         break;
       case 'pre_gap_up': case 'pre_gap_down': case 'pre_flat':
-        footer = 'Pre-market analysis · Based on levels + price action · Full thesis at 9:30 open'; break;
+        footer = `Pre-market analysis · Based on levels + price action${body.newsHeadlines?.length ? ` + ${body.newsHeadlines.length} news` : ''} · Full thesis at 9:30 open`; break;
       case 'after_hours':
         footer = 'After-hours recap · Pre-market thesis at 4:00 AM'; break;
       case 'closed':

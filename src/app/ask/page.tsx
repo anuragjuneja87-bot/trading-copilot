@@ -571,6 +571,7 @@ function AskPageContent() {
                 volumePressure={volumePressure}
                 mlPrediction={mlResult.prediction}
                 mlLoading={mlResult.isLoading}
+                newsItems={data.news.items}
               />
 
               {/* DETAILED DATA PANELS (collapsible, default collapsed) */}

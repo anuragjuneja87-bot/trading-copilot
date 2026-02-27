@@ -733,7 +733,7 @@ export async function GET(request: NextRequest) {
             const data = await res.json();
             return {
               ticker: optTicker,
-              type: contractMap.get(optTicker) || 'C',
+              type: snapshotContracts.get(optTicker) || 'C',
               bars: data.results || [],
             };
           })

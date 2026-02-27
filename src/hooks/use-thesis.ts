@@ -26,6 +26,7 @@ interface UseThesisOptions {
   marketSession: 'pre-market' | 'open' | 'after-hours' | 'closed';
   signals: ThesisV2Request['signals'];
   levels: ThesisV2Request['levels'];
+  newsHeadlines?: { title: string; sentiment: string; source?: string }[];
   enabled?: boolean;
 }
 
@@ -51,7 +52,7 @@ function buildSnapshotKey(signals: ThesisV2Request['signals']): string {
 }
 
 export function useThesis(opts: UseThesisOptions): UseThesisResult {
-  const { ticker, price, changePercent, prevClose, marketSession, signals, levels, enabled = true } = opts;
+  const { ticker, price, changePercent, prevClose, marketSession, signals, levels, newsHeadlines, enabled = true } = opts;
 
   const [thesis, setThesis] = useState<ThesisV2Response | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -110,6 +111,7 @@ export function useThesis(opts: UseThesisOptions): UseThesisResult {
         marketSession: current.marketSession,
         signals: current.signals,
         levels: current.levels,
+        newsHeadlines: current.newsHeadlines,
       };
 
       const response = await fetch('/api/ai/thesis-v2', {
