@@ -247,7 +247,7 @@ function buildNewsSummary(news: any[], ticker: string): PanelSummary {
 function AskPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const selectedTicker = searchParams.get('symbol');
+  const selectedTicker = searchParams.get('symbol') || 'SPY';
   const watchlist = useWatchlistStore((state) => state.watchlist);
   const { data: session, status: authStatus } = useSession();
   const [disclaimerAccepted, setDisclaimerAccepted] = useState<boolean | null>(null);
