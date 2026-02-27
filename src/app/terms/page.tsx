@@ -3,7 +3,7 @@ import { Navbar, Footer } from '@/components/layout';
 
 export const metadata: Metadata = {
   title: 'Terms of Service',
-  description: 'Terms of Service for TradingCopilot',
+  description: 'Terms of Service for TradeYodha',
 };
 
 export default function TermsPage() {
@@ -19,7 +19,7 @@ export default function TermsPage() {
             <section>
               <h2 className="text-2xl font-semibold text-text-primary mb-4">1. Acceptance of Terms</h2>
               <p>
-                By accessing or using TradingCopilot, you agree to be bound by these Terms of Service.
+                By accessing or using TradeYodha, you agree to be bound by these Terms of Service.
                 If you disagree with any part of these terms, you may not access the service.
               </p>
             </section>
@@ -27,7 +27,7 @@ export default function TermsPage() {
             <section>
               <h2 className="text-2xl font-semibold text-text-primary mb-4">2. Service Description</h2>
               <p>
-                TradingCopilot provides AI-powered trading intelligence, including:
+                TradeYodha provides AI-powered trading intelligence, including:
               </p>
               <ul className="list-disc pl-6 space-y-2">
                 <li>Real-time options flow data</li>
@@ -53,7 +53,7 @@ export default function TermsPage() {
             <section>
               <h2 className="text-2xl font-semibold text-text-primary mb-4">4. Payment Terms</h2>
               <p>
-                <strong>Subscriptions:</strong> TradingCopilot offers free, pro, and elite subscription tiers.
+                <strong>Subscriptions:</strong> TradeYodha offers free, pro, and elite subscription tiers.
                 Paid subscriptions are billed monthly or annually as selected.
               </p>
               <p>
@@ -69,13 +69,13 @@ export default function TermsPage() {
             <section>
               <h2 className="text-2xl font-semibold text-text-primary mb-4">5. Disclaimer</h2>
               <p className="font-semibold text-warning">
-                <strong>NOT INVESTMENT ADVICE:</strong> TradingCopilot is not a registered investment advisor.
+                <strong>NOT INVESTMENT ADVICE:</strong> TradeYodha is not a registered investment advisor.
                 The information, analysis, and recommendations provided by our service are for informational
                 purposes only and do not constitute investment advice, financial advice, trading advice, or
                 any other sort of advice.
               </p>
               <p>
-                You should not treat any content on TradingCopilot as a substitute for professional financial
+                You should not treat any content on TradeYodha as a substitute for professional financial
                 advice. Always seek the advice of qualified financial advisors with any questions you may have
                 regarding your investments.
               </p>
@@ -88,8 +88,8 @@ export default function TermsPage() {
                 You acknowledge that:
               </p>
               <ul className="list-disc pl-6 space-y-2">
-                <li>You may lose money trading based on information from TradingCopilot</li>
-                <li>TradingCopilot is not responsible for any trading losses you incur</li>
+                <li>You may lose money trading based on information from TradeYodha</li>
+                <li>TradeYodha is not responsible for any trading losses you incur</li>
                 <li>Market data and AI analysis may contain errors or delays</li>
                 <li>You are solely responsible for your trading decisions</li>
               </ul>
@@ -123,8 +123,8 @@ export default function TermsPage() {
               <h2 className="text-2xl font-semibold text-text-primary mb-4">10. Contact Us</h2>
               <p>
                 If you have any questions about these Terms of Service, please contact us at:{' '}
-                <a href="mailto:support@tradingcopilot.com" className="text-accent hover:underline">
-                  support@tradingcopilot.com
+                <a href="mailto:support@tradeyodha.com" className="text-accent hover:underline">
+                  support@tradeyodha.com
                 </a>
               </p>
             </section>

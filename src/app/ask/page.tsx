@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef, Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession, signIn } from 'next-auth/react';
 import { useWatchlistStore, useAuthStore, useUserPreferencesStore } from '@/stores';
 import { useWarRoomData } from '@/hooks/use-war-room-data';
@@ -269,6 +269,19 @@ function AskPageContent() {
     }
   }, [authStatus]);
 
+  // Auto-save disclaimer acceptance if redirected from landing page
+  useEffect(() => {
+    if (authStatus === 'authenticated' && searchParams.get('da') === '1') {
+      fetch('/api/user/disclaimer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accepted: true }),
+      }).catch(() => {});
+      // Remove the query param from URL
+      window.history.replaceState({}, '', '/ask');
+    }
+  }, [authStatus, searchParams]);
+
   useEffect(() => {
     if (session?.user?.id) {
       useAuthStore.getState().setAuth((session.user as { id: string }).id);
@@ -355,7 +368,7 @@ function AskPageContent() {
   };
 
   // Loading state
-  if (authStatus === 'loading' || disclaimerAccepted === null) {
+  if (authStatus === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#0a0e17' }}>
         <div className="text-gray-500 text-sm font-mono">Loading...</div>
@@ -363,9 +376,16 @@ function AskPageContent() {
     );
   }
 
-  // Auth gate
   if (authStatus === 'unauthenticated') {
-    return null; // useEffect will redirect
+    return null;
+  }
+
+  if (disclaimerAccepted === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0a0e17' }}>
+        <div className="text-gray-500 text-sm font-mono">Loading...</div>
+      </div>
+    );
   }
 
   // Disclaimer gate

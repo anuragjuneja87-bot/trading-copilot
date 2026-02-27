@@ -3,7 +3,7 @@ import { Navbar, Footer } from '@/components/layout';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy',
-  description: 'Privacy Policy for TradingCopilot',
+  description: 'Privacy Policy for TradeYodha',
 };
 
 export default function PrivacyPage() {
@@ -91,8 +91,8 @@ export default function PrivacyPage() {
               <h2 className="text-2xl font-semibold text-text-primary mb-4">7. Contact Us</h2>
               <p>
                 If you have any questions about this Privacy Policy, please contact us at:{' '}
-                <a href="mailto:support@tradingcopilot.com" className="text-accent hover:underline">
-                  support@tradingcopilot.com
+                <a href="mailto:support@tradeyodha.com" className="text-accent hover:underline">
+                  support@tradeyodha.com
                 </a>
               </p>
             </section>

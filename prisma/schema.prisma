@@ -49,6 +49,8 @@ model User {
   dailyQuestionsUsed  Int      @default(0)
   dailyQuestionsReset DateTime @default(now())
 
+  disclaimerAcceptedAt DateTime?
+
   // Relations
   accounts      Account[]
   sessions      Session[]
