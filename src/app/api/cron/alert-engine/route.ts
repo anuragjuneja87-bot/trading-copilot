@@ -25,11 +25,18 @@ import { isMarketOpen } from '@/lib/redis';
 export const maxDuration = 60;
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+const TRADEYODHA_API_SECRET = process.env.TRADEYODHA_API_SECRET;
 // Prefer explicit production URL > VERCEL_PROJECT_PRODUCTION_URL > VERCEL_URL > localhost
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL 
   || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null)
   || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
   || 'http://localhost:3000';
+
+// Headers for self-fetching our own APIs (must pass middleware auth)
+const INTERNAL_HEADERS: Record<string, string> = {
+  'x-cron-worker': '1',
+  ...(TRADEYODHA_API_SECRET ? { 'x-api-secret': TRADEYODHA_API_SECRET } : {}),
+};
 
 // Tier mapping for sensitivity filter
 const TIER_GATE: Record<string, number[]> = {
@@ -85,7 +92,7 @@ async function fetchFlowStats(ticker: string) {
   try {
     const res = await fetch(`${APP_URL}/api/flow/options?tickers=${ticker}&limit=300`, {
       cache: 'no-store',
-      headers: { 'x-cron-worker': '1' },
+      headers: INTERNAL_HEADERS,
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
@@ -104,7 +111,7 @@ async function fetchDarkPool(ticker: string) {
   try {
     const res = await fetch(`${APP_URL}/api/darkpool?ticker=${ticker}`, {
       cache: 'no-store',
-      headers: { 'x-cron-worker': '1' },
+      headers: INTERNAL_HEADERS,
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
@@ -123,7 +130,7 @@ async function fetchVolumePressure(ticker: string) {
   try {
     const res = await fetch(`${APP_URL}/api/market/volume-pressure?ticker=${ticker}`, {
       cache: 'no-store',
-      headers: { 'x-cron-worker': '1' },
+      headers: INTERNAL_HEADERS,
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
@@ -155,7 +162,7 @@ async function fetchLevels(ticker: string) {
   try {
     const res = await fetch(`${APP_URL}/api/levels?ticker=${ticker}`, {
       cache: 'no-store',
-      headers: { 'x-cron-worker': '1' },
+      headers: INTERNAL_HEADERS,
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
@@ -174,7 +181,7 @@ async function fetchRelativeStrength(ticker: string) {
   try {
     const res = await fetch(`${APP_URL}/api/market/relative-strength?ticker=${ticker}`, {
       cache: 'no-store',
-      headers: { 'x-cron-worker': '1' },
+      headers: INTERNAL_HEADERS,
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
@@ -507,7 +514,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  console.log(`[alert-engine] Starting. APP_URL=${APP_URL}, POLYGON_API_KEY=${POLYGON_API_KEY ? 'set' : 'MISSING'}`);
+  console.log(`[alert-engine] Starting. APP_URL=${APP_URL}, POLYGON_API_KEY=${POLYGON_API_KEY ? 'set' : 'MISSING'}, API_SECRET=${TRADEYODHA_API_SECRET ? 'set' : 'MISSING'}`);
 
   const startTime = Date.now();
 
