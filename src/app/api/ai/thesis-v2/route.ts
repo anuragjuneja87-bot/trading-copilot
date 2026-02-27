@@ -6,17 +6,57 @@ export const maxDuration = 30;
 /* ══════════════════════════════════════════════════════════════
    THESIS V2 API — AI-powered thesis generation with structured output
    
-   v2.2 Changes:
-   - ATR-aware gap classification (no more "flat" on meaningful index gaps)
-   - Intraday target logic: Cam pivots + VWAP as day trade targets,
-     call/put wall as multi-session context only
-   - Signal quality assessment: thin data = downgraded conviction
-   - LLM bias override: Claude can override pre-computed bias when
-     data quality is low or signals are contradictory
+   v3.0 Changes:
+   - News-aware thesis (macro context for indices, catalyst analysis for stocks)
+   - Server-side cache: same ticker+signals = one LLM call for all users
+   - GEX flip distance filter: skip if >5% from price (not day-trade relevant)
+   - Rewritten pre-market prompts with 3-paragraph macro brief
+   - Enhanced system prompt with NEWS ANALYSIS + WRITING QUALITY rules
+   - max_tokens bumped to 2000 for richer output
    ══════════════════════════════════════════════════════════════ */
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const AI_TIMEOUT = parseInt(process.env.AI_TIMEOUT || '25000', 10);
+
+// ── Server-side Thesis Cache ────────────────────────────────
+// Same ticker + market state + signals = same thesis for all users
+// Saves API costs when 100 users view SPY simultaneously
+
+interface CacheEntry {
+  data: any;
+  createdAt: number;
+  cacheKey: string;
+}
+
+const thesisCache = new Map<string, CacheEntry>();
+const CACHE_TTL_RTH = 3 * 60 * 1000;         // 3 min during market hours
+const CACHE_TTL_PREMARKET = 10 * 60 * 1000;   // 10 min pre-market
+const CACHE_TTL_CLOSED = 30 * 60 * 1000;      // 30 min when closed
+const CACHE_MAX_SIZE = 200;                     // Max entries before pruning
+
+function getCacheTTL(marketSession: string): number {
+  if (marketSession === 'open') return CACHE_TTL_RTH;
+  if (marketSession === 'pre-market') return CACHE_TTL_PREMARKET;
+  return CACHE_TTL_CLOSED;
+}
+
+function buildCacheKey(ticker: string, marketSession: string, signals: any, changePercent: number, newsCount: number): string {
+  // Round changePercent to 0.1% to avoid cache misses on tiny price ticks
+  const roundedChange = Math.round(changePercent * 10) / 10;
+  const signalSnapshot = JSON.stringify([
+    signals.flow.status, signals.volume.status, signals.darkPool.status,
+    signals.gex.status, signals.vwap.status, signals.rs.status, signals.ml.status,
+  ]);
+  return `${ticker}:${marketSession}:${roundedChange}:${signalSnapshot}:${newsCount}`;
+}
+
+function pruneCache() {
+  if (thesisCache.size <= CACHE_MAX_SIZE) return;
+  // Remove oldest entries
+  const entries = [...thesisCache.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt);
+  const toRemove = entries.slice(0, entries.length - CACHE_MAX_SIZE + 50);
+  toRemove.forEach(([key]) => thesisCache.delete(key));
+}
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -212,22 +252,28 @@ function buildSignalSnapshot(signals: ThesisV2Request['signals']): string {
 
 // ── Intraday Level Classifier ──────────────────────────────
 
+const MAX_LEVEL_DISTANCE_PCT = 5; // Skip levels >5% from price (not day-trade relevant)
+
 function buildIntradayLevels(price: number, levels: ThesisV2Request['levels']): string {
   const items: { name: string; price: number; dist: number; above: boolean }[] = [];
-  const add = (name: string, val: number | null | undefined) => {
+  const add = (name: string, val: number | null | undefined, maxDist?: number) => {
     if (!val || val <= 0) return;
-    items.push({ name, price: val, dist: ((val - price) / price) * 100, above: val > price });
+    const distPct = ((val - price) / price) * 100;
+    // Skip levels that are too far from current price
+    if (maxDist && Math.abs(distPct) > maxDist) return;
+    items.push({ name, price: val, dist: distPct, above: val > price });
   };
   add('VWAP', levels.vwap);
   add('Camarilla R3', levels.camR3);
   add('Camarilla R4', levels.camR4);
   add('Camarilla S3', levels.camS3);
   add('Camarilla S4', levels.camS4);
-  add('Previous High', levels.prevHigh);
-  add('Previous Low', levels.prevLow);
+  add('Previous High', levels.prevHigh, MAX_LEVEL_DISTANCE_PCT);
+  add('Previous Low', levels.prevLow, MAX_LEVEL_DISTANCE_PCT);
   add('Previous Close', levels.prevClose);
-  add('Max Pain', levels.maxPain);
-  add('GEX Flip', levels.gexFlip);
+  add('Max Pain', levels.maxPain, MAX_LEVEL_DISTANCE_PCT);
+  // GEX flip: only include if within 5% of price — a flip 18% away is meaningless for day trading
+  add('GEX Flip', levels.gexFlip, MAX_LEVEL_DISTANCE_PCT);
   items.sort((a, b) => Math.abs(a.dist) - Math.abs(b.dist));
 
   if (items.length === 0) return '';
@@ -239,6 +285,11 @@ function buildIntradayLevels(price: number, levels: ThesisV2Request['levels']): 
   let result = '\nINTRADAY LEVELS (use THESE for day trade entries/targets/stops):';
   if (above.length) result += '\n Resistance:\n' + above.join('\n');
   if (below.length) result += '\n Support:\n' + below.join('\n');
+
+  // Note if GEX flip was filtered out
+  if (levels.gexFlip && Math.abs(((levels.gexFlip - price) / price) * 100) > MAX_LEVEL_DISTANCE_PCT) {
+    result += `\n NOTE: GEX flip ($${levels.gexFlip.toFixed(2)}) is ${Math.abs(((levels.gexFlip - price) / price) * 100).toFixed(1)}% away — too distant for intraday relevance. Treat current price zone as ${price > (levels.gexFlip || 0) ? 'above flip (positive gamma = mean-reversion regime)' : 'below flip (negative gamma = trend-amplification regime)'}.`;
+  }
 
   const swingLevels: string[] = [];
   if (levels.callWall) swingLevels.push(`  Call Wall: $${levels.callWall.toFixed(2)} (${(((levels.callWall - price) / price) * 100).toFixed(1)}% away — NOT a day trade target)`);
@@ -560,6 +611,17 @@ export async function POST(request: NextRequest) {
     if (!ANTHROPIC_API_KEY)
       return NextResponse.json({ success: false, error: 'AI service not configured' }, { status: 503 });
 
+    // ── Cache check ──────────────────────────────────────
+    const cacheKey = buildCacheKey(ticker, marketSession, signals, changePercent, body.newsHeadlines?.length || 0);
+    const cached = thesisCache.get(cacheKey);
+    const ttl = getCacheTTL(marketSession);
+    
+    if (cached && (Date.now() - cached.createdAt) < ttl) {
+      console.log(`[Thesis] ✅ Cache HIT for ${ticker} (${marketSession}), age: ${Math.round((Date.now() - cached.createdAt) / 1000)}s`);
+      return NextResponse.json({ success: true, data: cached.data, cached: true });
+    }
+
+    // ── Generate thesis ──────────────────────────────────
     const atrContext = computeATRContext(ticker, changePercent, effectivePrice, levels);
     const quality = assessSignalQuality(signals);
     const marketState = detectMarketState(marketSession, changePercent, signals, atrContext);
@@ -605,14 +667,21 @@ export async function POST(request: NextRequest) {
     else if (marketState === 'pre_gap_down') gapLabel = `GAP DOWN ${changePercent.toFixed(1)}%`;
     else if (marketState === 'pre_flat') gapLabel = `FLAT ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(1)}%`;
 
-    return NextResponse.json({ success: true, data: {
+    const responseData = {
       marketState, bias, gapLabel, mlConfidence: mlTag,
       thesis: parsed.thesis || `${ticker} at $${effectivePrice.toFixed(2)} — analysis generating...`,
       bullSetup: parsed.bullSetup || undefined, bearSetup: parsed.bearSetup || undefined,
       sessionRecap: parsed.sessionRecap || undefined, stats: parsed.stats || undefined,
       tomorrowPlan: parsed.tomorrowPlan || undefined, afterHoursNote: parsed.afterHoursNote || undefined,
       risk: parsed.risk || undefined, footer, signalSnapshot, generatedAt: new Date().toISOString(),
-    } as ThesisV2Response });
+    } as ThesisV2Response;
+
+    // ── Store in cache ──────────────────────────────────
+    thesisCache.set(cacheKey, { data: responseData, createdAt: Date.now(), cacheKey });
+    pruneCache();
+    console.log(`[Thesis] 💾 Cached ${ticker} (${marketSession}), cache size: ${thesisCache.size}`);
+
+    return NextResponse.json({ success: true, data: responseData });
 
   } catch (error: any) {
     console.error('Thesis V2 API error:', error);
