@@ -294,6 +294,9 @@ export async function GET(request: NextRequest) {
 
   try {
 
+    // Collect snapshot contracts for full-session aggregates
+    const snapshotContracts = new Map<string, 'C' | 'P'>();
+
     // Step 1: Get active contracts for each underlying
     for (const underlying of tickers.slice(0, 5)) {
       try {
@@ -462,6 +465,15 @@ export async function GET(request: NextRequest) {
 
         // Combine calls and puts, ensuring both are represented
         const activeContracts = [...activeCalls, ...activePuts];
+
+        // Store snapshot contracts for full-session use
+        for (const contract of activeContracts) {
+          const optTicker = contract.details?.ticker || contract.ticker;
+          if (!optTicker) continue;
+          const ct = (contract.details?.contract_type || '').toLowerCase();
+          const type: 'C' | 'P' = (ct === 'put' || ct === 'p') ? 'P' : 'C';
+          snapshotContracts.set(optTicker, type);
+        }
 
         console.log(`[Flow API] ${underlying}: Found ${activeContracts.length} active contracts (${activeCalls.length} calls, ${activePuts.length} puts)`);
         
@@ -690,41 +702,22 @@ export async function GET(request: NextRequest) {
        ══════════════════════════════════════════════════════════════ */
     let fullSessionTimeSeries: FlowTimeSeries[] | null = null;
     
-    if (fullSession && allTrades.length > 0) {
+    if (fullSession && snapshotContracts.size > 0) {
       try {
         // Get today's date in YYYY-MM-DD (ET timezone)
         const now = new Date();
         const etDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
         const today = `${etDate.getFullYear()}-${String(etDate.getMonth() + 1).padStart(2, '0')}-${String(etDate.getDate()).padStart(2, '0')}`;
         
-        // Collect unique contracts with their type from existing trades
-        const contractMap = new Map<string, 'C' | 'P'>();
-        allTrades.forEach(t => {
-          if (t.optionTicker && !contractMap.has(t.optionTicker)) {
-            contractMap.set(t.optionTicker, t.callPut as 'C' | 'P');
-          }
-        });
-        
-        // Pick top 20 contracts by premium (10 call, 10 put)
+        // Use snapshot contracts (already sorted by volume) instead of
+        // trade-derived contracts — trades only cover last few minutes
         const callContracts: string[] = [];
         const putContracts: string[] = [];
-        // Group by contract and sum premium
-        const contractPremium = new Map<string, number>();
-        allTrades.forEach(t => {
-          if (t.optionTicker) {
-            contractPremium.set(t.optionTicker, (contractPremium.get(t.optionTicker) || 0) + t.premium);
-          }
-        });
-        
-        const sortedContracts = [...contractMap.entries()]
-          .sort((a, b) => (contractPremium.get(b[0]) || 0) - (contractPremium.get(a[0]) || 0));
-        
-        for (const [ticker, type] of sortedContracts) {
-          if (type === 'C' && callContracts.length < 10) callContracts.push(ticker);
-          else if (type === 'P' && putContracts.length < 10) putContracts.push(ticker);
-          if (callContracts.length >= 10 && putContracts.length >= 10) break;
+        for (const [ticker, type] of snapshotContracts.entries()) {
+          if (type === 'C' && callContracts.length < 15) callContracts.push(ticker);
+          else if (type === 'P' && putContracts.length < 15) putContracts.push(ticker);
+          if (callContracts.length >= 15 && putContracts.length >= 15) break;
         }
-        
         const aggContracts = [...callContracts, ...putContracts];
         console.log(`[Flow API] Full session: fetching 5-min aggregates for ${aggContracts.length} contracts`);
         
