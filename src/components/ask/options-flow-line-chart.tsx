@@ -33,6 +33,12 @@ interface FlowLineChartProps {
 const MARKET_OPEN_MINUTES = 9 * 60 + 30;  // 570
 const MARKET_CLOSE_MINUTES = 16 * 60;      // 960
 
+// Get the ET date string (YYYY-MM-DD) for a timestamp
+function getTradingDateET(timestampMs: number): string {
+  const d = new Date(timestampMs);
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD format
+}
+
 function isRegularHours(timestampMs: number): boolean {
   const d = new Date(timestampMs);
   const etStr = d.toLocaleString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' });
@@ -64,21 +70,27 @@ export function OptionsFlowLineChart({ data, timeframeRange, height = 160 }: Flo
 
     const sorted = [...data].sort((a, b) => a.timeMs - b.timeMs);
 
+    // Find the latest trading date in the data and filter to ONLY that day
+    // This prevents multi-day data from spanning the chart
+    const validPoints = sorted.filter(d => d.timeMs && d.timeMs > 1000000000000);
+    const latestDate = validPoints.length > 0
+      ? getTradingDateET(validPoints[validPoints.length - 1].timeMs)
+      : null;
+
     // Compute ET offset once from first data point
-    const firstValid = sorted.find(d => d.timeMs && d.timeMs > 1000000000000);
+    const firstValid = validPoints[0];
     const etOffset = firstValid ? getETOffsetSeconds(firstValid.timeMs) : 0;
 
     for (const d of sorted) {
       if (!d.timeMs || d.timeMs < 1000000000000) continue;
-      // Filter to regular market hours only
+      // Filter to latest trading day + regular hours only
+      if (latestDate && getTradingDateET(d.timeMs) !== latestDate) continue;
       if (!isRegularHours(d.timeMs)) continue;
 
       cumCall += d.callPremium || 0;
       cumPut += d.putPremium || 0;
 
-      // Apply ET offset so chart displays Eastern Time
       const timeSec = Math.floor(d.timeMs / 1000) + etOffset;
-
       callPoints.push({ time: timeSec, value: cumCall });
       putPoints.push({ time: timeSec, value: cumPut });
     }

@@ -708,6 +708,7 @@ export async function GET(request: NextRequest) {
         const now = new Date();
         const etDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
         const today = `${etDate.getFullYear()}-${String(etDate.getMonth() + 1).padStart(2, '0')}-${String(etDate.getDate()).padStart(2, '0')}`;
+        console.log(`[Flow API] Full session date: ${today}, now ET: ${etDate.toISOString()}`);
         
         // Use snapshot contracts (already sorted by volume) instead of
         // trade-derived contracts — trades only cover last few minutes
