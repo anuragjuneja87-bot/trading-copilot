@@ -83,8 +83,9 @@ async function fetchFlowStats(ticker: string) {
       headers: { 'x-cron-worker': '1' },
     });
     if (!res.ok) return null;
-    const data = await res.json();
-    return data.stats || null;
+    const json = await res.json();
+    // API returns { success, data: { stats, flow, meta } }
+    return json.data?.stats || json.stats || null;
   } catch { return null; }
 }
 
@@ -95,8 +96,9 @@ async function fetchDarkPool(ticker: string) {
       headers: { 'x-cron-worker': '1' },
     });
     if (!res.ok) return null;
-    const data = await res.json();
-    return data.stats || null;
+    const json = await res.json();
+    // API returns { success, data: { stats, prints, ... } }
+    return json.data?.stats || json.stats || null;
   } catch { return null; }
 }
 
@@ -107,7 +109,23 @@ async function fetchVolumePressure(ticker: string) {
       headers: { 'x-cron-worker': '1' },
     });
     if (!res.ok) return null;
-    return await res.json();
+    const json = await res.json();
+    // API returns { success, data: { buckets, summary: { totalBuy, totalSell } } }
+    const vpData = json.data || json;
+    if (!vpData?.summary) return null;
+    const { totalBuy, totalSell } = vpData.summary;
+    const totalVol = totalBuy + totalSell;
+    const pressure = totalVol > 0 ? Math.round(((totalBuy - totalSell) / totalVol) * 100) : 0;
+    // Determine CVD trend from buckets
+    let cvdTrend: 'rising' | 'falling' | 'flat' = 'flat';
+    const buckets = vpData.buckets || [];
+    if (buckets.length >= 3) {
+      const recent = buckets.slice(-3);
+      const cvds = recent.map((b: any) => (b.buyVolume || 0) - (b.sellVolume || 0));
+      if (cvds[2] > cvds[1] && cvds[1] > cvds[0]) cvdTrend = 'rising';
+      else if (cvds[2] < cvds[1] && cvds[1] < cvds[0]) cvdTrend = 'falling';
+    }
+    return { pressure, cvdTrend };
   } catch { return null; }
 }
 
@@ -118,7 +136,9 @@ async function fetchLevels(ticker: string) {
       headers: { 'x-cron-worker': '1' },
     });
     if (!res.ok) return null;
-    return await res.json();
+    const json = await res.json();
+    // API returns { success, data: { callWall, putWall, gexFlip, vwap, ... } }
+    return json.data || json;
   } catch { return null; }
 }
 
@@ -129,7 +149,9 @@ async function fetchRelativeStrength(ticker: string) {
       headers: { 'x-cron-worker': '1' },
     });
     if (!res.ok) return null;
-    return await res.json();
+    const json = await res.json();
+    // API returns { success, data: { rsVsSpy, regime, ... } } or flat object
+    return json.data || json;
   } catch { return null; }
 }
 
@@ -156,6 +178,7 @@ function buildTickerState(
     topSweepStrike: flow?.topSweepStrike,
     topSweepValue: flow?.topSweepValue,
 
+    // vp is now { pressure, cvdTrend } from our fixed fetcher
     cvdTrend: vp?.cvdTrend || 'flat',
     volumePressure: vp?.pressure ?? 50,
 
@@ -170,7 +193,7 @@ function buildTickerState(
     gexFlip: levels?.gexFlip ?? undefined,
     vwap: levels?.vwap ?? undefined,
 
-    newsScore: undefined, // TODO: wire news API
+    newsScore: undefined,
   };
 }
 
@@ -204,6 +227,9 @@ async function processTickers(tickers: string[]) {
             return { ticker, signals: 0, error: 'no-snapshot' };
           }
 
+          // Diagnostic: log what we got so we can verify data extraction
+          console.log(`[alert-engine] ${ticker}: price=$${snapshot.price}, flow=${flow ? `callR=${flow.callRatio}%` : 'null'}, dp=${dp ? `bull=${dp.bullishPct}%` : 'null'}, vp=${vp ? `p=${vp.pressure}` : 'null'}, levels=${levels ? `cw=${levels.callWall}` : 'null'}, rs=${rs ? `rs=${rs.rsVsSpy}` : 'null'}`);
+
           const state = buildTickerState(ticker, snapshot, flow, dp, vp, levels, rs);
 
           // Load previous state from ticker_cache
@@ -225,6 +251,10 @@ async function processTickers(tickers: string[]) {
 
           // Run all 9 detectors
           const detectedSignals = runAllDetectors(state, prev);
+
+          if (detectedSignals.length > 0) {
+            console.log(`[alert-engine] 🎯 ${ticker}: ${detectedSignals.length} signal(s) detected: ${detectedSignals.map(s => `${s.type}(T${s.tier})`).join(', ')}`);
+          }
 
           // Update ticker_cache with current state
           const flowLdr = state.flowCallRatio > 60 ? 'calls' : state.flowCallRatio < 40 ? 'puts' : 'balanced';
@@ -319,13 +349,18 @@ async function fanOutSignals(
 
   if (users.length === 0) return;
 
+  console.log(`[alert-engine] Fan-out: ${ticker} has ${signals.length} signal(s) → ${users.length} user(s) watching`);
+
   const now = new Date();
   const alertsToCreate: any[] = [];
   const cooldownsToCreate: any[] = [];
 
   for (const userItem of users) {
-    const settings = userItem.user.alertSettings;
-    if (!settings) continue;
+    // Use saved settings or sensible defaults if user hasn't configured yet
+    const settings = userItem.user.alertSettings || {
+      sensitivity: 'MEDIUM',
+      enabledTypes: ['confluence', 'thesis_flip', 'sweep_cluster', 'cvd_divergence', 'dark_pool_large', 'key_level', 'news_catalyst'],
+    };
 
     const allowedTiers = TIER_GATE[settings.sensitivity] || TIER_GATE.MEDIUM;
     const enabledTypes = new Set(settings.enabledTypes);
@@ -385,6 +420,7 @@ async function fanOutSignals(
   // Batch write alerts
   if (alertsToCreate.length > 0) {
     await prisma.alert.createMany({ data: alertsToCreate });
+    console.log(`[alert-engine] 🔔 Created ${alertsToCreate.length} alert(s) for ${ticker}: ${alertsToCreate.map(a => a.type).join(', ')}`);
   }
 
   // Batch upsert cooldowns
@@ -436,6 +472,8 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  console.log(`[alert-engine] Starting. APP_URL=${APP_URL}, POLYGON_API_KEY=${POLYGON_API_KEY ? 'set' : 'MISSING'}`);
+
   const startTime = Date.now();
 
   try {
@@ -446,7 +484,10 @@ export async function GET(request: NextRequest) {
     });
     const allTickers = watchedRaw.map((w) => w.ticker);
 
+    console.log(`[alert-engine] Tickers from watchlists: [${allTickers.join(', ')}] (${allTickers.length} total)`);
+
     if (allTickers.length === 0) {
+      console.log('[alert-engine] ⚠️ No watched tickers — no users have watchlists set up');
       return NextResponse.json({
         status: 'skipped',
         reason: 'No watched tickers',
