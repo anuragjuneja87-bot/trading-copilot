@@ -28,7 +28,6 @@ import {
   DEFAULT_TIMEFRAME,
   getAdjustedTimeframeRange
 } from '@/components/war-room/timeframe-selector';
-import { DataSourceBadge } from '@/components/war-room/data-source-badge';
 import { MarketClock } from '@/components/war-room/market-clock';
 import { AlertProvider } from '@/components/ask/alert-provider';
 import { AlertBell } from '@/components/ask/alert-bell';
@@ -488,7 +487,6 @@ function AskPageContent() {
 
               <AlertBell />
               <UserAuthButton />
-              <DataSourceBadge lastUpdate={data.lastUpdate} />
               <div
                 className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
                 style={{

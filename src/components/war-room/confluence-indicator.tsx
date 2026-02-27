@@ -446,19 +446,19 @@ export function ConfluenceIndicator({
     }}>
       {/* ═══ ROW 1: Compressed Confluence Signals ═══ */}
       <div style={{
-        display: 'flex', alignItems: 'center',
-        padding: '8px 14px', gap: 2,
+        display: 'flex', alignItems: 'center', flexWrap: 'wrap' as const,
+        padding: '10px 16px', gap: 4,
         borderBottom: `1px solid ${K.borderSubtle}`,
       }}>
         {/* Bias badge */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 5,
-          padding: '4px 12px', borderRadius: 6,
-          fontWeight: 800, fontSize: 11, letterSpacing: 0.5,
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '5px 14px', borderRadius: 6,
+          fontWeight: 800, fontSize: 12, letterSpacing: 0.5,
           marginRight: 8, flexShrink: 0,
           background: `${score.color}18`, border: `1px solid ${score.color}35`, color: score.color,
         }}>
-          <div style={{ width: 7, height: 7, borderRadius: '50%', background: score.color, boxShadow: `0 0 6px ${score.color}70` }} />
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: score.color, boxShadow: `0 0 6px ${score.color}70` }} />
           {score.label}
         </div>
 
@@ -469,19 +469,19 @@ export function ConfluenceIndicator({
           return (
             <div key={i} title={`${s.name}: ${s.value}${s.quality === 'low' ? ' (thin data)' : ''}`}
               style={{
-                display: 'flex', alignItems: 'center', gap: 4,
-                padding: '3px 10px', borderRadius: 4,
-                fontSize: 10, fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '4px 12px', borderRadius: 5,
+                fontSize: 12, fontWeight: 600,
                 background: 'rgba(255,255,255,0.03)',
                 cursor: 'default', whiteSpace: 'nowrap' as const,
               }}>
               <div style={{
-                width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+                width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
                 background: dotColor, opacity: isActive ? 1 : 0.3,
                 boxShadow: isActive ? `0 0 4px ${dotColor}50` : 'none',
               }} />
-              <span style={{ color: K.textMuted, fontWeight: 500 }}>{s.shortName}</span>
-              <span style={{ fontWeight: 700, color: isActive ? dotColor : K.textMuted }}>{s.shortValue}</span>
+              <span style={{ color: K.textMuted, fontWeight: 500, fontSize: 11 }}>{s.shortName}</span>
+              <span style={{ fontWeight: 700, fontSize: 12, color: isActive ? dotColor : K.textMuted }}>{s.shortValue}</span>
             </div>
           );
         })}
@@ -493,28 +493,28 @@ export function ConfluenceIndicator({
           <div style={{ display: 'flex', gap: 3 }}>
             {pips.map((p, i) => (
               <div key={i} style={{
-                width: 4, height: 14, borderRadius: 2,
+                width: 5, height: 16, borderRadius: 2,
                 background: p === 'bull' ? 'rgba(0,220,130,0.5)' : p === 'bear' ? 'rgba(255,71,87,0.5)' : p === 'neutral' ? 'rgba(251,191,36,0.35)' : 'rgba(255,255,255,0.08)',
               }} />
             ))}
           </div>
-          <div style={{ fontSize: 10, fontWeight: 600, color: K.textMuted }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: K.textMuted }}>
             <span style={{ color: K.green, fontWeight: 700 }}>{score.bullish}</span>{' bull '}
             <span style={{ color: K.red, fontWeight: 700 }}>{score.bearish}</span>{' bear'}
           </div>
         </div>
 
         {/* Session chip */}
-        {isClosed && <div style={{ padding: '3px 8px', borderRadius: 4, fontSize: 9, fontWeight: 700, letterSpacing: 0.5, background: K.redDim, color: K.red, border: '1px solid rgba(255,71,87,0.15)', flexShrink: 0 }}>CLOSED</div>}
-        {isLive && <div style={{ padding: '3px 8px', borderRadius: 4, fontSize: 9, fontWeight: 700, letterSpacing: 0.5, background: K.greenDim, color: K.green, border: '1px solid rgba(0,220,130,0.15)', flexShrink: 0 }}>LIVE</div>}
-        {isPre && <div style={{ padding: '3px 8px', borderRadius: 4, fontSize: 9, fontWeight: 700, letterSpacing: 0.5, background: K.yellowDim, color: K.yellow, border: '1px solid rgba(251,191,36,0.12)', flexShrink: 0 }}>PRE</div>}
+        {isClosed && <div style={{ padding: '4px 10px', borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.5, background: K.redDim, color: K.red, border: '1px solid rgba(255,71,87,0.15)', flexShrink: 0 }}>CLOSED</div>}
+        {isLive && <div style={{ padding: '4px 10px', borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.5, background: K.greenDim, color: K.green, border: '1px solid rgba(0,220,130,0.15)', flexShrink: 0 }}>LIVE</div>}
+        {isPre && <div style={{ padding: '4px 10px', borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.5, background: K.yellowDim, color: K.yellow, border: '1px solid rgba(251,191,36,0.12)', flexShrink: 0 }}>PRE</div>}
       </div>
 
       {/* ═══ ROW 2: Aggregated Unusual Signals ═══ */}
       <div
         style={{
           display: 'flex', alignItems: 'center',
-          padding: '8px 14px', gap: 10,
+          padding: '10px 16px', gap: 12,
           overflow: 'hidden',
         }}
         onMouseEnter={() => setIsPaused(true)}
@@ -522,7 +522,7 @@ export function ConfluenceIndicator({
       >
         {/* Session-aware label */}
         <div style={{
-          fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
+          fontSize: 10, fontWeight: 700, letterSpacing: 1.5,
           color: activityLabelColor,
           textTransform: 'uppercase' as const,
           flexShrink: 0, paddingRight: 10,
@@ -547,23 +547,23 @@ export function ConfluenceIndicator({
               {/* Render twice for loop if scrolling */}
               {(aggSignals.length > 2 ? [...aggSignals, ...aggSignals] : aggSignals).map((sig, i) => (
                 <div key={`${sig.id}-${i}`} style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '5px 14px', borderRadius: 5,
-                  fontSize: 12, fontWeight: 500,
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 16px', borderRadius: 6,
+                  fontSize: 13, fontWeight: 500,
                   whiteSpace: 'nowrap' as const, flexShrink: 0,
                   background: 'rgba(255,255,255,0.02)',
                   border: `1px solid ${K.borderSubtle}`,
                 }}>
-                  <span style={{ fontSize: 14 }}>{sig.icon}</span>
+                  <span style={{ fontSize: 16 }}>{sig.icon}</span>
                   <span style={{
-                    fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
-                    padding: '2px 6px', borderRadius: 3,
+                    fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+                    padding: '2px 8px', borderRadius: 3,
                     background: sig.typeBg, color: sig.typeColor,
                   }}>{sig.type}</span>
-                  <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12 }}>
+                  <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>
                     {sig.text}
                   </span>
-                  <span style={{ fontWeight: 700, fontSize: 12, color: sig.isBullish ? K.green : K.red }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: sig.isBullish ? K.green : K.red }}>
                     {sig.detail}
                   </span>
                 </div>
@@ -571,7 +571,7 @@ export function ConfluenceIndicator({
             </div>
           </div>
         ) : (
-          <span style={{ fontSize: 11, color: K.textMuted, fontStyle: 'italic' }}>
+          <span style={{ fontSize: 12, color: K.textMuted, fontStyle: 'italic' }}>
             No data for activity analysis
           </span>
         )}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { useSession, signIn } from 'next-auth/react';
+import { useSession, signIn, signOut } from 'next-auth/react';
 import { YodhaLogo, YodhaWordmark } from '@/components/brand/yodha-logo';
 import { DisclaimerGate } from '@/components/landing/disclaimer-gate';
 import {
@@ -193,6 +193,7 @@ export default function LandingPage() {
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)' }}>
                   {session.user.image && <img src={session.user.image} alt="" className="w-5 h-5 rounded-full" referrerPolicy="no-referrer" />}
                   <span className="text-xs text-gray-400 font-mono hidden sm:inline">{session.user.name || session.user.email}</span>
+                  <button onClick={() => signOut({ callbackUrl: '/' })} className="text-[10px] text-gray-500 hover:text-red-400 transition-colors ml-1 hidden sm:inline">Sign Out</button>
                 </div>
                 <button onClick={() => window.location.href = '/ask'} className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all hover:scale-105" style={{ background: 'linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%)', color: '#060810' }}>
                   <span className="hidden sm:inline">Enter War Room</span><span className="sm:hidden">War Room</span><ArrowRight className="w-4 h-4" />
